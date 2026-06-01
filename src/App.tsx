@@ -926,9 +926,14 @@ function LoginView({ onFirstTime, onGoogle }: { onFirstTime: () => void; onGoogl
   return (
     <section className="login-view">
       <div className="login-card">
+        <span className="mockup-pill">Interactive mockup</span>
         <div className="login-mark">S</div>
         <h1>Spoolcast</h1>
         <p>Script-first AI video pipeline.</p>
+        <p className="mockup-note">
+          This is a frontend design mockup — nothing here is real (no sign-in, no
+          accounts, no video generation). Click anything to explore.
+        </p>
         <button className="primary-cta" onClick={onFirstTime}>
           First time? Let's make your first video →
         </button>
