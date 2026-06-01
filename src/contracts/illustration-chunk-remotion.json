@@ -1,0 +1,337 @@
+{
+  "adapter": "illustration-chunk-remotion",
+  "summary": "Generic Spoolcast pipeline: script and shot-list to AI scene PNGs, reveal frames, Remotion render, audits, and optional mobile variants.",
+  "session_root": "../spoolcast-content/sessions/{session_id}",
+  "source_of_truth": [
+    "session.json",
+    "shot-list/shot-list.json"
+  ],
+  "context_gate_schema_version": 1,
+  "context_gates": [
+    {
+      "id": "source_intake_context",
+      "stage": "input_intake",
+      "applies_to_actions": ["inventory_source"],
+      "purpose": "Force the raw source package and workflow rules before source analysis or asset inventory.",
+      "required_sources": [
+        "rules.md",
+        "contracts/illustration-chunk-remotion.json",
+        "PIPELINE.md",
+        "STORY.md",
+        "<session_root>/session.json",
+        "<session_root>/source/*",
+        "<session_root>/source/box/*",
+        "../spoolcast-content/series/<series>/rules.md when selected"
+      ],
+      "receipt_required_for_outputs": [
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md"
+      ],
+      "downstream_checks": [
+        "planned: source-analysis receipt is current before story_lock"
+      ]
+    },
+    {
+      "id": "core_message_context",
+      "stage": "story_lock",
+      "applies_to_actions": ["propose_core_message"],
+      "purpose": "Force the source analysis and story rules before proposing or writing the core message.",
+      "required_sources": [
+        "rules.md",
+        "contracts/illustration-chunk-remotion.json",
+        "STORY.md",
+        "<session_root>/session.json",
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md",
+        "<session_root>/working/.rule-gates/source_intake_context.json",
+        "../spoolcast-content/series/<series>/rules.md when selected"
+      ],
+      "receipt_required_for_outputs": [
+        "<session_root>/session.json:core_message"
+      ],
+      "downstream_checks": [
+        "planned: core-message receipt is current before structure"
+      ]
+    },
+    {
+      "id": "structure_context",
+      "stage": "structure",
+      "applies_to_actions": ["draft_structure"],
+      "purpose": "Force the confirmed core message, source analysis, and story rules before structure drafting.",
+      "required_sources": [
+        "STORY.md",
+        "<session_root>/session.json",
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md",
+        "<session_root>/working/.rule-gates/core_message_context.json",
+        "../spoolcast-content/series/<series>/rules.md when selected"
+      ],
+      "receipt_required_for_outputs": [
+        "<session_root>/working/structure.md"
+      ],
+      "downstream_checks": [
+        "planned: structure receipt is current before screenplay_plan"
+      ]
+    },
+    {
+      "id": "screenplay_context",
+      "stage": "screenplay_plan",
+      "applies_to_actions": ["draft_screenplay", "audit_screenplay"],
+    "purpose": "Force story rules, the scoped narration voice profile, approved structure, and audio-first devlog opening rules before screenplay drafting and review.",
+    "required_sources": [
+      "rules.md",
+      "STORY.md",
+        "<session_root>/session.json",
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md",
+        "<session_root>/working/structure.md",
+        "../spoolcast-content/series/<series>/rules.md when selected",
+      "../spoolcast-content/series/<series>/NARRATION_VOICE.md when selected"
+    ],
+    "receipt_required_for_outputs": [
+      "<session_root>/working/listener-draft.md",
+      "<session_root>/working/screenplay-v6-listener-draft.md",
+      "<session_root>/working/screenplay-v3.md",
+      "<session_root>/working/screenplay-audit.json"
+    ],
+      "downstream_checks": [
+      "audit_screenplay.py verifies the screenplay context receipt source hashes",
+      "audit_screenplay.py rejects devlog openings that do not hook, orient, and promise in plain English",
+      "audit_screenplay.py rejects unexplained project terms and meaning-poor process fog before shot-list authoring",
+      "audit_narration_voice_v2.py checks the continuous listener draft before chunking",
+      "planned: screenplay receipt is current before shot-list authoring"
+    ]
+    },
+    {
+      "id": "shot_list_context",
+      "stage": "production_units",
+      "applies_to_actions": ["build_shot_list", "validate_shot_list"],
+      "purpose": "Force screenplay, style, reference, visual/story rules, and devlog b-roll/meme/reaction rules before AI authors or validates the shot-list.",
+      "required_sources": [
+        "rules.md",
+        "STORY.md",
+        "VISUALS.md",
+        "<session_root>/session.json",
+        "<session_root>/working/screenplay-v3.md",
+        "<session_root>/working/narration-voice-review-v2.json",
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md",
+        "../spoolcast-content/styles/<style>/style.json",
+        "../spoolcast-content/styles/<style>/references/*",
+        "../spoolcast-content/series/<series>/rules.md when selected",
+        "../spoolcast-content/series/spoolcast-devlog/rules.md when session_id starts spoolcast-dev-log",
+        "../spoolcast-content/series/<series>/NARRATION_VOICE.md when selected"
+      ],
+      "receipt_required_for_outputs": [
+        "<session_root>/shot-list/shot-list.json",
+        "<session_root>/working/shot-list-validation.passed.json"
+      ],
+      "downstream_checks": [
+        "validate_shot_list.py verifies the shot-list context receipt source hashes",
+        "validate_shot_list.py rejects Spoolcast devlogs with no b-roll/meme/reaction asset plan unless the user explicitly approved a skip",
+        "validate_shot_list.py rejects unresolved meme/reaction/broll candidates before preview data can be built",
+        "validate_shot_list.py rejects generated devlog chunks without compact frame-design receipts before KIE generation",
+        "validate_shot_list.py blocks opening visual support that rechunks approved audio instead of using root visual_timeline base_visual events",
+        "validate_shot_list.py rejects wojak-gpt2 Chad prompts that do not use the locked meme-chad reference/register, that turn Chad into a prop workaround, or that overuse Chad as a running background device",
+        "validate_shot_list.py rejects referenced characters without live image URLs before KIE generation",
+        "validation sentinel records context receipt sources and source hashes"
+      ]
+    },
+    {
+      "id": "scene_prompt_context",
+      "stage": "visual_assets",
+      "applies_to_actions": ["batch_scenes", "generate_scene"],
+      "purpose": "Force validated shot-list, style, references, and external-asset sidecars before image-model prompts are submitted.",
+      "required_sources": [
+      "VISUALS.md",
+      "<session_root>/session.json",
+      "<session_root>/shot-list/shot-list.json",
+      "<session_root>/working/shot-list-validation.passed.json",
+      "../spoolcast-content/styles/<style>/style.json",
+      "../spoolcast-content/styles/<style>/references/*",
+      "../spoolcast-content/series/<series>/rules.md when selected",
+      "../spoolcast-content/series/spoolcast-devlog/rules.md when session_id starts spoolcast-dev-log",
+      "<session_root>/source/external-assets/*",
+      "<session_root>/source/external-assets/*.sidecar.json"
+    ],
+      "receipt_required_for_outputs": [
+        "<session_root>/source/generated-assets/scenes/*.png",
+        "<session_root>/manifests/*.json"
+      ],
+      "downstream_checks": [
+        "scene_batch_status.py",
+        "audit_scenes.py",
+        "scene generation refuses shot-lists whose validation sentinel is stale",
+        "planned: scene manifest records context receipt id and source hashes"
+      ]
+    }
+  ],
+  "statuses": [
+    "not_started",
+    "ready",
+    "running",
+    "blocked",
+    "failed",
+    "passed",
+    "approved",
+    "skipped"
+  ],
+  "edges": [
+    {"from": "format_setup", "to": "input_intake"},
+    {"from": "input_intake", "to": "story_lock"},
+    {"from": "story_lock", "to": "structure"},
+    {"from": "structure", "to": "screenplay_plan"},
+    {"from": "screenplay_plan", "to": "narration_voice_check"},
+    {"from": "narration_voice_check", "to": "production_units"},
+    {"from": "production_units", "to": "narration_audio"},
+    {"from": "narration_audio", "to": "visual_assets"},
+    {"from": "visual_assets", "to": "asset_audit"},
+    {"from": "asset_audit", "to": "preprocess_review_render"},
+    {"from": "preprocess_review_render", "to": "package_widescreen"},
+    {"from": "package_widescreen", "to": "publish"},
+    {"from": "package_widescreen", "to": "mobile_variant", "optional": true},
+    {"from": "mobile_variant", "to": "publish", "optional": true}
+  ],
+  "stages": [
+    {
+      "id": "format_setup",
+      "label": "Format / Session Setup",
+      "owner": "script",
+      "requires_approval": true,
+      "inputs": ["session id", "style", "budget"],
+      "outputs": ["session.json", "shot-list/shot-list.json"],
+      "gate": "session.json parses and session folder exists",
+      "actions": ["init_session", "select_style"]
+    },
+    {
+      "id": "input_intake",
+      "label": "Input Intake",
+      "owner": "ai",
+      "requires_approval": false,
+      "inputs": ["source/*"],
+      "outputs": ["working/asset-inventory.md"],
+      "gate": "input inventory exists or agent-sourced input is recorded",
+      "actions": ["inventory_source"]
+    },
+    {
+      "id": "story_lock",
+      "label": "Story / Goal Lock",
+      "owner": "ai",
+      "requires_approval": true,
+      "inputs": ["source material", "working/asset-inventory.md"],
+      "outputs": ["session.json:core_message"],
+      "gate": "core message is confirmed by user or autopilot policy",
+      "actions": ["propose_core_message"]
+    },
+    {
+      "id": "structure",
+      "label": "Structure",
+      "owner": "ai",
+      "requires_approval": true,
+      "inputs": ["session.json:core_message"],
+      "outputs": ["working/structure.md"],
+      "gate": "structure approved or autopilot policy accepts it",
+      "actions": ["draft_structure"]
+    },
+    {
+      "id": "screenplay_plan",
+      "label": "Screenplay / Production Plan",
+      "owner": "ai",
+      "requires_approval": false,
+      "inputs": ["working/structure.md", "working/.rule-gates/screenplay.json"],
+      "outputs": ["working/listener-draft.md", "working/screenplay-v3.md", "working/screenplay-audit.json"],
+      "gate": "continuous listener draft exists before chunking; audit_screenplay.py exits with no blocking flags",
+      "actions": ["gate_screenplay", "draft_screenplay", "audit_screenplay"]
+    },
+    {
+      "id": "narration_voice_check",
+      "label": "Listener / Narration Voice Audit",
+      "owner": "script",
+      "requires_approval": false,
+      "inputs": ["working/listener-draft.md", "working/screenplay-v3.md"],
+      "outputs": ["working/narration-voice-review-v2.json"],
+      "gate": "audit_narration_voice_v2.py exits with no blocking flags before chunking",
+      "actions": ["audit_narration_voice_v2"]
+    },
+    {
+      "id": "production_units",
+      "label": "Shot-List / Chunking",
+      "owner": "ai+script",
+      "requires_approval": true,
+      "inputs": ["working/screenplay-v3.md", "working/narration-voice-review-v2.json"],
+      "outputs": ["shot-list/shot-list.json", "shot-list/shot-list.xlsx", "working/shot-list-validation.passed.json"],
+      "gate": "validate_shot_list.py exits 0 after shot-list style/reference gate",
+      "actions": ["gate_shot_list", "build_shot_list", "validate_shot_list", "export_xlsx"]
+    },
+    {
+      "id": "narration_audio",
+      "label": "Narration / Audio",
+      "owner": "script",
+      "requires_approval": false,
+      "inputs": ["shot-list/shot-list.json"],
+      "outputs": ["source/audio/*.mp3"],
+      "gate": "required mp3 files exist; listener/script checks are handled before shot-list chunking by audit_screenplay.py and audit_narration_voice_v2.py",
+      "actions": ["batch_tts"]
+    },
+    {
+      "id": "visual_assets",
+      "label": "Visual Assets",
+      "owner": "script",
+      "requires_approval": false,
+      "inputs": ["shot-list/shot-list.json", "session.json", "source/external-assets/*"],
+      "outputs": ["source/generated-assets/scenes/*.png", "manifests/*.json"],
+      "gate": "required generated or external visual exists for every chunk",
+      "actions": ["batch_scenes", "generate_scene", "scene_batch_status"]
+    },
+    {
+      "id": "asset_audit",
+      "label": "Asset Audit",
+      "owner": "script",
+      "requires_approval": false,
+      "inputs": ["source/generated-assets/scenes/*.png", "shot-list/shot-list.json"],
+      "outputs": ["working/scene-audit.json", "working/overlay-audit.json"],
+      "gate": "asset audits pass or accepted exceptions are recorded",
+      "actions": ["audit_scenes", "audit_overlays"]
+    },
+    {
+      "id": "preprocess_review_render",
+      "label": "Preprocess / Review / Render",
+      "owner": "script",
+      "requires_approval": true,
+      "inputs": ["approved assets", "source/audio/*.mp3"],
+      "outputs": ["frames/*", "review/shot-review.html", "renders/*.mp4", "working/render-audit.passed"],
+      "gate": "render audit sentinel exists",
+      "actions": ["batch_preprocess", "build_review_board", "render_with_audit"]
+    },
+    {
+      "id": "package_widescreen",
+      "label": "Widescreen Package",
+      "owner": "script",
+      "requires_approval": false,
+      "inputs": ["working/render-audit.passed", "renders/*.mp4"],
+      "outputs": ["renders/*.srt", "renders/*thumbnail*.png", "working/widescreen-approval.json"],
+      "gate": "SRT and thumbnail exist for the shipped render; mobile is blocked until widescreen approval is recorded",
+      "actions": ["generate_srt", "generate_thumbnail", "approve_widescreen"]
+    },
+    {
+      "id": "mobile_variant",
+      "label": "Mobile Variant",
+      "owner": "script",
+      "requires_approval": true,
+      "inputs": ["working/widescreen-approval.json", "working/render-audit.passed"],
+      "outputs": ["source/generated-assets/scenes/mobile/*-mobile.png", "renders/mobile/*.mp4", "working/mobile-publish-audit.json"],
+      "gate": "mobile crop/assets/publish audits pass",
+      "actions": ["smart_crop_mobile", "audit_mobile_crops", "mobile_pad_to_fit", "replay_mobile", "mobile_export", "mobile_thumbnails", "audit_mobile_publish"]
+    },
+    {
+      "id": "publish",
+      "label": "Publish",
+      "owner": "human+script",
+      "requires_approval": true,
+      "inputs": ["audited package"],
+      "outputs": ["platform URL or package folder"],
+      "gate": "explicit per-platform publish approval and pre-upload checklist pass",
+      "actions": ["publish_youtube", "manual_publish"]
+    }
+  ]
+}

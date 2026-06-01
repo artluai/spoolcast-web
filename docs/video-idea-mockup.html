@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Spoolcast — Video idea (minimal mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c12;
+    --bg-2:#11141d;
+    --bg-3:#171a25;
+    --bg-4:#1f2330;
+    --line:#23283a;
+    --line-2:#323849;
+    --ink:#e9ecf3;
+    --ink-2:#9098ad;
+    --ink-3:#5a6178;
+    --accent:#7aa2ff;
+    --accent-2:#9fbaff;
+    --accent-glow:rgba(122,162,255,.18);
+    --green:#36c98c;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:13.5px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+  body{
+    padding:60px 40px;display:flex;justify-content:center;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 1px) 0 0/24px 24px,
+      var(--bg);
+  }
+
+  /* the floating detail card — the only outline on the page */
+  .card{
+    width:min(1000px, calc(100vw - 80px));
+    border:1px solid var(--accent);
+    border-radius:14px;
+    background:rgba(17,20,29,.96);
+    box-shadow:0 24px 70px rgba(0,0,0,.5);
+    overflow:hidden;
+  }
+
+  /* sticky head — same pattern as the workflow detail card */
+  .head{
+    display:flex;align-items:center;gap:14px;
+    padding:16px 26px;
+    border-bottom:1px solid var(--line);
+    background:rgba(17,20,29,.98);
+  }
+  .head .label{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-3)
+  }
+  .head h2{margin:0;font-size:20px;letter-spacing:-.03em;font-weight:600}
+  .status{
+    padding:4px 10px;border-radius:5px;border:1px solid rgba(54,201,140,.3);
+    background:rgba(54,201,140,.08);color:var(--green);
+    font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase
+  }
+  .head .view-output{
+    background:transparent;border:1px solid var(--line-2);border-radius:7px;
+    color:var(--ink-2);padding:7px 13px;font-size:12px;font-weight:500;
+    font-family:var(--sans);cursor:pointer;
+  }
+  .head .view-output:hover{background:var(--bg-3);color:var(--ink);border-color:#3d445a}
+  .head .spacer{flex:1}
+  .head .nav{
+    background:transparent;border:1px solid var(--line-2);border-radius:7px;
+    color:var(--ink-2);padding:7px 13px;font-size:12px;font-weight:500;
+    font-family:var(--sans);cursor:pointer;
+  }
+  .head .nav:hover{background:var(--bg-3);color:var(--ink);border-color:#3d445a}
+  .head .icon-btn{
+    width:36px;padding:7px 0;background:transparent;border:1px solid var(--line-2);
+    border-radius:7px;color:var(--ink-2);cursor:pointer;
+    display:grid;place-items:center;
+  }
+  .head .icon-btn:hover{background:var(--bg-3);color:var(--ink);border-color:#3d445a}
+
+  /* body — symmetric padding on both sides, content fills the card. */
+  .body{padding:48px 56px 52px}
+  .stack{width:100%}
+
+  .eyebrow{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--ink-3);margin-bottom:12px
+  }
+  h1.q{
+    margin:0 0 24px;
+    font-size:28px;font-weight:600;letter-spacing:-.025em;line-height:1.2;
+    color:var(--ink)
+  }
+
+  /* textbox — Claude/OpenAI style: rounded outline, generous padding,
+     subtle focus ring. one of the two outlines in the body. */
+  .textbox{
+    width:100%;
+    background:var(--bg-2);
+    border:1px solid var(--line-2);
+    border-radius:12px;
+    color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;letter-spacing:-.005em;
+    padding:16px 18px;resize:vertical;outline:none;
+    min-height:140px;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .textbox::placeholder{color:var(--ink-3)}
+  .textbox:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+
+  /* helper row — small mono links beneath the textbox */
+  .helpers{
+    display:flex;gap:22px;flex-wrap:wrap;
+    margin-top:14px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+    color:var(--ink-3)
+  }
+  .helpers a{
+    color:var(--ink-3);text-decoration:none;cursor:pointer;
+    border-bottom:1px dashed transparent;padding-bottom:1px;
+    transition:color .15s,border-color .15s
+  }
+  .helpers a:hover{color:var(--accent-2);border-bottom-color:var(--accent-glow)}
+
+  /* source material section — sits below the idea textbox.
+     headline, caption, file list, then the attach button. */
+  .sources{margin-top:44px}
+  .sources .label{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--ink-3);margin-bottom:8px
+  }
+  .sources .caption{
+    color:var(--ink-2);font-size:13.5px;line-height:1.55;margin:0 0 18px
+  }
+
+  /* per-file row: filename + a one-line description.
+     borderless rows separated by hairline dividers. */
+  .file-list{display:flex;flex-direction:column;margin-bottom:14px}
+  .file-row{
+    display:grid;grid-template-columns:24px 1fr auto;align-items:start;
+    gap:14px;padding:14px 0;
+    border-top:1px solid rgba(255,255,255,.045)
+  }
+  .file-row:first-child{border-top:0}
+  .file-row .icon{
+    margin-top:2px;color:var(--ink-3);
+    display:grid;place-items:center
+  }
+  .file-row .meta-col{min-width:0}
+  .file-row .name{
+    font-family:var(--mono);font-size:12.5px;color:var(--ink);
+    letter-spacing:.01em;margin-bottom:4px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+  }
+  .file-row .desc{
+    color:var(--ink-2);font-size:12.5px;line-height:1.5
+  }
+  .file-row .desc input{
+    width:100%;background:transparent;border:0;outline:none;
+    color:var(--ink-2);font:inherit;padding:0
+  }
+  .file-row .desc input::placeholder{color:var(--ink-3);font-style:italic}
+  .file-row .size{
+    font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+    letter-spacing:.06em;margin-top:3px
+  }
+  .file-row .remove{
+    background:transparent;border:0;color:var(--ink-3);cursor:pointer;
+    font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;padding:6px 8px;border-radius:5px;
+    align-self:start
+  }
+  .file-row .remove:hover{color:var(--red);background:rgba(233,106,106,.08)}
+
+  /* attach button — minimal outlined pill */
+  .attach{
+    display:inline-flex;align-items:center;gap:9px;
+    background:transparent;border:1px dashed var(--line-2);
+    border-radius:9px;padding:11px 16px;color:var(--ink-2);
+    font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;
+    transition:border-color .15s,color .15s,background .15s
+  }
+  .attach:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow)}
+  .attach svg{flex:none}
+
+  /* tiny meta footer — what comes next. */
+  .meta{
+    margin-top:48px;
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--ink-3);
+    padding-top:18px;border-top:1px solid rgba(255,255,255,.04)
+  }
+  .meta span{color:var(--ink-3)}
+  .meta b{color:var(--ink-2);font-weight:500}
+
+  /* the dashed tether line above the card, matching the workflow view */
+  .tether-stage{
+    position:absolute;top:0;left:0;width:100%;height:60px;pointer-events:none
+  }
+  .tether-stage svg{width:100%;height:100%}
+  .tether-stage path{
+    fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;
+    stroke-dasharray:5 6;opacity:.7
+  }
+
+  /* a tiny float-right comment block — design intent notes */
+  .notes{
+    position:fixed;right:28px;top:28px;width:280px;
+    border:1px dashed var(--line-2);border-radius:10px;padding:14px 16px;
+    background:rgba(17,20,29,.7);color:var(--ink-2);font-size:12px;line-height:1.55
+  }
+  .notes b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+  .notes ul{margin:0;padding-left:18px}
+  .notes li+li{margin-top:4px}
+</style>
+</head>
+<body>
+
+<aside class="notes">
+  <b>Mockup notes</b>
+  <ul>
+    <li>Left-aligned, 760px content column.</li>
+    <li>Textbox outline like Claude/OpenAI: rounded border, focus ring.</li>
+    <li>Below the textbox: source-material section with per-file description input.</li>
+    <li>Attach button: dashed outline pill.</li>
+    <li>Audience / takeaway moved out of step 02 — they belong in the structure step.</li>
+  </ul>
+</aside>
+
+<div class="card">
+
+  <div class="head">
+    <span class="label">Step 02</span>
+    <h2>Video idea</h2>
+    <span class="status">In progress</span>
+    <span class="spacer"></span>
+    <button class="nav">‹ Previous</button>
+    <button class="nav">Next ›</button>
+    <button class="icon-btn" aria-label="Expand">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+    </button>
+  </div>
+
+  <div class="body">
+    <div class="stack">
+      <div class="eyebrow">Start here</div>
+      <h1 class="q">What's this video about?</h1>
+
+      <textarea class="textbox" rows="5"
+        placeholder="A short explanation of the idea, topic, opinion, or story this video should turn into."></textarea>
+
+      <div class="helpers">
+        <a>Generate angles</a>
+        <a>Ask clarifying questions</a>
+        <a>Turn notes into a thesis</a>
+      </div>
+
+      <section class="sources">
+        <div class="label">Source material</div>
+        <p class="caption">Links, notes, transcripts, screenshots, and reference files can attach here after the idea is clear.</p>
+
+        <div class="file-list">
+
+          <div class="file-row">
+            <span class="icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </span>
+            <span class="meta-col">
+              <span class="name">contract-locked-engine.md</span>
+              <span class="desc"><input value="Design doc explaining the contract → engine boundary. Use for sections 2 + 4." /></span>
+              <span class="size">12 KB · markdown</span>
+            </span>
+            <button class="remove" aria-label="Remove">Remove</button>
+          </div>
+
+          <div class="file-row">
+            <span class="icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+            <span class="meta-col">
+              <span class="name">dev-log-05-transcript.txt</span>
+              <span class="desc"><input value="Last episode's transcript — pull the &ldquo;why this matters&rdquo; framing from the cold open." /></span>
+              <span class="size">38 KB · text</span>
+            </span>
+            <button class="remove" aria-label="Remove">Remove</button>
+          </div>
+
+          <div class="file-row">
+            <span class="icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+            </span>
+            <span class="meta-col">
+              <span class="name">workflow-shot-2026-05-22.png</span>
+              <span class="desc"><input placeholder="Add a one-line description so the model knows how to use this file…" /></span>
+              <span class="size">412 KB · image</span>
+            </span>
+            <button class="remove" aria-label="Remove">Remove</button>
+          </div>
+
+        </div>
+
+        <button class="attach">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          Attach files
+        </button>
+      </section>
+
+      <div class="meta">
+        <span>Next · <b>Core message</b></span>
+        <span>Autosaves</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

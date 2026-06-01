@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Spoolcast — Onboarding (fog-of-war filmstrip)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c12; --bg-2:#11141d; --bg-3:#171a25; --bg-4:#1f2330;
+    --line:#23283a; --line-2:#323849;
+    --ink:#e9ecf3; --ink-2:#9098ad; --ink-3:#5a6178;
+    --accent:#7aa2ff; --accent-2:#9fbaff; --accent-glow:rgba(122,162,255,.18);
+    --green:#36c98c;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --card-w:560px; --card-h:420px; --gap:64px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:13.5px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+  body{
+    height:100vh;overflow:hidden;display:flex;flex-direction:column;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 1px) 0 0/24px 24px,
+      var(--bg);
+  }
+  button{font:inherit;color:inherit;cursor:pointer}
+
+  /* progress bar at top */
+  .top{display:flex;flex-direction:column;align-items:center;padding:34px 0 8px;flex:none}
+  .step-bar{display:flex;gap:6px;margin-bottom:8px}
+  .step-bar span{width:30px;height:3px;border-radius:2px;background:var(--line-2);transition:background .25s}
+  .step-bar .done{background:rgba(54,201,140,.5)}
+  .step-bar .active{background:var(--accent)}
+  .top .count{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* ===== the filmstrip ===== */
+  .strip-viewport{
+    flex:1;min-height:0;position:relative;overflow:hidden;
+    display:flex;align-items:center;
+    /* fog: fade both edges so off-center modules dissolve into the bg */
+    -webkit-mask-image:linear-gradient(to right, transparent 0%, #000 26%, #000 74%, transparent 100%);
+            mask-image:linear-gradient(to right, transparent 0%, #000 26%, #000 74%, transparent 100%);
+  }
+  .strip{
+    position:absolute;left:50%;top:50%;
+    display:flex;align-items:center;gap:var(--gap);
+    transition:transform .42s cubic-bezier(.22,.7,.18,1);
+    will-change:transform;
+  }
+
+  /* every module is the SAME outer shell + size — uniform vibe */
+  .mod{
+    flex:none;width:var(--card-w);min-height:var(--card-h);
+    border:1px solid var(--line-2);border-radius:18px;
+    background:linear-gradient(180deg, rgba(20,23,32,.96) 0%, rgba(15,18,26,.96) 100%);
+    box-shadow:0 24px 64px rgba(0,0,0,.34);
+    padding:34px 36px;display:flex;flex-direction:column;
+    position:relative;
+    transition:opacity .42s ease, transform .42s cubic-bezier(.22,.7,.18,1), border-color .25s, box-shadow .25s;
+    opacity:.32;transform:scale(.9);
+  }
+  /* connector line between modules in the chain */
+  .mod::after{
+    content:"";position:absolute;right:calc(-1 * var(--gap));top:50%;
+    width:var(--gap);height:1.5px;background:var(--line-2);
+    transform:translateY(-50%);
+  }
+  .mod:last-child::after{display:none}
+  .mod.cur{
+    opacity:1;transform:scale(1);
+    border-color:rgba(122,162,255,.4);
+    box-shadow:0 0 0 1px rgba(122,162,255,.18), 0 30px 80px rgba(0,0,0,.46);
+  }
+  .mod.cur::after{background:linear-gradient(90deg, var(--accent), var(--line-2))}
+  .mod.done{opacity:.32}
+  .mod.done::after{background:rgba(54,201,140,.4)}
+
+  /* module header — same layout for all */
+  .mod .eyebrow{
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--ink-3);margin-bottom:10px
+  }
+  .mod.cur .eyebrow{color:var(--accent-2)}
+  .mod .q{margin:0 0 22px;font-size:23px;font-weight:600;letter-spacing:-.025em;line-height:1.2;color:var(--ink)}
+  .mod .content{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
+
+  /* --- option pills (uniform inner element) --- */
+  .opt{
+    display:flex;align-items:center;gap:13px;
+    border:1px solid var(--line-2);border-radius:10px;
+    background:var(--bg-2);padding:14px 16px;cursor:pointer;
+    transition:border-color .15s, box-shadow .15s, background .15s;position:relative;overflow:hidden
+  }
+  .opt .stripe{position:absolute;left:0;top:0;right:0;height:2px;background:transparent;transition:background .2s}
+  .opt:hover{border-color:#3d445a}
+  .opt.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+  .opt.sel .stripe{background:var(--accent)}
+  .opt .num{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink-3);min-width:13px}
+  .opt.sel .num{color:var(--accent-2)}
+  .opt .nm{font-size:14px;font-weight:500;color:var(--ink)}
+  .opt .ds{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
+  .opt .ratio{width:22px;height:13px;border:1px solid var(--ink-3);border-radius:2px;flex:none}
+  .opt .ratio.r916{width:9px;height:15px}
+  .opt .ratio.r11{width:14px;height:14px}
+  .opt .thumb{width:46px;height:30px;border-radius:5px;object-fit:cover;flex:none;background:var(--bg-4)}
+
+  /* --- textbox (uniform style with step 02) --- */
+  .tb{
+    width:100%;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;
+    color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;
+    padding:14px 16px;resize:none;outline:none;transition:border-color .15s, box-shadow .15s
+  }
+  .tb::placeholder{color:var(--ink-3)}
+  .tb:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+  .tb.one{height:50px}
+  .tb.tall{height:150px}
+
+  .inline-link{margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--ink-3);display:flex;gap:18px;flex-wrap:wrap}
+  .inline-link a{color:var(--ink-3);text-decoration:none;cursor:pointer;border-bottom:1px dashed transparent;padding-bottom:1px}
+  .inline-link a:hover{color:var(--accent-2);border-bottom-color:var(--accent-glow)}
+
+  /* attach chip */
+  .attach{
+    margin-top:6px;align-self:flex-start;display:inline-flex;align-items:center;gap:8px;
+    background:transparent;border:1px dashed var(--line-2);border-radius:9px;padding:9px 13px;
+    color:var(--ink-2);font-size:12.5px;font-weight:500;transition:border-color .15s,color .15s,background .15s
+  }
+  .attach:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow)}
+
+  /* "or let AI decide" divider + option */
+  .or-row{display:flex;align-items:center;gap:12px;color:var(--ink-3);font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin:4px 0}
+  .or-row::before,.or-row::after{content:"";flex:1;height:1px;background:var(--line)}
+  .ai-opt{
+    display:flex;align-items:center;gap:12px;border:1px solid var(--line-2);border-radius:10px;
+    background:rgba(122,162,255,.06);padding:13px 16px;cursor:pointer;color:var(--accent-2);
+    transition:border-color .15s,background .15s
+  }
+  .ai-opt:hover{border-color:var(--accent);background:rgba(122,162,255,.12)}
+  .ai-opt.sel{border-color:var(--accent);background:rgba(122,162,255,.18)}
+  .ai-opt .nm{font-size:13.5px;font-weight:500}
+  .ai-opt .ds{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+
+  /* narrator examples — EQUAL tiles. Video box + separate text box,
+     both tiles identical footprint; video letterboxes inside an equal frame. */
+  .vid-row{display:flex;gap:18px;align-items:stretch;justify-content:center}
+  .vid-tile{width:232px;display:flex;flex-direction:column;gap:10px;cursor:pointer;background:none;border:0;padding:0}
+  .vid-tile .vbox{position:relative;height:184px;border:1px solid var(--line-2);border-radius:11px;overflow:hidden;background:#0c0e16;transition:border-color .15s,box-shadow .15s}
+  .vid-tile:hover .vbox{border-color:#3d445a}
+  .vid-tile.sel .vbox{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+  .vid-tile .vbox video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;display:block;background:#0c0e16}
+  .vtag{position:absolute;left:8px;top:8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;font-weight:600;background:rgba(11,13,19,.78);border:1px solid var(--line-2);border-radius:4px;padding:3px 7px;color:var(--ink-2);z-index:2}
+  .vhint{position:absolute;right:8px;bottom:8px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;background:rgba(11,13,19,.78);border:1px solid var(--line-2);border-radius:4px;padding:3px 7px;color:var(--ink-3);transition:opacity .15s;z-index:2}
+  .vbox:hover .vhint{opacity:0}
+  .vtext{border:1px solid var(--line-2);border-radius:10px;background:var(--bg-2);padding:11px 13px;text-align:left;transition:border-color .15s}
+  .vid-tile.sel .vtext{border-color:var(--accent)}
+  .vtext b{display:block;font-size:13px;font-weight:600;color:var(--ink)}
+  .vtext small{color:var(--ink-3);font-size:11px}
+
+  /* finish loading overlay */
+  .loader{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
+    background:rgba(8,10,16,.82);backdrop-filter:blur(6px)}
+  .loader.show{display:flex}
+  .loader-card{width:440px;border:1px solid var(--line-2);border-radius:16px;background:linear-gradient(180deg,rgba(20,23,32,.98),rgba(15,18,26,.98));box-shadow:0 30px 80px rgba(0,0,0,.5);padding:30px 32px}
+  .loader-card .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent-2);margin-bottom:6px}
+  .loader-card h2{margin:0 0 22px;font-size:20px;font-weight:600;letter-spacing:-.02em}
+  .loader-step{display:flex;align-items:center;gap:12px;padding:9px 0;color:var(--ink-3);font-size:13.5px;transition:color .25s}
+  .loader-step .ic{width:18px;height:18px;flex:none;display:grid;place-items:center}
+  .loader-step .dot{width:7px;height:7px;border-radius:50%;border:1.5px solid var(--line-2)}
+  .loader-step.run{color:var(--ink)}
+  .loader-step.run .dot{border-color:var(--accent);border-top-color:transparent;animation:spin .7s linear infinite}
+  .loader-step.ok{color:var(--ink-2)}
+  .loader-step.ok .dot{display:none}
+  .loader-step .check{display:none;color:var(--green)}
+  .loader-step.ok .check{display:block}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loader-bar{height:3px;border-radius:2px;background:var(--bg-4);margin-top:18px;overflow:hidden}
+  .loader-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .4s ease}
+
+  /* style grid — compact, fits uniform card */
+  .style-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .style-cell{border:1px solid var(--line-2);border-radius:9px;overflow:hidden;background:var(--bg-2);cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .style-cell.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+  .style-cell .pv{aspect-ratio:16/10;background:#11141d;display:block;width:100%;object-fit:cover}
+  .style-cell .lbl{padding:6px 8px;font-size:11.5px;font-weight:500;color:var(--ink)}
+
+  /* slider */
+  .slider-val{font-size:20px;font-weight:600;color:var(--ink);margin-bottom:14px}
+  .slider-val em{font-style:normal;color:var(--ink-3);font-family:var(--mono);font-size:11px;margin-left:8px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+
+  /* ===== nav ===== */
+  .nav{display:flex;justify-content:center;align-items:center;gap:16px;padding:18px 0 36px;flex:none}
+  .nav button{min-width:96px;border-radius:9px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2);padding:11px 18px;font-weight:500;transition:background .14s,color .14s,border-color .14s}
+  .nav button:hover:not(:disabled){background:var(--bg-3);color:var(--ink);border-color:#3d445a}
+  .nav .primary{background:var(--accent);color:#071021;border-color:var(--accent);font-weight:700}
+  .nav button:disabled{opacity:.4;cursor:not-allowed}
+
+  /* design notes */
+  .notes{position:fixed;right:22px;bottom:22px;width:300px;border:1px dashed var(--line-2);border-radius:10px;padding:13px 15px;background:rgba(17,20,29,.78);color:var(--ink-2);font-size:11.5px;line-height:1.5;z-index:50}
+  .notes b{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+  .notes ul{margin:0;padding-left:16px}
+  .notes li+li{margin-top:3px}
+</style>
+</head>
+<body>
+
+  <div class="top">
+    <div class="step-bar" id="bar"></div>
+    <div class="count" id="count"></div>
+  </div>
+
+  <div class="strip-viewport">
+    <div class="strip" id="strip"></div>
+  </div>
+
+  <div class="nav">
+    <button id="back">← Back</button>
+    <button class="primary" id="next">Next →</button>
+  </div>
+
+  <div class="loader" id="loader">
+    <div class="loader-card">
+      <div class="eyebrow">Building your project</div>
+      <h2>Setting up the workflow…</h2>
+      <div id="loader-steps">
+        <div class="loader-step" data-s><span class="ic"><span class="dot"></span><svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Locking format &amp; visual style</div>
+        <div class="loader-step" data-s><span class="ic"><span class="dot"></span><svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Saving the idea &amp; references</div>
+        <div class="loader-step" data-s><span class="ic"><span class="dot"></span><svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Determining the core message</div>
+        <div class="loader-step" data-s><span class="ic"><span class="dot"></span><svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Drafting the structure outline</div>
+        <div class="loader-step" data-s><span class="ic"><span class="dot"></span><svg class="check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Opening your workflow at step 04</div>
+      </div>
+      <div class="loader-bar"><i id="loader-bar-fill"></i></div>
+    </div>
+  </div>
+
+  <aside class="notes">
+    <b>Onboarding notes</b>
+    <ul>
+      <li>One uniform module shape/size for every question.</li>
+      <li>Whole chain is always present; current module zooms in, neighbors fade (fog-of-war) at ~30%.</li>
+      <li>Click a neighbor or use ← → arrows / buttons to move.</li>
+      <li>Format first (shape → narrator → motion → length → style), then identity → idea → core message.</li>
+      <li>Narrator examples: widescreen (16:9) vs portrait (9:16), each native aspect, hover to play. Portrait clip is a stand-in — needs the real UGC asset path.</li>
+      <li>"Finish onboarding" = completing steps 01–03; lands the user on step 04 (Structure outline).</li>
+    </ul>
+  </aside>
+
+<script>
+  const STYLES = [
+    {id:'anime',  n:'Anime soft'},
+    {id:'comic',  n:'Comic ink'},
+    {id:'flat',   n:'Flat vector'},
+    {id:'paper',  n:'Paper cutout'},
+    {id:'noir',   n:'Noir'},
+    {id:'custom', n:'Custom'},
+  ];
+
+  const A = '/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/';
+  const VID_WIDE = A + 'sessions/spoolcast-dev-log-06/renders/spoolcast-dev-log-06-1.0x.mp4';
+  const VID_UGC = '/ugc-sample.mp4';
+
+  /* every question shares the same outer shell; only .content differs.
+     ORDER: format setup first (steps 01 fields), then identity → idea → core message. */
+  const QUESTIONS = [
+    { key:'canvas', eyebrow:'01 · Canvas', q:'What shape is this video?',
+      body:`<button class="opt sel"><span class="stripe"></span><span class="num">A</span><span class="ratio"></span><span class="nm">Widescreen</span><span class="ds">16:9</span></button>
+            <button class="opt"><span class="stripe"></span><span class="num">B</span><span class="ratio r916"></span><span class="nm">Vertical</span><span class="ds">9:16</span></button>
+            <button class="opt"><span class="stripe"></span><span class="num">C</span><span class="ratio r11"></span><span class="nm">Square</span><span class="ds">1:1</span></button>` },
+
+    { key:'narrator', eyebrow:'02 · Audio', q:'Is there a narrator?',
+      body:`<div class="vid-row">
+              <button class="vid-tile sel" data-opt>
+                <span class="vbox"><video src="${VID_WIDE}" muted playsinline preload="metadata"></video><span class="vtag">NARRATED</span><span class="vhint">Hover to play</span></span>
+                <span class="vtext"><b>Yes, a separate narrator tells the story</b><small>Spoolcast dev-log style · 16:9</small></span>
+              </button>
+              <button class="vid-tile" data-opt>
+                <span class="vbox"><video src="${VID_UGC}" muted playsinline preload="metadata"></video><span class="vtag">IN-VIDEO</span><span class="vhint">Hover to play</span></span>
+                <span class="vtext"><b>No, the people in the video do the talking</b><small>UGC / talking-to-camera style · 9:16</small></span>
+              </button>
+            </div>` },
+
+    { key:'motion', eyebrow:'03 · Visuals', q:'What do the visuals look like?',
+      body:`<button class="opt sel"><span class="stripe"></span><span class="num">A</span><span class="nm">Animated still images</span><span class="ds">cheap · consistent</span></button>
+            <button class="opt"><span class="stripe"></span><span class="num">B</span><span class="nm">Generated video clips</span><span class="ds">full motion · pricier</span></button>` },
+
+    { key:'length', eyebrow:'04 · Length', q:'How long, roughly?',
+      body:`<div class="slider-val">~2 min <em>(120s · ~15 beats)</em></div>
+            <input type="range" min="30" max="600" step="15" value="120" />` },
+
+    { key:'style', eyebrow:'05 · Style', q:'Pick a visual style.',
+      body:`<div class="style-grid">${STYLES.map((s,i)=>`
+              <div class="style-cell ${i===0?'sel':''}"><span class="pv"></span><span class="lbl">${s.n}</span></div>`).join('')}</div>` },
+
+    { key:'name', eyebrow:'06 · Identity', q:"What's the name of this video?",
+      body:`<input class="tb one" placeholder="e.g. Spoolcast Dev Log #07 — the UI wrapper" />` },
+
+    { key:'about', eyebrow:'07 · Idea', q:"What's this video about?",
+      body:`<textarea class="tb tall" placeholder="Be as descriptive as you want — the idea, topic, opinion, or story this should turn into."></textarea>
+            <button class="attach"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg> Attach references &amp; images</button>` },
+
+    { key:'message', eyebrow:'08 · Core message', q:"What's the core message?",
+      body:`<textarea class="tb" style="height:96px" placeholder="The one thing a viewer should walk away believing."></textarea>
+            <div class="or-row">or</div>
+            <button class="ai-opt"><span class="nm">Let AI determine it for me</span><span class="ds">from the idea above</span></button>` },
+  ];
+
+  let cur = 1; // start mid-chain so the fog-of-war is obvious
+  const strip = document.getElementById('strip');
+  const bar = document.getElementById('bar');
+  const count = document.getElementById('count');
+
+  // build modules once
+  QUESTIONS.forEach((qq,i)=>{
+    const m = document.createElement('div');
+    m.className = 'mod';
+    m.dataset.i = i;
+    m.innerHTML = `<div class="eyebrow">${qq.eyebrow}</div><h2 class="q">${qq.q}</h2><div class="content">${qq.body}</div>`;
+    m.addEventListener('click', e=>{ if(!e.target.closest('.opt,.tb,.attach,.ai-opt,.style-cell,.vid-tile,input')) go(i); });
+    strip.appendChild(m);
+  });
+  // hover-to-play WITH sound on narrator video examples
+  strip.querySelectorAll('.vbox').forEach(f=>{
+    const v = f.querySelector('video');
+    if(!v) return;
+    f.addEventListener('mouseenter', ()=>{ v.muted = false; v.volume = 1; v.currentTime = 0; v.play().catch(()=>{}); });
+    f.addEventListener('mouseleave', ()=>{ v.pause(); v.muted = true; v.currentTime = 0; });
+  });
+  // click to select a choice (within its own group)
+  strip.addEventListener('click', e=>{
+    const choice = e.target.closest('.opt, .vid-tile, .style-cell');
+    if(choice){
+      choice.parentElement.querySelectorAll('.opt, .vid-tile, .style-cell').forEach(el=>el.classList.remove('sel'));
+      choice.classList.add('sel');
+      return;
+    }
+    const ai = e.target.closest('.ai-opt');
+    if(ai){ ai.classList.toggle('sel'); }
+  });
+  // step bar
+  QUESTIONS.forEach(()=>{ const s=document.createElement('span'); bar.appendChild(s); });
+
+  const CARD_W = 560, GAP = 64;
+  function render(){
+    const offset = -(cur * (CARD_W + GAP) + CARD_W/2);
+    strip.style.transform = `translate(${offset}px, -50%)`;
+    [...strip.children].forEach((m,i)=>{
+      m.classList.toggle('cur', i===cur);
+      m.classList.toggle('done', i<cur);
+    });
+    [...bar.children].forEach((s,i)=>{
+      s.className = i<cur ? 'done' : i===cur ? 'active' : '';
+    });
+    count.textContent = `${cur+1} of ${QUESTIONS.length} · ${QUESTIONS[cur].eyebrow.split('·')[1].trim()}`;
+    document.getElementById('back').disabled = cur===0;
+    document.getElementById('next').textContent = cur===QUESTIONS.length-1 ? 'Finish onboarding →' : 'Next →';
+  }
+  function go(i){ cur = Math.max(0, Math.min(QUESTIONS.length-1, i)); render(); }
+
+  function finish(){
+    const loader = document.getElementById('loader');
+    const steps = [...loader.querySelectorAll('.loader-step')];
+    const fill = document.getElementById('loader-bar-fill');
+    loader.classList.add('show');
+    let i = 0;
+    const run = ()=>{
+      if(i>0) steps[i-1].classList.replace('run','ok');
+      fill.style.width = Math.round((i/steps.length)*100)+'%';
+      if(i>=steps.length){
+        // hand off to the real workflow screen
+        setTimeout(()=>{ window.location.assign('/p/new'); }, 350);
+        return;
+      }
+      steps[i].classList.add('run');
+      i++;
+      setTimeout(run, 900);
+    };
+    run();
+  }
+
+  document.getElementById('next').addEventListener('click', ()=>{ cur===QUESTIONS.length-1 ? finish() : go(cur+1); });
+  document.getElementById('back').addEventListener('click', ()=>go(cur-1));
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowRight' && cur<QUESTIONS.length-1) go(cur+1);
+    if(e.key==='ArrowLeft') go(cur-1);
+  });
+  render();
+</script>
+</body>
+</html>

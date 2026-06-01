@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spoolcast — Start a project (template picker)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0a0c12; --bg-2:#11141d; --bg-3:#171a25; --bg-4:#1f2330;
+    --line:#23283a; --line-2:#323849;
+    --ink:#e9ecf3; --ink-2:#9098ad; --ink-3:#5a6178;
+    --accent:#7aa2ff; --accent-2:#9fbaff; --accent-glow:rgba(122,162,255,.18);
+    --green:#36c98c;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --seam:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+  body{display:flex;flex-direction:column;overflow:hidden}
+  button{font:inherit;color:inherit;cursor:pointer}
+
+  header{height:60px;flex:none;display:flex;align-items:center;gap:18px;padding:0 24px;
+    border-bottom:1px solid var(--line);background:rgba(10,12,18,.86);backdrop-filter:blur(10px);z-index:20}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:600;border:0;background:none;padding:0}
+  .logo .mark{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:linear-gradient(135deg,#8a7bff,#6f9bff);color:#0a0c12}
+  .crumb{display:flex;align-items:center;gap:10px;color:var(--ink-2);font-size:13px}
+  .crumb .sep{color:var(--ink-3)} .crumb b{color:var(--ink);font-weight:600}
+  .crumb .back{width:26px;height:26px;border-radius:7px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2);display:grid;place-items:center}
+
+  /* space stage */
+  .stage{flex:1;min-height:0;overflow:auto;
+    background-color:#070a10;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='66' height='66'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.05' stroke-width='1'%3E%3Cpath d='M33 28v10M28 33h10'/%3E%3C/g%3E%3C/svg%3E");
+    background-size:66px 66px;box-shadow:inset 0 0 220px 70px rgba(0,0,0,.6);}
+  .stage::-webkit-scrollbar{width:10px}
+  .stage::-webkit-scrollbar-thumb{background:rgba(120,130,160,.25);border-radius:6px;border:2px solid transparent;background-clip:content-box}
+  .inner{width:1180px;max-width:calc(100vw - 64px);margin:0 auto;padding:26px 0 64px}
+
+  .head{margin-bottom:18px}
+  h1{margin:0 0 5px;font-size:28px;letter-spacing:-.03em;line-height:1.1}
+  .lede{margin:0;color:var(--ink-3);font-size:13px;line-height:1.4}
+  .search{flex:1;min-width:0;max-width:340px;height:26px;display:flex;align-items:center;gap:7px;border:1px solid var(--line-2);border-radius:7px;background:var(--bg-2);padding:0 10px;transition:border-color .15s,box-shadow .15s}
+  .search svg{width:13px;height:13px;color:var(--ink-3);flex:none}
+  .search input{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--ink);font:inherit;font-size:12.5px;line-height:1;letter-spacing:-.01em}
+  .search input::placeholder{color:var(--ink-3)}
+  .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+  .no-results{display:none;color:var(--ink-3);font-family:var(--mono);font-size:12px;padding:26px 4px}
+  .no-results.show{display:block}
+  .section-label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 2px 12px;flex-wrap:nowrap}
+  .section-label h2{flex:none;white-space:nowrap}
+  .section-label h2{margin:0;font-size:14px;font-weight:600}
+  .section-label .hint{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* ===== tetris / bento grid ===== */
+  .bento{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:160px;gap:var(--seam);grid-auto-flow:dense}
+  .t-dev      {grid-column:span 2; grid-row:span 2}
+  .t-news     {grid-column:span 1; grid-row:span 4}
+  .t-ugc      {grid-column:span 1; grid-row:span 4}
+  .t-explainer{grid-column:span 2; grid-row:span 2}
+
+  .tile{position:relative;border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:#0c0e16;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .tile.open{border-color:rgba(122,162,255,.5)}
+
+  /* unified hover outline on every interactive module + pill */
+  .tile:hover,.blank-top:hover,.recent-tile:hover,.sub-row:hover{
+    border-color:var(--accent);
+    box-shadow:0 0 0 2px var(--accent-glow), 0 18px 44px rgba(0,0,0,.4);
+  }
+  .act:hover,.sub-go:hover,.subs-close:hover{
+    border-color:var(--accent);
+    box-shadow:0 0 0 2px var(--accent-glow);
+  }
+  .tile video,.tile .poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .tile .play{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);z-index:3;
+    width:58px;height:58px;border-radius:50%;border:1px solid rgba(255,255,255,.5);background:rgba(10,12,18,.5);
+    backdrop-filter:blur(4px);color:#fff;font-size:19px;display:grid;place-items:center;padding-left:4px;transition:transform .15s,background .15s}
+  .tile:hover .play{transform:translate(-50%,-50%) scale(1.07);background:rgba(122,162,255,.75)}
+  .tile.playing .play,.tile.playing .scrim,.tile.playing .badge{opacity:0;pointer-events:none}
+  .badge{position:absolute;z-index:3;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.05em;
+    background:rgba(10,12,18,.72);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:3px 8px;color:var(--ink);transition:opacity .2s}
+  .badge.tl{left:10px;top:10px} .badge.tr{right:10px;top:10px;color:var(--ink-2)}
+  .badge.series{color:var(--accent-2);border-color:rgba(122,162,255,.4);background:rgba(20,28,52,.72)}
+  .scrim{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:54px 14px 13px;
+    background:linear-gradient(to top, rgba(8,10,16,.95) 12%, rgba(8,10,16,.55) 55%, transparent 100%);transition:opacity .2s}
+  .t-name{font-size:18px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+  .t-sig{margin-top:4px;font-family:var(--mono);font-size:10.5px;letter-spacing:.01em;color:var(--ink-2);line-height:1.45}
+  .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .act{border:1px solid var(--line-2);border-radius:8px;background:rgba(23,26,37,.85);color:var(--ink);padding:8px 12px;font-size:12px;font-weight:600}
+  .act.primary{border-color:var(--accent);background:var(--accent);color:#071021}
+  .act:hover{filter:brightness(1.08)}
+  .act .car{font-size:9px}
+
+  /* series overlay slides up within the tile */
+  .tpl-subs{position:absolute;left:0;right:0;bottom:0;z-index:5;background:rgba(9,11,17,.96);backdrop-filter:blur(8px);
+    border-top:1px solid var(--line-2);padding:13px 14px 14px;transform:translateY(101%);transition:transform .26s cubic-bezier(.22,.7,.18,1);max-height:100%;overflow:auto}
+  .tile.open .tpl-subs{transform:translateY(0)}
+  .subs-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .subs-head b{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  .subs-close{border:1px solid var(--line-2);border-radius:7px;background:var(--bg-3);color:var(--ink-2);width:24px;height:24px;display:grid;place-items:center;font-size:13px}
+  .sub-row{display:flex;flex-direction:column;gap:11px;border:1px solid var(--line-2);border-radius:11px;background:var(--bg-2);padding:14px}
+  .sub-row+.sub-row{margin-top:8px}
+  .sub-top{display:flex;align-items:center;gap:9px}
+  .sub-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none;box-shadow:0 0 8px var(--accent-glow)}
+  .sub-top b{font-size:14px;font-weight:600;letter-spacing:-.01em}
+  .sub-meta{font-family:var(--mono);font-size:11px;line-height:1.55;color:var(--ink-3)}
+  .sub-go{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#071021;padding:11px;font-size:12.5px;font-weight:700}
+
+  /* standalone — start blank : prominent banner above the templates */
+  .blank-top{display:flex;align-items:center;gap:18px;width:100%;text-align:left;cursor:pointer;
+    border:1px solid var(--line-2);border-radius:14px;padding:18px 20px;margin-bottom:28px;
+    background:linear-gradient(120deg, rgba(122,162,255,.10), rgba(17,20,29,.5) 60%);
+    transition:border-color .15s,box-shadow .15s,background .15s}
+  .blank-top:hover{border-color:var(--accent);background:linear-gradient(120deg, rgba(122,162,255,.18), rgba(17,20,29,.55) 60%);box-shadow:0 0 0 2px var(--accent-glow)}
+  .blank-top .bt-glyph{width:52px;height:52px;border-radius:12px;flex:none;display:grid;place-items:center;font-size:26px;color:var(--accent-2);
+    background:rgba(122,162,255,.14);border:1px solid rgba(122,162,255,.35)}
+  .blank-top .bt-text{flex:1;min-width:0}
+  .blank-top .bt-title{font-size:17px;font-weight:700;letter-spacing:-.02em}
+  .blank-top .bt-sub{display:block;margin-top:3px;color:var(--ink-3);font-size:12.5px}
+  .blank-top .bt-cta{flex:none;border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#071021;padding:10px 16px;font-size:12.5px;font-weight:700}
+
+  /* recents — packed row of resume blocks */
+  .recents{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--seam)}
+  .recent-tile{display:flex;flex-direction:column;justify-content:space-between;border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:13px 14px;cursor:pointer;min-height:96px;transition:border-color .15s,background .15s}
+  .recent-tile:hover{background:var(--bg-3)}
+  .recent-tile .r-title{font-size:14px;font-weight:600}
+  .recent-tile .r-sub{color:var(--ink-3);font-family:var(--mono);font-size:10.5px;margin-top:3px}
+  .recent-tile .r-foot{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .recent-tile .r-step{font-family:var(--mono);font-size:10.5px;color:var(--ink-2)}
+  .bar{flex:1;height:5px;border-radius:3px;background:var(--bg-4);overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+
+  .notes{margin-top:34px;border:1px dashed var(--line-2);border-radius:10px;padding:14px 16px;background:rgba(17,20,29,.55);color:var(--ink-2);font-size:11.5px;line-height:1.6}
+  .notes b{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+  .notes ul{margin:0;padding-left:16px} .notes li+li{margin-top:3px}
+
+  /* ===== mobile: stacked list, full-bleed media keeps native aspect ===== */
+  @media (max-width:760px){
+    .inner{width:auto;max-width:560px;padding:24px 14px 60px}
+    .stage{box-shadow:none;background-color:var(--bg);
+      background-image:radial-gradient(circle at 1px 1px, rgba(255,255,255,.03) 1px, transparent 1px);background-size:26px 26px}
+    /* 2-column grid: widescreen spans both cols, portrait takes one */
+    .bento{grid-template-columns:repeat(2,1fr);grid-auto-rows:auto;grid-auto-flow:row}
+    .t-dev,.t-explainer{grid-column:span 2;grid-row:auto;aspect-ratio:16/9}
+    .t-news,.t-ugc{grid-column:span 1;grid-row:auto;aspect-ratio:9/16}
+    .recents{grid-template-columns:1fr}
+    .blank-top{flex-wrap:wrap;gap:12px}
+    .blank-top .bt-cta{width:100%;text-align:center}
+    .inner{padding-top:16px}
+    .head{gap:12px;margin-bottom:12px}
+    h1{font-size:24px}
+    .lede{font-size:11px}
+    .section-label{margin-bottom:10px}
+    .search{height:26px;padding:0 10px}
+    .blank-top{margin-bottom:22px}
+  }
+  /* tiny phones: keep the small portrait tiles uncluttered */
+  @media (max-width:480px){
+    .t-news .t-sig,.t-ugc .t-sig{display:none}
+    .t-news .t-name,.t-ugc .t-name{font-size:14px}
+    .t-news .scrim,.t-ugc .scrim{padding:36px 9px 9px}
+    .t-news .acts,.t-ugc .acts{flex-direction:column;gap:6px}
+    .t-news .act,.t-ugc .act{width:100%;padding:8px;font-size:11.5px}
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <button class="logo"><span class="mark">S</span><span>Spoolcast</span></button>
+    <div class="crumb"><span class="back">←</span><span>Projects</span><span class="sep">/</span><b>Start a project</b></div>
+  </header>
+
+  <div class="stage">
+    <div class="inner">
+      <div class="head">
+        <h1>Start a project</h1>
+        <p class="lede">Choose a template, or pick up where you left off.</p>
+      </div>
+
+      <button class="blank-top">
+        <span class="bt-glyph">+</span>
+        <span class="bt-text">
+          <span class="bt-title">Standalone — start blank</span>
+          <span class="bt-sub">A true one-off. Choose format &amp; style from scratch — no template applied.</span>
+        </span>
+        <span class="bt-cta">Start blank →</span>
+      </button>
+
+      <div class="section-label">
+        <h2>Choose a template</h2>
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+          <input id="q" type="text" placeholder="Search format, style, cadence…" />
+        </div>
+      </div>
+
+      <div class="bento">
+
+        <!-- dev-log : widescreen, spans 2×2 -->
+        <div class="tile t-dev" data-tpl data-play data-poster="DEV_POSTER" data-video="DEV_VIDEO">
+          <video preload="metadata" playsinline></video>
+          <span class="badge tl series">1 series · weekly</span>
+          <span class="badge tr">4:08</span>
+          <button class="play">▶</button>
+          <div class="scrim">
+            <div class="t-name">Spoolcast dev-log</div>
+            <div class="t-sig">16:9 · narrated (TTS Schedar) · anime soft · animated stills</div>
+            <div class="acts">
+              <button class="act" data-toggle><span class="car">▾</span> Pick up a series</button>
+              <button class="act primary">Use base template →</button>
+            </div>
+          </div>
+          <div class="tpl-subs">
+            <div class="subs-head"><b>Subtemplates · pick a series</b><button class="subs-close" data-close>×</button></div>
+            <div class="sub-row">
+              <div class="sub-top"><span class="sub-dot"></span><b>Dev Log — weekly</b></div>
+              <div class="sub-meta">10 episodes · intro &amp; style locked<br>Last: Dev Log #10</div>
+              <button class="sub-go">Start episode #11 →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- anime news : portrait, spans 1×3 (full-bleed, no side gaps) -->
+        <div class="tile t-news" data-tpl data-play data-poster="NEWS_POSTER" data-video="NEWS_VIDEO">
+          <video preload="metadata" playsinline></video>
+          <span class="badge tl series">1 series · daily</span>
+          <span class="badge tr">1:21</span>
+          <button class="play">▶</button>
+          <div class="scrim">
+            <div class="t-name">Anime news</div>
+            <div class="t-sig">9:16 · narrated + cast · Bleach key-art · generated clips</div>
+            <div class="acts">
+              <button class="act" data-toggle><span class="car">▾</span> Series</button>
+              <button class="act primary">Use base →</button>
+            </div>
+          </div>
+          <div class="tpl-subs">
+            <div class="subs-head"><b>Subtemplates · pick a series</b><button class="subs-close" data-close>×</button></div>
+            <div class="sub-row">
+              <div class="sub-top"><span class="sub-dot"></span><b>faux7-news — daily</b></div>
+              <div class="sub-meta">15 episodes · 11-character cast<br>Last: Episode 15 · May 28</div>
+              <button class="sub-go">Start episode #16 →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ugc : portrait, spans 1×3 -->
+        <div class="tile t-ugc" data-tpl data-play data-poster="UGC_POSTER" data-video="UGC_VIDEO">
+          <video preload="metadata" playsinline></video>
+          <span class="badge tl">base template</span>
+          <span class="badge tr">0:56</span>
+          <button class="play">▶</button>
+          <div class="scrim">
+            <div class="t-name">UGC explainer</div>
+            <div class="t-sig">9:16 · in-video audio · photoreal · generated clips</div>
+            <div class="acts">
+              <button class="act primary">Use this template →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- stick-figure explainer : widescreen, base only -->
+        <div class="tile t-explainer" data-tpl data-play data-poster="EXPL_POSTER" data-video="EXPL_VIDEO">
+          <video preload="metadata" playsinline></video>
+          <span class="badge tl">base template</span>
+          <span class="badge tr">0:22</span>
+          <button class="play">▶</button>
+          <div class="scrim">
+            <div class="t-name">Stick-figure explainer</div>
+            <div class="t-sig">16:9 · narrated · hand-drawn doodles (C&amp;H / XKCD) · animated stills</div>
+            <div class="acts">
+              <button class="act primary">Use this template →</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="no-results" id="noResults">No templates match “<span id="qEcho"></span>”. Try a format, style, or cadence.</div>
+
+      <div class="section-label"><h2>Pick up where you left off</h2><span class="hint">in-progress videos</span></div>
+      <div class="recents">
+        <div class="recent-tile">
+          <div><div class="r-title">Dev Log #06</div><div class="r-sub">spoolcast dev-log · 2h ago</div></div>
+          <div class="r-foot"><span class="r-step">08/13</span><span class="bar"><i style="width:58%"></i></span></div>
+        </div>
+        <div class="recent-tile">
+          <div><div class="r-title">News drop · May 14</div><div class="r-sub">faux7-news · yesterday</div></div>
+          <div class="r-foot"><span class="r-step">12/13</span><span class="bar"><i style="width:92%"></i></span></div>
+        </div>
+        <div class="recent-tile">
+          <div><div class="r-title">Founder mode, explained</div><div class="r-sub">standalone · 3d ago</div></div>
+          <div class="r-foot"><span class="r-step">03/13</span><span class="bar"><i style="width:23%"></i></span></div>
+        </div>
+      </div>
+
+      <aside class="notes">
+        <b>Template picker notes</b>
+        <ul>
+          <li>Tetris/bento packing — widescreen &amp; portrait tiles interlock with touching edges; portrait media is full-bleed (no letterbox side gaps), equal surface presence to widescreen.</li>
+          <li>Click any tile to play a real example with sound. "Pick up a series" slides up the subtemplate list inside the tile.</li>
+          <li>Repo-accurate: dev-log = 16:9 stills (10 sessions); anime news = 9:16 generated clips, 15 episodes, 11 characters, Bleach key-art; UGC = the provided sample (base only).</li>
+          <li>Mobile reflows the same tiles into the single-column list.</li>
+        </ul>
+      </aside>
+    </div>
+  </div>
+
+<script>
+  const A = '/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/';
+  const ASSETS = {
+    DEV_POSTER: A + 'sessions/spoolcast-dev-log-06/source/generated-assets/thumbnails/thumb-v2-three-answers.png',
+    DEV_VIDEO:  A + 'sessions/spoolcast-dev-log-06/renders/spoolcast-dev-log-06-1.0x.mp4',
+    NEWS_POSTER:'/news-poster.jpg',
+    NEWS_VIDEO: A + 'shows/news-anime-bot/sessions/2026-05-28/episode/out/episode-15.mp4',
+    UGC_POSTER: '/ugc-poster.jpg',
+    UGC_VIDEO:  '/ugc-sample.mp4',
+    EXPL_POSTER:'/explainer-poster.jpg',
+    EXPL_VIDEO: A + 'sessions/spoolcast-explainer/source/external-assets/pilot-proof-22s.mp4',
+  };
+
+  document.querySelectorAll('.tile[data-play]').forEach(tile => {
+    const poster = ASSETS[tile.dataset.poster];
+    const video = tile.querySelector('video');
+    video.src = ASSETS[tile.dataset.video];
+    video.poster = poster;
+    tile.addEventListener('click', e => {
+      if (e.target.closest('.act, .sub-go, .subs-close, .tpl-subs')) return;
+      document.querySelectorAll('.tile.playing').forEach(m => {
+        if (m !== tile){ m.classList.remove('playing'); const v=m.querySelector('video'); v.pause(); v.controls=false; }
+      });
+      if (tile.classList.contains('playing')) return;
+      tile.classList.add('playing');
+      video.controls=true; video.muted=false; video.currentTime=0; video.play().catch(()=>{});
+    });
+  });
+
+  document.querySelectorAll('[data-toggle]').forEach(b =>
+    b.addEventListener('click', e => { e.stopPropagation(); b.closest('[data-tpl]').classList.toggle('open'); }));
+  document.querySelectorAll('[data-close]').forEach(b =>
+    b.addEventListener('click', e => { e.stopPropagation(); b.closest('[data-tpl]').classList.remove('open'); }));
+
+  // live search — filters templates (+ recents) by name / format / style / cadence
+  const q = document.getElementById('q');
+  const tiles = [...document.querySelectorAll('.bento .tile')];
+  const recents = [...document.querySelectorAll('.recent-tile')];
+  q.addEventListener('input', () => {
+    const v = q.value.trim().toLowerCase();
+    let shown = 0;
+    tiles.forEach(t => {
+      const match = !v || t.textContent.toLowerCase().includes(v);
+      t.style.display = match ? '' : 'none';
+      if (match) shown++;
+      if (!match) t.classList.remove('open');
+    });
+    recents.forEach(t => {
+      t.style.display = (!v || t.textContent.toLowerCase().includes(v)) ? '' : 'none';
+    });
+    document.getElementById('noResults').classList.toggle('show', shown === 0);
+    document.getElementById('qEcho').textContent = q.value;
+  });
+</script>
+</body>
+</html>
