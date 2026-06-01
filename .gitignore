@@ -15,6 +15,9 @@ dist-ssr
 # QA / scratch screenshots
 spoolcast-web-horizontal-qa.png
 
+# deploy artifacts
+*.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
