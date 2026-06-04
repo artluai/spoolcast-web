@@ -4174,10 +4174,14 @@ function VisualGallery() {
   )
 }
 
-// Friendly format-template names per style library (for the Share dropdown).
-const TEMPLATE_NAMES: Record<string, string> = {
-  'wojak-gpt2': 'Wojak · GPT-image',
-  'anime / nano-banana': 'Anime · nano-banana',
+// World Kit "Share" scope hierarchy, narrow -> wide:
+//   Episode  <  Show / subtemplate  <  Format template
+// IMPORTANT: "Format template" is the whole-series PIPELINE format (e.g. the
+// Remotion illustration format, or the Anime news bot format) — NOT the image
+// / visual style (that's "Style Anchor", owned by Step 01). Keyed by show.
+const FORMAT_TEMPLATE_NAMES: Record<string, string> = {
+  'spoolcast dev log': 'Remotion illustration',
+  'faux7-news': 'Anime news bot',
 }
 
 // World Kit subsections — the visual-reference planning model. Cast is one of
@@ -4223,7 +4227,8 @@ function WorldKitPanel({
   const [scopes, setScopes] = useState<Record<string, string>>(() =>
     Object.fromEntries(WORLD_KIT_SECTIONS.map((s) => [s.id, s.scope])),
   )
-  const templateName = TEMPLATE_NAMES[castData.style] ?? castData.style
+  // the format template (series pipeline), NOT the visual style
+  const templateName = FORMAT_TEMPLATE_NAMES[showName] ?? 'format template'
   const scopeLabels: Record<string, string> = {
     Episode: 'Episode only',
     Show: `Show: ${showName}`,
