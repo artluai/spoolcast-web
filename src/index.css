@@ -468,15 +468,17 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .beat-row small { grid-column: 2; color: var(--ink-2); }
 /* cards keep a consistent size and wrap, so any character count (1, 2, 5…) packs
    cleanly instead of being stretched to fill a fixed 3-column track */
-.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 190px)); gap: 16px; justify-content: start; }
+.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 220px)); gap: 16px; justify-content: start; }
 .cast-card { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
-.portrait { position: relative; aspect-ratio: 1; background: var(--bg-3); overflow: hidden; }
+/* image leads; the text block stays compact (role clamps to 2 lines) */
+.portrait { position: relative; aspect-ratio: 4 / 5; background: var(--bg-3); overflow: hidden; }
 .portrait img { width: 100%; height: 100%; object-fit: cover; }
 .portrait span { position: absolute; top: 10px; left: 10px; border-radius: 5px; padding: 4px 8px; background: rgba(10,12,18,.7); color: var(--ink-2); font-family: var(--mono); font-size: 10px; }
-.cast-card .body { padding: 14px; }
-.cast-card h3 { margin: 0 0 6px; }
-.cast-card p, .cast-card small { color: var(--ink-2); }
-.compact .cast-card .body { min-height: 128px; }
+.cast-card .body { padding: 10px 12px 12px; }
+.cast-card h3 { margin: 0 0 4px; font-size: 14px; }
+.cast-card p { margin: 0; color: var(--ink-2); font-size: 11.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cast-card small { display: block; margin-top: 6px; color: var(--ink-3); font-size: 10.5px; }
+.compact .cast-card .body { min-height: 0; }
 /* World Kit — visual-reference planning panel (cast is one subsection of it) */
 .wk-panel { display: flex; flex-direction: column; gap: 14px; }
 .wk-note { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
