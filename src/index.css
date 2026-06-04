@@ -501,7 +501,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .wk-empty { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
 .wk-items { display: flex; flex-wrap: wrap; gap: 7px; }
 .wk-item { font-size: 11.5px; color: var(--ink-2); background: var(--bg-3); border-radius: 7px; padding: 6px 10px; }
-.wk-manage { align-self: flex-start; }
+.wk-manage { align-self: flex-start; background: transparent; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
+.wk-manage:hover { background: var(--bg-3); color: var(--ink); }
 @media (max-width: 760px) { .wk-note { justify-content: flex-start; } }
 
 .s1-flow { display: flex; flex-direction: column; gap: 0; }
