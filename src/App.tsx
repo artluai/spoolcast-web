@@ -3192,7 +3192,7 @@ function StepContent({
     )
   }
   if (step.id === 'worldkit') {
-    return <WorldKitPanel castData={castData} onManage={onOpenCast} compact />
+    return <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'shots') return <ShotTable />
@@ -4174,9 +4174,16 @@ function VisualGallery() {
   )
 }
 
+// Friendly format-template names per style library (for the Share dropdown).
+const TEMPLATE_NAMES: Record<string, string> = {
+  'wojak-gpt2': 'Wojak · GPT-image',
+  'anime / nano-banana': 'Anime · nano-banana',
+}
+
 // World Kit subsections — the visual-reference planning model. Cast is one of
 // them; nothing here implies a fixed "1 character + 1 environment" recipe.
-// Share scope is kept to single words so the control stays tiny.
+// Share scope values stay single words; the dropdown labels name the actual
+// show / template so it's clear where a reference gets shared to.
 const WORLD_KIT_SCOPES = ['Episode', 'Show', 'Template'] as const
 
 type WorldKitSection = {
@@ -4204,16 +4211,24 @@ const WORLD_KIT_SECTIONS: WorldKitSection[] = [
 
 function WorldKitPanel({
   castData,
+  showName,
   onManage,
   compact = false,
 }: {
   castData: (typeof castByShow)['spoolcast dev log']
+  showName: string
   onManage?: () => void
   compact?: boolean
 }) {
   const [scopes, setScopes] = useState<Record<string, string>>(() =>
     Object.fromEntries(WORLD_KIT_SECTIONS.map((s) => [s.id, s.scope])),
   )
+  const templateName = TEMPLATE_NAMES[castData.style] ?? castData.style
+  const scopeLabels: Record<string, string> = {
+    Episode: 'Episode only',
+    Show: `Show: ${showName}`,
+    Template: `Template: ${templateName}`,
+  }
   return (
     <div className="wk-panel">
       <div className="wk-note">
@@ -4240,7 +4255,7 @@ function WorldKitPanel({
                     onChange={(e) => setScopes((p) => ({ ...p, [sec.id]: e.target.value }))}
                   >
                     {WORLD_KIT_SCOPES.map((o) => (
-                      <option key={o} value={o}>{o}</option>
+                      <option key={o} value={o}>{scopeLabels[o]}</option>
                     ))}
                   </select>
                 </label>
@@ -4299,7 +4314,7 @@ function WorldKitView({
             <p>Style, cast, environments, props, screens, motion, and beat-specific refs — each with its own reuse scope. Style library: {castData.style}.</p>
           </div>
         </div>
-        <WorldKitPanel castData={castData} />
+        <WorldKitPanel castData={castData} showName={showName} />
       </div>
     </section>
   )

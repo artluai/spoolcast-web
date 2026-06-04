@@ -466,7 +466,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .beat-row { display: grid; grid-template-columns: 36px 1fr; gap: 10px; padding: 13px 10px; border-top: 1px solid rgba(255,255,255,.045); }
 .beat-row span { font-family: var(--mono); color: var(--ink-3); }
 .beat-row small { grid-column: 2; color: var(--ink-2); }
-.cast-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+/* cards keep a consistent size and wrap, so any character count (1, 2, 5…) packs
+   cleanly instead of being stretched to fill a fixed 3-column track */
+.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 190px)); gap: 16px; justify-content: start; }
 .cast-card { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
 .portrait { position: relative; aspect-ratio: 1; background: var(--bg-3); overflow: hidden; }
 .portrait img { width: 100%; height: 100%; object-fit: cover; }
@@ -483,7 +485,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .wk-grid { display: flex; flex-direction: column; gap: 12px; }
 .wk-card { border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .wk-card-locked { opacity: .55; }
-.wk-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wk-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .wk-card-meta h3 { margin: 0; font-size: 14px; }
 .wk-card-meta p { margin: 3px 0 0; font-size: 12px; color: var(--ink-3); }
 .wk-scope { flex: none; display: flex; align-items: center; gap: 6px; }
