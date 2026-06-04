@@ -271,15 +271,15 @@ const stepAlias: Record<string, { id: string; name: string; blurb: string }> = {
 
 function buildStepsFromContract(blank = false): Step[] {
   const stages = (illContract as { stages: StageContract[] }).stages
-  // Node positions, in final main-line order. Cast (05) sits between Structure
-  // outline (04) and Screenplay (06); everything after Structure shifts one
-  // column right to make room.
+  // Node positions, in final main-line order. World Kit (05) sits between
+  // Structure outline (04) and Screenplay (06); everything after Structure
+  // shifts one column right to make room.
   const positions = [
     [30, 110], // 01 Project setup
     [288, 110], // 02 Video idea
     [498, 110], // 03 Core message
     [756, 110], // 04 Structure outline
-    [1014, 110], // 05 Cast
+    [1014, 110], // 05 World Kit
     [1272, 110], // 06 Screenplay
     [1530, 110], // 07 Storyboard
     [1788, 60], // 08 Narration audio
@@ -310,18 +310,19 @@ function buildStepsFromContract(blank = false): Step[] {
         optional: alias.id === 'phone',
       }
     })
-  // Cast is now a regular main-line checkpoint, immediately after Structure
-  // outline: Structure defines the roles, Cast confirms who appears, and
-  // Screenplay/Storyboard reuse the same character references downstream.
-  const castNode = {
-    id: 'cast',
-    sourceId: 'cast',
-    name: 'Cast',
-    blurb: 'Episode cast — the characters who appear in this episode.',
+  // World Kit is the visual-reference planning stage between Structure outline
+  // and Screenplay: it gathers the style anchor, cast, environments, props,
+  // documents/screens, motion refs, and beat-specific refs the render reuses.
+  // (Cast is just one subsection inside it.) Source of truth: working/world-kit.md.
+  const worldKitNode = {
+    id: 'worldkit',
+    sourceId: 'worldkit',
+    name: 'World Kit',
+    blurb: 'Plan the visual references — style anchor, cast, environments, props, and beat-specific refs.',
     status: (blank ? 'later' : 'done') as Status,
     optional: false,
   }
-  const merged = [...contractSteps.slice(0, 4), castNode, ...contractSteps.slice(4)]
+  const merged = [...contractSteps.slice(0, 4), worldKitNode, ...contractSteps.slice(4)]
   return merged.map((step, index) => {
     const [x, y] = positions[index]
     return {
@@ -658,7 +659,7 @@ function SpoolcastApp() {
                   const fresh = buildStepsFromContract(true).map((step) =>
                     step.id === 'setup'
                       ? { ...step, status: 'done' as const }
-                      : series && step.id === 'cast'
+                      : series && step.id === 'worldkit'
                         ? { ...step, status: 'done' as const }
                         : step,
                   )
@@ -709,7 +710,7 @@ function SpoolcastApp() {
           />
           <Route
             path="/p/:id/cast"
-            element={<CastLibraryView castData={castData} showName={showName} />}
+            element={<WorldKitView castData={castData} showName={showName} />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -846,7 +847,7 @@ function Header({
           <>
             <span className="crumb-secondary">{showName}</span>
             <span className="sep">/</span>
-            <b>Cast</b>
+            <b>World Kit</b>
           </>
         ) : setupMode === 'series' ? (
           <>
@@ -890,7 +891,7 @@ function Header({
             </button>
           ) : null}
           <button className={`btn-soft ${isCast ? 'active' : ''}`} onClick={onCast}>
-            Cast
+            World Kit
           </button>
           <button
             className={`btn-soft ${route === '/library' ? 'active' : ''}`}
@@ -2531,8 +2532,8 @@ function WorkflowView({
       ['setup', 'idea'],
       ['idea', 'goal'],
       ['goal', 'plan'],
-      ['plan', 'cast'],
-      ['cast', 'script'],
+      ['plan', 'worldkit'],
+      ['worldkit', 'script'],
       ['script', 'shots'],
       ['shots', 'voice'],
       ['shots', 'pics'],
@@ -2554,7 +2555,7 @@ function WorkflowView({
       : activeStep.status === 'work'
         ? 'In progress'
         : 'Pending'
-  const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'cast'].includes(activeStep.id)
+  const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'worldkit'].includes(activeStep.id)
 
   const NODE_W = 172
   const NODE_H = 88
@@ -3151,7 +3152,7 @@ function StepContent({
               <p>Format · Illustration video</p>
               <p>Output · 16:9 widescreen</p>
               <p>Narration voice · schedar-en-male-01</p>
-              <button onClick={onOpenCast}>Cast rules →</button>
+              <button onClick={onOpenCast}>World Kit →</button>
             </div>
           </div>
           <TemplateComponents inherited templateName={showName} />
@@ -3190,16 +3191,8 @@ function StepContent({
       </>
     )
   }
-  if (step.id === 'cast') {
-    return (
-      <>
-        <div className="struct-head">
-          <span className="sub">In this episode · {castData.chars.length} characters</span>
-          <button onClick={onOpenCast}>Manage library →</button>
-        </div>
-        <CastGrid castData={castData} compact />
-      </>
-    )
+  if (step.id === 'worldkit') {
+    return <WorldKitPanel castData={castData} onManage={onOpenCast} compact />
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'shots') return <ShotTable />
@@ -3242,13 +3235,13 @@ function SaveTemplateContent({
     format: true,
     style: true,
     structure: kind === 'subtemplate',
-    cast: kind === 'subtemplate',
+    worldkit: kind === 'subtemplate',
   })
   const lockRows: [string, string][] = [
     ['format', 'Format & canvas'],
     ['style', 'Visual style'],
     ['structure', 'Structure outline'],
-    ['cast', 'Cast'],
+    ['worldkit', 'World Kit'],
   ]
   return (
     <div className="save-tpl">
@@ -4181,7 +4174,95 @@ function VisualGallery() {
   )
 }
 
-function CastLibraryView({
+// World Kit subsections — the visual-reference planning model. Cast is one of
+// them; nothing here implies a fixed "1 character + 1 environment" recipe.
+const WORLD_KIT_SCOPES = [
+  'Episode only',
+  'Share to show / subtemplate',
+  'Share to format template',
+] as const
+
+type WorldKitSection = {
+  id: string
+  name: string
+  desc: string
+  scope: string
+  cast?: boolean
+  items?: string[]
+}
+
+const WORLD_KIT_SECTIONS: WorldKitSection[] = [
+  { id: 'style', name: 'Style Anchor', desc: 'The locked look every reference inherits.', scope: 'Share to format template', items: ['Wojak · GPT-image', 'Flat cel shading', '16:9 frame · no on-image text'] },
+  { id: 'cast', name: 'Cast', desc: 'Characters who appear. Manifest: cast.txt.', scope: 'Share to show / subtemplate', cast: true },
+  { id: 'env', name: 'Environments', desc: 'Locations and backdrops.', scope: 'Share to show / subtemplate', items: ['Hooded-desk home office', 'Whiteboard wall', 'Night-city skyline'] },
+  { id: 'props', name: 'Props / Objects', desc: 'Recurring objects and held items.', scope: 'Episode only', items: ['"OUCH!" mug', 'Job-tracker board', 'Mechanical keyboard'] },
+  { id: 'docs', name: 'Documents / Screens', desc: 'On-screen UI, documents, and charts.', scope: 'Episode only', items: ['shot-list.json table', 'session.json core_message', 'Terminal log'] },
+  { id: 'motion', name: 'Motion / Camera References', desc: 'Camera moves and motion cues.', scope: 'Share to format template', items: ['Slow push-in', 'Static medium', 'Whip-pan to reaction'] },
+  { id: 'beat', name: 'Beat-Specific References', desc: 'One-off refs scoped to a single beat.', scope: 'Episode only', items: ['B1 — "THE SYMPTOM" title card', 'C14 — four thought-bubble inserts'] },
+]
+
+function WorldKitPanel({
+  castData,
+  onManage,
+  compact = false,
+}: {
+  castData: (typeof castByShow)['spoolcast dev log']
+  onManage?: () => void
+  compact?: boolean
+}) {
+  const [scopes, setScopes] = useState<Record<string, string>>(() =>
+    Object.fromEntries(WORLD_KIT_SECTIONS.map((s) => [s.id, s.scope])),
+  )
+  return (
+    <div className="wk-panel">
+      <div className="wk-note">
+        <span>
+          Source of truth: <code>working/world-kit.md</code> · Cast manifest: <code>cast.txt</code>
+        </span>
+        <span className="wk-flex">Each beat pulls whatever references it needs — there's no fixed recipe.</span>
+      </div>
+      <div className="wk-grid">
+        {WORLD_KIT_SECTIONS.map((sec) => (
+          <div className={`wk-card ${sec.cast ? 'wk-card-wide' : ''}`} key={sec.id}>
+            <div className="wk-card-head">
+              <div className="wk-card-meta">
+                <h3>{sec.name}</h3>
+                <p>{sec.desc}</p>
+              </div>
+              <label className="wk-scope">
+                <span>Reuse</span>
+                <select
+                  value={scopes[sec.id]}
+                  onChange={(e) => setScopes((p) => ({ ...p, [sec.id]: e.target.value }))}
+                >
+                  {WORLD_KIT_SCOPES.map((o) => (
+                    <option key={o} value={o}>{o}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {sec.cast ? (
+              <>
+                <CastGrid castData={castData} compact={compact} />
+                {onManage ? (
+                  <button className="wk-manage" onClick={onManage}>Manage cast →</button>
+                ) : null}
+              </>
+            ) : (
+              <div className="wk-items">
+                {sec.items?.map((it) => (
+                  <span className="wk-item" key={it}>{it}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function WorldKitView({
   castData,
   showName,
 }: {
@@ -4196,15 +4277,15 @@ function CastLibraryView({
         <div className="cast-head">
           <button className="back-btn" onClick={() => navigate(`/p/${params.id ?? 'dev-log-06'}`)}>←</button>
           <div>
-            <div className="eyebrow">Cast library · {showName}</div>
+            <div className="eyebrow">World Kit · {showName}</div>
             <div className="title-row">
-              <h1>{castData.chars.length} recurring characters</h1>
-              <button>+ New</button>
+              <h1>Visual references for this episode</h1>
+              <button>+ New reference</button>
             </div>
-            <p>Reusable across every episode of this show. Style library: {castData.style}.</p>
+            <p>Style, cast, environments, props, screens, motion, and beat-specific refs — each with its own reuse scope. Style library: {castData.style}.</p>
           </div>
         </div>
-        <CastGrid castData={castData} />
+        <WorldKitPanel castData={castData} />
       </div>
     </section>
   )
