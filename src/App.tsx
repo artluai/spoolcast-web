@@ -432,7 +432,7 @@ function SpoolcastApp() {
   const navigate = useNavigate()
   const location = useLocation()
   const route = location.pathname
-  const initialStandalone = route === '/p/new' || route === '/p/new/cast'
+  const initialStandalone = route === '/p/new' || route === '/p/new/world-kit'
   const [setupMode, setSetupMode] = useState<SetupMode>(initialStandalone ? 'standalone' : 'series')
   const [showName, setShowName] = useState(initialStandalone ? 'standalone' : 'spoolcast dev log')
   const [steps, setSteps] = useState(() => buildStepsFromContract(initialStandalone))
@@ -482,7 +482,7 @@ function SpoolcastApp() {
   }, [])
 
   const isWorkflow = route.startsWith('/p/')
-  const isCast = route.endsWith('/cast')
+  const isWorldKit = route.endsWith('/world-kit')
   const blankProject = setupMode === 'standalone'
   const castData =
     castByShow[showName as keyof typeof castByShow] ?? castByShow['spoolcast dev log']
@@ -496,7 +496,7 @@ function SpoolcastApp() {
 
   // header floats (no bg) at the top of the workflow + picker, becomes a solid
   // bar once you scroll
-  const floatable = (isWorkflow && !isCast) || route === '/projects' || route === '/library'
+  const floatable = (isWorkflow && !isWorldKit) || route === '/projects' || route === '/library'
   useEffect(() => {
     document.body.classList.toggle('header-float', floatable && !headerScrolled)
     return () => document.body.classList.remove('header-float')
@@ -576,14 +576,14 @@ function SpoolcastApp() {
       setupMode={setupMode}
       showName={showName}
       isWorkflow={isWorkflow}
-      isCast={isCast}
+      isWorldKit={isWorldKit}
       autopilot={autopilot}
       onLogo={() => {
         restoreDemo()
         navigate('/projects')
       }}
       onBack={() => {
-        if (isCast) navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}`)
+        if (isWorldKit) navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}`)
         else {
           restoreDemo()
           navigate('/projects')
@@ -603,7 +603,7 @@ function SpoolcastApp() {
           setConfirmAuto(true)
         }
       }}
-      onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/cast`)}
+      onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/world-kit`)}
       onNew={() => {
         restoreDemo()
         navigate('/projects')
@@ -690,7 +690,7 @@ function SpoolcastApp() {
                 castData={castData}
                 blankProject={blankProject}
                 autopilot={autopilot}
-                onOpenCast={() => navigate(`/p/dev-log-06/cast`)}
+                onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
                 onToast={setToast}
                 onAdvance={(id) =>
                   setSteps((prev) =>
@@ -709,7 +709,7 @@ function SpoolcastApp() {
             element={<LibraryView onScrolled={setHeaderScrolled} />}
           />
           <Route
-            path="/p/:id/cast"
+            path="/p/:id/world-kit"
             element={<WorldKitView castData={castData} showName={showName} />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -731,7 +731,7 @@ function SpoolcastApp() {
           }}
         />
       ) : null}
-      {isWorkflow && !isCast ? (
+      {isWorkflow && !isWorldKit ? (
         <ChatWidget
           state={chatState}
           tab={chatTab}
@@ -783,7 +783,7 @@ function Header({
   setupMode,
   showName,
   isWorkflow,
-  isCast,
+  isWorldKit,
   autopilot,
   onLogo,
   onBack,
@@ -797,7 +797,7 @@ function Header({
   setupMode: SetupMode
   showName: string
   isWorkflow: boolean
-  isCast: boolean
+  isWorldKit: boolean
   autopilot: boolean
   onLogo: () => void
   onBack: () => void
@@ -843,7 +843,7 @@ function Header({
         </button>
         <span className="crumb-secondary">Projects</span>
         <span className="sep">/</span>
-        {isCast ? (
+        {isWorldKit ? (
           <>
             <span className="crumb-secondary">{showName}</span>
             <span className="sep">/</span>
@@ -879,7 +879,7 @@ function Header({
             <span className="pulse" />
             auto-saved
           </div>
-          {!isCast ? (
+          {!isWorldKit ? (
             <button
               className={`autopilot ${autopilot ? 'on' : ''}`}
               type="button"
@@ -890,7 +890,7 @@ function Header({
               <span className="ap-state">{autopilot ? 'on' : 'off'}</span>
             </button>
           ) : null}
-          <button className={`btn-soft ${isCast ? 'active' : ''}`} onClick={onCast}>
+          <button className={`btn-soft ${isWorldKit ? 'active' : ''}`} onClick={onCast}>
             World Kit
           </button>
           <button
@@ -4176,11 +4176,8 @@ function VisualGallery() {
 
 // World Kit subsections — the visual-reference planning model. Cast is one of
 // them; nothing here implies a fixed "1 character + 1 environment" recipe.
-const WORLD_KIT_SCOPES = [
-  'Episode only',
-  'Share to show / subtemplate',
-  'Share to format template',
-] as const
+// Share scope is kept to single words so the control stays tiny.
+const WORLD_KIT_SCOPES = ['Episode', 'Show', 'Template'] as const
 
 type WorldKitSection = {
   id: string
@@ -4188,17 +4185,21 @@ type WorldKitSection = {
   desc: string
   scope: string
   cast?: boolean
+  locked?: boolean
+  image?: string
+  caption?: string
   items?: string[]
 }
 
 const WORLD_KIT_SECTIONS: WorldKitSection[] = [
-  { id: 'style', name: 'Style Anchor', desc: 'The locked look every reference inherits.', scope: 'Share to format template', items: ['Wojak · GPT-image', 'Flat cel shading', '16:9 frame · no on-image text'] },
-  { id: 'cast', name: 'Cast', desc: 'Characters who appear. Manifest: cast.txt.', scope: 'Share to show / subtemplate', cast: true },
-  { id: 'env', name: 'Environments', desc: 'Locations and backdrops.', scope: 'Share to show / subtemplate', items: ['Hooded-desk home office', 'Whiteboard wall', 'Night-city skyline'] },
-  { id: 'props', name: 'Props / Objects', desc: 'Recurring objects and held items.', scope: 'Episode only', items: ['"OUCH!" mug', 'Job-tracker board', 'Mechanical keyboard'] },
-  { id: 'docs', name: 'Documents / Screens', desc: 'On-screen UI, documents, and charts.', scope: 'Episode only', items: ['shot-list.json table', 'session.json core_message', 'Terminal log'] },
-  { id: 'motion', name: 'Motion / Camera References', desc: 'Camera moves and motion cues.', scope: 'Share to format template', items: ['Slow push-in', 'Static medium', 'Whip-pan to reaction'] },
-  { id: 'beat', name: 'Beat-Specific References', desc: 'One-off refs scoped to a single beat.', scope: 'Episode only', items: ['B1 — "THE SYMPTOM" title card', 'C14 — four thought-bubble inserts'] },
+  // Style Anchor is owned by Project setup (Step 01) — shown here read-only.
+  { id: 'style', name: 'Style Anchor', desc: 'Set in Project setup — locked here.', scope: 'Template', locked: true, image: asset('styles/wojak-comic/references/chad.png'), caption: 'Wojak comic' },
+  { id: 'cast', name: 'Cast', desc: 'Characters who appear. Manifest: cast.txt.', scope: 'Show', cast: true },
+  { id: 'env', name: 'Environments', desc: 'Locations and backdrops.', scope: 'Show', items: ['Hooded-desk home office', 'Whiteboard wall', 'Night-city skyline'] },
+  { id: 'props', name: 'Props / Objects', desc: 'Recurring objects and held items.', scope: 'Episode', items: ['"OUCH!" mug', 'Job-tracker board', 'Mechanical keyboard'] },
+  { id: 'docs', name: 'Documents / Screens', desc: 'On-screen UI, documents, and charts.', scope: 'Episode', items: ['shot-list.json table', 'session.json core_message', 'Terminal log'] },
+  { id: 'motion', name: 'Motion / Camera References', desc: 'Camera moves and motion cues.', scope: 'Template', items: ['Slow push-in', 'Static medium', 'Whip-pan to reaction'] },
+  { id: 'beat', name: 'Beat-Specific References', desc: 'One-off refs scoped to a single beat.', scope: 'Episode', items: ['B1 — "THE SYMPTOM" title card', 'C14 — four thought-bubble inserts'] },
 ]
 
 function WorldKitPanel({
@@ -4223,25 +4224,38 @@ function WorldKitPanel({
       </div>
       <div className="wk-grid">
         {WORLD_KIT_SECTIONS.map((sec) => (
-          <div className={`wk-card ${sec.cast ? 'wk-card-wide' : ''}`} key={sec.id}>
+          <div className={`wk-card ${sec.locked ? 'wk-card-locked' : ''}`} key={sec.id}>
             <div className="wk-card-head">
               <div className="wk-card-meta">
                 <h3>{sec.name}</h3>
                 <p>{sec.desc}</p>
               </div>
-              <label className="wk-scope">
-                <span>Reuse</span>
-                <select
-                  value={scopes[sec.id]}
-                  onChange={(e) => setScopes((p) => ({ ...p, [sec.id]: e.target.value }))}
-                >
-                  {WORLD_KIT_SCOPES.map((o) => (
-                    <option key={o} value={o}>{o}</option>
-                  ))}
-                </select>
-              </label>
+              {sec.locked ? (
+                <span className="wk-locked-tag">Step 01</span>
+              ) : (
+                <label className="wk-scope" title="Where this reference can be reused">
+                  <span>Share</span>
+                  <select
+                    value={scopes[sec.id]}
+                    onChange={(e) => setScopes((p) => ({ ...p, [sec.id]: e.target.value }))}
+                  >
+                    {WORLD_KIT_SCOPES.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
-            {sec.cast ? (
+            {sec.locked ? (
+              sec.image ? (
+                <div className="wk-style">
+                  <img src={sec.image} alt="" />
+                  <span>{sec.caption}</span>
+                </div>
+              ) : (
+                <div className="wk-empty">No style reference set</div>
+              )
+            ) : sec.cast ? (
               <>
                 <CastGrid castData={castData} compact={compact} />
                 {onManage ? (
