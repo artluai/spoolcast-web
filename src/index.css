@@ -490,9 +490,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .wk-scope span { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .wk-scope select { background: var(--bg-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 11px; cursor: pointer; }
 .wk-locked-tag { flex: none; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); background: var(--bg-3); border-radius: 6px; padding: 5px 9px; }
-.wk-style { display: flex; align-items: center; gap: 12px; }
-.wk-style img { width: 60px; height: 60px; border-radius: 10px; object-fit: cover; }
-.wk-style span { font-size: 12.5px; color: var(--ink-2); }
+.wk-style { display: flex; align-items: center; gap: 16px; }
+.wk-style img { width: 240px; aspect-ratio: 4 / 3; height: auto; object-fit: cover; border-radius: 12px; flex: none; }
+.wk-style span { font-size: 13px; color: var(--ink-2); }
+@media (max-width: 760px) { .wk-style { flex-direction: column; align-items: flex-start; gap: 10px; } .wk-style img { width: 100%; } }
 .wk-empty { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
 .wk-items { display: flex; flex-wrap: wrap; gap: 7px; }
 .wk-item { font-size: 11.5px; color: var(--ink-2); background: var(--bg-3); border-radius: 7px; padding: 6px 10px; }
