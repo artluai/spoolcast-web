@@ -4,6 +4,7 @@
   "session_root": "../spoolcast-content/sessions/{session_id}",
   "source_of_truth": [
     "session.json",
+    "working/world-kit.md",
     "shot-list/shot-list.json"
   ],
   "context_gate_schema_version": 1,
@@ -70,7 +71,32 @@
         "<session_root>/working/structure.md"
       ],
       "downstream_checks": [
-        "planned: structure receipt is current before screenplay_plan"
+        "planned: structure receipt is current before world_kit"
+      ]
+    },
+    {
+      "id": "world_kit_context",
+      "stage": "world_kit",
+      "applies_to_actions": ["build_world_kit"],
+      "purpose": "Force approved structure, style reference, source inventory, and series rules before choosing visual references.",
+      "required_sources": [
+        "rules.md",
+        "PIPELINE.md",
+        "VISUALS.md",
+        "<session_root>/session.json",
+        "<session_root>/working/source-analysis.md",
+        "<session_root>/working/asset-inventory.md",
+        "<session_root>/working/structure.md",
+        "<session_root>/working/.rule-gates/structure_context.json",
+        "../spoolcast-content/styles/<style>/style.json",
+        "../spoolcast-content/styles/<style>/references/*",
+        "../spoolcast-content/series/<series>/rules.md when selected"
+      ],
+      "receipt_required_for_outputs": [
+        "<session_root>/working/world-kit.md"
+      ],
+      "downstream_checks": [
+        "planned: World Kit receipt is current before screenplay and shot-list authoring"
       ]
     },
     {
@@ -85,6 +111,7 @@
         "<session_root>/working/source-analysis.md",
         "<session_root>/working/asset-inventory.md",
         "<session_root>/working/structure.md",
+        "<session_root>/working/world-kit.md",
         "../spoolcast-content/series/<series>/rules.md when selected",
       "../spoolcast-content/series/<series>/NARRATION_VOICE.md when selected"
     ],
@@ -104,8 +131,8 @@
     },
     {
       "id": "shot_list_context",
-      "stage": "production_units",
-      "applies_to_actions": ["build_shot_list", "validate_shot_list"],
+      "stage": "shot_list_json",
+      "applies_to_actions": ["draft_visual_pacing", "build_shot_list", "validate_shot_list"],
       "purpose": "Force screenplay, style, reference, visual/story rules, and devlog b-roll/meme/reaction rules before AI authors or validates the shot-list.",
       "required_sources": [
         "rules.md",
@@ -116,6 +143,7 @@
         "<session_root>/working/narration-voice-review-v2.json",
         "<session_root>/working/source-analysis.md",
         "<session_root>/working/asset-inventory.md",
+        "<session_root>/working/world-kit.md",
         "../spoolcast-content/styles/<style>/style.json",
         "../spoolcast-content/styles/<style>/references/*",
         "../spoolcast-content/series/<series>/rules.md when selected",
@@ -131,7 +159,7 @@
         "validate_shot_list.py rejects Spoolcast devlogs with no b-roll/meme/reaction asset plan unless the user explicitly approved a skip",
         "validate_shot_list.py rejects unresolved meme/reaction/broll candidates before preview data can be built",
         "validate_shot_list.py rejects generated devlog chunks without compact frame-design receipts before KIE generation",
-        "validate_shot_list.py blocks opening visual support that rechunks approved audio instead of using root visual_timeline base_visual events",
+        "validate_shot_list.py blocks opening visual support that rechunks approved audio instead of using root base_layer events",
         "validate_shot_list.py rejects wojak-gpt2 Chad prompts that do not use the locked meme-chad reference/register, that turn Chad into a prop workaround, or that overuse Chad as a running background device",
         "validate_shot_list.py rejects referenced characters without live image URLs before KIE generation",
         "validation sentinel records context receipt sources and source hashes"
@@ -180,10 +208,12 @@
     {"from": "format_setup", "to": "input_intake"},
     {"from": "input_intake", "to": "story_lock"},
     {"from": "story_lock", "to": "structure"},
-    {"from": "structure", "to": "screenplay_plan"},
+    {"from": "structure", "to": "world_kit"},
+    {"from": "world_kit", "to": "screenplay_plan"},
     {"from": "screenplay_plan", "to": "narration_voice_check"},
-    {"from": "narration_voice_check", "to": "production_units"},
-    {"from": "production_units", "to": "narration_audio"},
+    {"from": "narration_voice_check", "to": "visual_pacing"},
+    {"from": "visual_pacing", "to": "shot_list_json"},
+    {"from": "shot_list_json", "to": "narration_audio"},
     {"from": "narration_audio", "to": "visual_assets"},
     {"from": "visual_assets", "to": "asset_audit"},
     {"from": "asset_audit", "to": "preprocess_review_render"},
@@ -234,11 +264,21 @@
       "actions": ["draft_structure"]
     },
     {
+      "id": "world_kit",
+      "label": "World Kit",
+      "owner": "ai",
+      "requires_approval": true,
+      "inputs": ["working/structure.md", "session.json:style"],
+      "outputs": ["working/world-kit.md"],
+      "gate": "World Kit exists with style anchor and any needed cast, environments, props/objects, documents/screens, motion/camera references, and beat-specific refs scoped for reuse",
+      "actions": ["build_world_kit"]
+    },
+    {
       "id": "screenplay_plan",
       "label": "Screenplay / Production Plan",
       "owner": "ai",
       "requires_approval": false,
-      "inputs": ["working/structure.md", "working/.rule-gates/screenplay.json"],
+      "inputs": ["working/structure.md", "working/world-kit.md", "working/.rule-gates/screenplay.json"],
       "outputs": ["working/listener-draft.md", "working/screenplay-v3.md", "working/screenplay-audit.json"],
       "gate": "continuous listener draft exists before chunking; audit_screenplay.py exits with no blocking flags",
       "actions": ["gate_screenplay", "draft_screenplay", "audit_screenplay"]
@@ -254,13 +294,23 @@
       "actions": ["audit_narration_voice_v2"]
     },
     {
-      "id": "production_units",
-      "label": "Shot-List / Chunking",
+      "id": "visual_pacing",
+      "label": "Visual Pacing",
+      "owner": "ai",
+      "requires_approval": true,
+      "inputs": ["working/screenplay-v3.md", "working/world-kit.md", "working/narration-voice-review-v2.json"],
+      "outputs": ["working/visual-pacing-plan.md"],
+      "gate": "visual pacing plan exists with per-chunk visual moment decisions, distinct image count, cut rationale, and b-roll/meme/reaction candidates; see VISUAL_PACING.md",
+      "actions": ["draft_visual_pacing"]
+    },
+    {
+      "id": "shot_list_json",
+      "label": "Shot-List JSON",
       "owner": "ai+script",
       "requires_approval": true,
-      "inputs": ["working/screenplay-v3.md", "working/narration-voice-review-v2.json"],
+      "inputs": ["working/screenplay-v3.md", "working/narration-voice-review-v2.json", "working/world-kit.md", "working/visual-pacing-plan.md"],
       "outputs": ["shot-list/shot-list.json", "shot-list/shot-list.xlsx", "working/shot-list-validation.passed.json"],
-      "gate": "validate_shot_list.py exits 0 after shot-list style/reference gate",
+      "gate": "validate_shot_list.py exits 0 after shot-list style/reference gate; shot-list JSON matches visual pacing plan",
       "actions": ["gate_shot_list", "build_shot_list", "validate_shot_list", "export_xlsx"]
     },
     {
@@ -320,8 +370,8 @@
       "requires_approval": true,
       "inputs": ["working/widescreen-approval.json", "working/render-audit.passed"],
       "outputs": ["source/generated-assets/scenes/mobile/*-mobile.png", "renders/mobile/*.mp4", "working/mobile-publish-audit.json"],
-      "gate": "mobile crop/assets/publish audits pass",
-      "actions": ["smart_crop_mobile", "audit_mobile_crops", "mobile_pad_to_fit", "replay_mobile", "mobile_export", "mobile_thumbnails", "audit_mobile_publish"]
+      "gate": "mobile crop/assets/publish audits pass; mobile render uses the approved Remotion timing data and mobile_image_path assets, not ffmpeg-only timeline reconstruction or stale chunk images",
+      "actions": ["smart_crop_mobile", "audit_mobile_crops", "mobile_pad_to_fit", "replay_mobile", "render_mobile_remotion", "mobile_thumbnails", "audit_mobile_publish"]
     },
     {
       "id": "publish",
