@@ -7,7 +7,7 @@ import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
 import { StepContent } from './StepContent'
 
 export function WorkflowView({
-  steps,
+  steps: rawSteps,
   gates,
   seed,
   selected,
@@ -66,7 +66,21 @@ export function WorkflowView({
     }
   }, [])
   const fullView = full || isMobile
-  
+
+  // IN-PROGRESS RULE: a step the user has started typing in (dirty) shows as
+  // "In progress" instead of "Pending" — derived here, in one place, from the
+  // store's per-step dirty flags. Engine-confirmed statuses (done) win.
+  const dirtyStepsMap = useWorkflowStore((s) => s.dirtySteps)
+  const steps = useMemo(
+    () =>
+      rawSteps.map((step) =>
+        step.status === 'later' && dirtyStepsMap[step.sourceId ?? step.id]
+          ? { ...step, status: 'work' as const }
+          : step,
+      ),
+    [rawSteps, dirtyStepsMap],
+  )
+
   // DIRTY STATE TRACKING: per-step dirty flags live in the zustand workflow store,
   // keyed by the engine node id (activeStep.sourceId) the approval logic compares against.
   const s1 = useWorkflowStore((s) => s.s1)
@@ -557,12 +571,12 @@ export function WorkflowView({
             <h2>{activeStep.name}</h2>
             {apiLoading ? (
               <span className="status-pill work">Checking engine...</span>
-            ) : apiStatus?.data?.status ? (
-              <span className={`status-pill ${apiStatus.data.status === 'blocked' ? 'work' : 'done'}`}>
-                {apiStatus.data.status.toUpperCase()}
-              </span>
             ) : (
-              <span className={`status-pill ${activeStep.status}`}>{statusLabel}</span>
+              // PER-STEP STATUS: always show this step's own status (statusLabel already
+              // turns "In progress" while the user is editing), never the session-wide one.
+              <span className={`status-pill ${statusLabel === 'Complete' ? 'done' : statusLabel === 'In progress' || statusLabel === 'Blocked' ? 'work' : activeStep.status}`}>
+                {statusLabel.toUpperCase()}
+              </span>
             )}
             {activeStep.status === 'done' ? <button>View output</button> : null}
             {activeStep.progress ? (
@@ -602,52 +616,48 @@ export function WorkflowView({
               formatDirty={formatDirty}
             />
             
-            {/* SCOPED BLOCKER RULE: Show engine blocker card ONLY if the current step is at or beyond the blocked step. 
-                Includes explicit step labeling so the user knows exactly where the problem is.
-                UX RULE: Hide the blocker while the user is actively typing/working on the step. */}
+            {/* SCOPED BLOCKER RULE: The single blocker card. It NEVER shows on the step the user is
+                supposed to be working on (the first incomplete step) — there, the disabled
+                Save/Approve button is the signal. It ONLY shows on steps strictly AFTER the first
+                incomplete step, telling the user which prior step must be completed first. */}
             {!apiLoading && (() => {
               const nodes = apiStatus?.data?.workflow_graph?.nodes || []
               const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
-              
+
               if (!firstIncomplete) return null
 
-              // Only show the red blocker card if the engine explicitly marks the stage as "blocked"
-              if (firstIncomplete.status !== 'blocked') {
-                return null
-              }
-
-              // UX FIX: If the user is actively working on this step (dirty is true), get out of their way.
-              // The machine still knows it's blocked, but we don't scream "BLOCKED" while they are typing.
-              if (dirty) {
-                return null
-              }
-
-              // SCOPE CHECK: Only show this blocker if we are currently viewing this step or a downstream step.
+              // SCOPE CHECK: only steps strictly downstream of the first incomplete step get the card.
               const blockedStepIndex = nodes.findIndex((n: any) => n.id === firstIncomplete.id)
               const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
-              
-              if (currentStepIndex < blockedStepIndex) {
-                return null // We are on an earlier, already-completed step. Don't show downstream blockers here.
+
+              if (currentStepIndex <= blockedStepIndex) {
+                return null // On or before the step being worked on — never show the blocker here.
               }
 
-              const missingArtifacts = firstIncomplete.artifacts?.filter((a: any) => a.required && !a.exists) || []
-              
               const stepNumber = String(blockedStepIndex + 1).padStart(2, '0')
-              const blockersToShow = missingArtifacts.length > 0 
+              // Detail lines only when the engine explicitly marks the stage blocked (missing artifacts etc.)
+              const missingArtifacts = firstIncomplete.status === 'blocked'
+                ? (firstIncomplete.artifacts?.filter((a: any) => a.required && !a.exists) || [])
+                : []
+              const blockersToShow = missingArtifacts.length > 0
                 ? missingArtifacts.map((a: any) => `Missing required: ${a.pattern}`)
-                : (apiStatus.data.blockers?.slice(0, 1) || ['Unknown blocker'])
+                : firstIncomplete.status === 'blocked'
+                  ? (apiStatus.data.blockers?.slice(0, 1) || ['Unknown blocker'])
+                  : []
 
               return (
                 <div className="card" style={{ marginTop: 24, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
-                  <div className="ch" style={{ marginBottom: 12 }}>
-                    <h3 style={{ color: 'var(--red)' }}>Step {stepNumber} ({firstIncomplete.label}) is blocked</h3>
-                    <span className="label">Fix this first before proceeding</span>
+                  <div className="ch" style={{ marginBottom: blockersToShow.length > 0 ? 12 : 0 }}>
+                    <h3 style={{ color: 'var(--red)' }}>Step {stepNumber} ({firstIncomplete.label}) must be completed first</h3>
+                    <span className="label">Finish that step before this one unlocks</span>
                   </div>
-                  <ul style={{ margin: 0, paddingLeft: 20, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
-                    {blockersToShow.map((blocker: string, idx: number) => (
-                      <li key={idx}>{blocker}</li>
-                    ))}
-                  </ul>
+                  {blockersToShow.length > 0 && (
+                    <ul style={{ margin: 0, paddingLeft: 20, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+                      {blockersToShow.map((blocker: string, idx: number) => (
+                        <li key={idx}>{blocker}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )
             })()}
@@ -691,7 +701,8 @@ export function WorkflowView({
                 const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !dirty)
                 
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
-                const canAutopilot = !autopilot && !isBeyondBlocked && goalIndex >= 0 && selectableIndex >= goalIndex && activeStep.id !== 'post'
+                // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
+                const canAutopilot = !autopilot && goalIndex >= 0 && selectableIndex >= goalIndex && activeStep.id !== 'post'
                 const isLast = selectableIndex >= orderedSteps.length - 1
 
                 // 2. UI RENDERER: Dumb display based on calculator outputs
@@ -703,10 +714,10 @@ export function WorkflowView({
                         <div className="foot-choice">
                           <button
                             className="autopilot-btn"
-                            disabled={!stepComplete}
-                            title={!stepComplete ? (!priorsComplete ? 'Complete the earlier steps first' : 'Make a choice for this step first') : undefined}
+                            disabled={!stepComplete || isBeyondBlocked}
+                            title={isBeyondBlocked ? 'Complete the earlier steps first' : !stepComplete ? (!priorsComplete ? 'Complete the earlier steps first' : 'Make a choice for this step first') : undefined}
                             onClick={() => {
-                              if (!stepComplete) return
+                              if (!stepComplete || isBeyondBlocked) return
                               onAutopilot()
                             }}
                           >
@@ -727,15 +738,6 @@ export function WorkflowView({
                         </div>
                       )}
 
-                      {/* Blocker card ONLY for steps beyond the blocked step */}
-                      {isBeyondBlocked && firstIncomplete && (
-                        <div className="card" style={{ marginTop: 12, marginBottom: 12, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
-                          <div className="ch" style={{ marginBottom: 8 }}>
-                            <h3 style={{ color: 'var(--red)', fontSize: 14, margin: 0 }}>Step {String(blockedStepIndex + 1).padStart(2, '0')} ({firstIncomplete.label}) must be completed first</h3>
-                          </div>
-                        </div>
-                      )}
-                      
                       {isAlreadyApproved && dirty && (
                         <div className="card" style={{ borderColor: 'var(--amber)', background: 'rgba(224,163,56,.08)', marginTop: 12, marginBottom: 12 }}>
                           <span style={{ color: 'var(--amber)', fontSize: 13 }}>

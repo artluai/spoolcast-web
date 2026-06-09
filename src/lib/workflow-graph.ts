@@ -78,6 +78,18 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
     return match?.exists === true
   }
 
+  // HUMAN GATE RULE: a human gate is approved when the engine has either
+  // (a) an explicit approval recorded in working/approvals.json for that stage, or
+  // (b) marked the stage itself as passed/approved in the workflow graph.
+  // This is one rule for ALL human gates — no per-gate hardcoding.
+  const engineNodes = apiStatusData?.workflow_graph?.nodes || []
+  const humanGateState = (stageId: string): Gate['state'] => {
+    const explicitlyApproved = approvalsList.some((a: any) => a.stage_id === stageId)
+    const node = engineNodes.find((n: any) => n.id === stageId)
+    const stagePassed = node?.status === 'passed' || node?.status === 'approved'
+    return explicitlyApproved || stagePassed ? 'approved' : 'awaiting'
+  }
+
   // STRICT RULE: All gates default to pending/awaiting. They ONLY turn green if the engine explicitly confirms it.
 
   return [
@@ -87,8 +99,8 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
       step: 'setup',
       pos: 'after',
       label: 'Approve project setup',
-      // STRICT: Human gates require explicit approval, not just file existence.
-      state: approvalsList.some((a: any) => a.stage_id === 'format_setup') ? 'approved' : 'awaiting',
+      // STRICT: Human gates require explicit approval or engine-confirmed stage pass.
+      state: humanGateState('format_setup'),
       source: 'session.json',
     },
     {
@@ -97,7 +109,7 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
       step: 'goal',
       pos: 'after',
       label: 'Approve the core message / angle',
-      state: approvalsList.some((a: any) => a.stage_id === 'story_lock') ? 'approved' : 'awaiting',
+      state: humanGateState('story_lock'),
       source: 'session.json:core_message',
     },
     {
@@ -160,7 +172,7 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
       step: 'post',
       pos: 'before',
       label: 'Per-platform publish approval',
-      state: 'awaiting',
+      state: humanGateState('publish'),
       source: 'working/approvals.json',
     },
   ]
