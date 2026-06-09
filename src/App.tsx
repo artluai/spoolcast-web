@@ -11,260 +11,36 @@ import {
 import { Pill } from './components/common/Pill'
 import explainerContract from './contracts/explainer.json'
 import newsContract from './contracts/news-anime-bot.json'
-
-type Status = 'done' | 'work' | 'later'
-type GateType = 'human' | 'token' | 'audit'
-type GateState =
-  | 'approved'
-  | 'awaiting'
-  | 'consumed'
-  | 'not-yet'
-  | 'passed'
-  | 'failed'
-  | 'pending'
-
-type StageContract = {
-  id: string
-  label: string
-  requires_approval?: boolean
-  gate?: string
-}
-
-type Step = {
-  id: string
-  sourceId?: string
-  num: string
-  name: string
-  blurb: string
-  status: Status
-  x: number
-  y: number
-  progress?: { done: number; total: number }
-  optional?: boolean
-  blockedBy?: string
-}
-
-type Gate = {
-  id: string
-  type: GateType
-  step: string
-  pos: 'before' | 'after'
-  label: string
-  state: GateState
-  source: string
-}
-
-type SetupMode = 'series' | 'standalone'
-type ChatState = 'closed' | 'floating' | 'pinned'
-type ChatTab = 'chat' | 'history'
-
-// assets are mirrored from the spoolcast-content repo into public/content/ so
-// they ship with the build (the old /@fs/… path only worked in the dev server)
-const asset = (path: string) => `/content/${path}`
-
-const styleThumbs = [
-  {
-    id: 'wojak',
-    name: 'Wojak',
-    img: asset('styles/wojak-comic/references/chad.png'),
-    narratorOnly: true,
-  },
-  {
-    id: 'anime',
-    name: 'Anime',
-    img: asset('shows/news-anime-bot/characters/musk.png'),
-    narratorOnly: true,
-  },
-  { id: 'realistic', name: 'Photoreal' },
-  { id: 'handdrawn', name: 'Hand-drawn', narratorOnly: true },
-  { id: 'mocku', name: 'Mockumentary' },
-  { id: 'custom', name: 'Make my own', badge: 'CUSTOM' },
-]
-
-const castByShow = {
-  'spoolcast dev log': {
-    style: 'wojak-gpt2',
-    chars: [
-      {
-        ref: 'builder',
-        name: 'The builder',
-        role: 'Hooded mid-wojak narrator. First-person voice. Doomer-leaning early, neutral late.',
-        img: asset(
-          'sessions/spoolcast-dev-log-06/source/generated-assets/scenes/C29.png',
-        ),
-        episodes: 6,
-        lastUsed: 'Dev Log #06',
-      },
-      {
-        ref: 'ai-figure',
-        name: 'The AI',
-        role: 'Cracked-face wojak with AI ink-stamp forehead. Cream hoodie. Flat-affect throughout.',
-        img: asset('styles/wojak-gpt2/references/ai-figure.png'),
-        episodes: 6,
-        lastUsed: 'Dev Log #06',
-      },
-      {
-        ref: 'meme-chad',
-        name: 'Chad',
-        role: 'Locked meme-chad reference. Confident-mode contrast beats, thumbs-up reactions, and when the script wants a chad-mode insert.',
-        img: asset('styles/wojak-comic/references/chad.png'),
-        episodes: 3,
-        lastUsed: 'Dev Log #09',
-      },
-    ],
-  },
-  'faux7-news': {
-    style: 'anime / nano-banana',
-    chars: [
-      {
-        ref: 'musk',
-        name: 'Musk',
-        role: 'Recurring foil. Edgy reaction shots.',
-        img: asset('shows/news-anime-bot/characters/musk.png'),
-        episodes: 4,
-        lastUsed: '2026-05-14',
-      },
-      {
-        ref: 'altman',
-        name: 'Altman',
-        role: 'Lab-coat tech founder register.',
-        img: asset('shows/news-anime-bot/characters/altman.png'),
-        episodes: 5,
-        lastUsed: '2026-05-14',
-      },
-      {
-        ref: 'huang',
-        name: 'Huang',
-        role: 'Leather-jacket platform-vendor register.',
-        img: asset('shows/news-anime-bot/characters/huang.png'),
-        episodes: 3,
-        lastUsed: '2026-05-09',
-      },
-    ],
-  },
-}
-
-const shots = [
-  ['C01', 'Cold open', 'Hero shot of editor with terminal output overlay.', '0:06', 'ok'],
-  ['C02', 'Problem framing', 'Diagram of the three bottlenecks.', '0:08', 'ok'],
-  ['C03', 'Issue 1', 'Waveform expanding sequentially across timeline.', '0:07', 'ok'],
-  ['C04', 'Issue 2', 'Loading bar repeatedly resetting to zero.', '0:06', 'ok'],
-  ['C05', 'Issue 3', 'Network graph with a glowing hallucinated edge.', '0:07', 'ok'],
-  ['C06', 'Solution intro', 'Schematic of the contract structure.', '0:09', 'ok'],
-  ['C07', 'Implementation', 'Stage diagram with status indicators lighting up.', '0:08', 'ok'],
-  ['C08', 'Render path', 'Two parallel tracks merging into a render node.', '0:07', 'ok'],
-  ['C09', 'Audit demo', 'Magnifier scanning a JSON audit report.', '0:08', 'ok'],
-  ['C10', 'Approval gates', 'Approval ledger with timestamps and notes.', '0:07', 'ok'],
-  ['C11', 'Mobile branch', 'Branching node tree, mobile path dashed.', '0:07', 'ok'],
-  ['C12', 'Job runner', 'Terminal showing tailed log lines.', '0:06', 'ok'],
-  ['C13', 'UI direction', 'Node graph with disabled-action affordances.', '0:08', 'ok'],
-  ['C14', 'Cast handling', 'Character grid with selection state.', '0:08', 'ok'],
-  ['C15', 'Build path', 'Remotion timeline composing layers.', '0:07', 'work'],
-  ['C16', 'Audit sentinel', 'File-system tree with a green sentinel marker.', '0:06', 'pend'],
-  ['C17', 'Caption pass', 'SRT file scrolling alongside thumbnail preview.', '0:06', 'pend'],
-  ['C18', 'Mobile crop', '16:9 frame collapsing into 9:16 with subject lock.', '0:08', 'pend'],
-  ['C19', 'Cost summary', 'Cost breakdown chart.', '0:07', 'pend'],
-  ['C20', 'Lessons learned', 'Highlighted action list with disabled siblings.', '0:08', 'pend'],
-  ['C21', "What's next", 'Sketch of the upcoming UI mockup.', '0:07', 'pend'],
-  ['C22', 'Outro', 'End card with channel handle.', '0:09', 'pend'],
-] as const
-
-const sceneFiles = [
-  'C1.png',
-  'C2.png',
-  'C10.png',
-  'C11.png',
-  'C12.png',
-  'C13.png',
-  'C15.png',
-  'C16.png',
-  'C20.png',
-  'C21.png',
-  'C22.png',
-  'C26.png',
-  'C30.png',
-  'C31.png',
-]
-
-const outline: [string, string, string][] = []
-
-const stepAlias: Record<string, { id: string; name: string; blurb: string }> = {
-  format_setup: {
-    id: 'setup',
-    name: 'Project setup',
-    blurb: 'Project name, visual style, and budget.',
-  },
-  input_intake: {
-    id: 'idea',
-    name: 'Video idea',
-    blurb: 'What the video is about, plus notes and references.',
-  },
-  story_lock: {
-    id: 'goal',
-    name: 'Core message',
-    blurb: 'Lock the single-sentence angle before scripting.',
-  },
-  structure: {
-    id: 'plan',
-    name: 'Structure outline',
-    blurb: 'High-level structural arc.',
-  },
-  world_kit: {
-    id: 'worldkit',
-    name: 'World Kit',
-    blurb: 'Plan the visual references — style anchor, cast, environments, props, and beat-specific refs.',
-  },
-  screenplay_plan: {
-    id: 'script',
-    name: 'Screenplay',
-    blurb: 'First narration draft.',
-  },
-  visual_pacing: {
-    id: 'pacing',
-    name: 'Visual pacing',
-    blurb: 'Plan per-chunk visual moments, image count, and b-roll/meme/reaction candidates.',
-  },
-  shot_list_json: {
-    id: 'shots',
-    name: 'Storyboard',
-    blurb: 'Visual breakdown of the script.',
-  },
-  narration_audio: {
-    id: 'voice',
-    name: 'Narration audio',
-    blurb: 'Synthesized narration from the script.',
-  },
-  visual_assets: {
-    id: 'pics',
-    name: 'Visual generation',
-    blurb: 'AI-rendered visuals for each shot.',
-  },
-  asset_audit: {
-    id: 'check',
-    name: 'Visual review',
-    blurb: 'Quality audit of generated visuals.',
-  },
-  preprocess_review_render: {
-    id: 'build',
-    name: 'Final render',
-    blurb: 'Compiled master video.',
-  },
-  package_widescreen: {
-    id: 'caps',
-    name: 'Captions and cover',
-    blurb: 'Subtitle file and thumbnail image.',
-  },
-  mobile_variant: {
-    id: 'phone',
-    name: 'Vertical cut',
-    blurb: 'Mobile-format version.',
-  },
-  publish: {
-    id: 'post',
-    name: 'Video output',
-    blurb: 'Final video — export the file or publish to a platform.',
-  },
-}
+import type {
+  ChatState,
+  ChatTab,
+  Gate,
+  OnboardSeed,
+  SetupMode,
+  StageContract,
+  Status,
+  Step,
+} from './types'
+import { asset } from './lib/assets'
+import { castByShow, outline, sceneFiles, shots, stepAlias, styleThumbs } from './data/cast'
+import { PICKER_TEMPLATES, RECENTS, type PickerTemplate } from './data/picker'
+import {
+  ASSET_TYPES,
+  LIB_CHARS,
+  LIB_IMAGES,
+  LIB_PROMPTS,
+  LIB_TABS,
+  LIB_TEMPLATES,
+  LIB_VIDEOS,
+  SHOWS,
+  type FlowAsset,
+  type LibEpisode,
+  type LibShow,
+  type TypeKey,
+} from './data/library'
+import { ONB_EYEBROWS, ONB_LOADER_STEPS, ONB_VID_UGC, ONB_VID_WIDE } from './data/onboarding'
+import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from './data/template-rules'
+import { FORMAT_TEMPLATE_NAMES, WORLD_KIT_SCOPES, WORLD_KIT_SECTIONS } from './data/worldkit'
 
 function buildStepsFromContract(blank = false, apiStatusData?: any): Step[] {
   const stages = (explainerContract as { stages: StageContract[] }).stages
@@ -1105,141 +881,6 @@ function SignupModal({
   )
 }
 
-type PickerTemplate = {
-  id: string
-  cls: string
-  poster: string
-  video: string
-  badge: string
-  series: boolean
-  seriesBtn?: string
-  duration: string
-  name: string
-  sig: string
-  useLabel: string
-  sub: { name: string; meta: string; cta: string } | null
-  seed: OnboardSeed
-}
-
-const PICKER_TEMPLATES: PickerTemplate[] = [
-  {
-    id: 'dev',
-    cls: 't-dev',
-    poster: asset('sessions/spoolcast-dev-log-06/source/generated-assets/thumbnails/thumb-v2-three-answers.png'),
-    video: asset('sessions/spoolcast-dev-log-06/renders/spoolcast-dev-log-06-1.0x.mp4'),
-    badge: '1 series · weekly',
-    series: true,
-    duration: '4:08',
-    name: 'Spoolcast dev-log',
-    sig: '16:9 · narrated (TTS Schedar) · anime soft · animated stills',
-    useLabel: 'Use base template →',
-    sub: {
-      name: 'Dev Log — weekly',
-      meta: '10 episodes · cold-open intro & style locked · last: Dev Log #10',
-      cta: 'Start episode #11 →',
-    },
-    seed: {
-      s1: { narrator: 'yes', style: 'anime', output: '169', length: 248, projectId: 'spoolcast-dev-log-11', editing: '' },
-      ideaBrief: '',
-      goal: { text: '', mode: '' },
-    },
-  },
-  {
-    id: 'news',
-    cls: 't-news',
-    poster: '/news-poster.jpg',
-    video: asset('shows/news-anime-bot/sessions/2026-05-28/episode/out/episode-15.mp4'),
-    badge: '1 series · daily',
-    series: true,
-    seriesBtn: 'Series',
-    duration: '1:21',
-    name: 'Anime news',
-    sig: '9:16 · narrated + cast · Bleach key-art anime · generated clips',
-    useLabel: 'Use base →',
-    sub: {
-      name: 'faux7-news — daily',
-      meta: '15 episodes · 11-character cast · last: Episode 15 (May 28)',
-      cta: 'Start episode #16 →',
-    },
-    seed: {
-      s1: { narrator: 'yes', style: 'anime', output: '916', length: 90, projectId: 'faux7-news-16', editing: '' },
-      ideaBrief: '',
-      goal: { text: '', mode: '' },
-    },
-  },
-  {
-    id: 'ugc',
-    cls: 't-ugc',
-    poster: '/ugc-poster.jpg',
-    video: '/ugc-sample.mp4',
-    badge: 'base template',
-    series: false,
-    duration: '0:56',
-    name: 'UGC explainer',
-    sig: '9:16 · in-video audio · photoreal · generated clips',
-    useLabel: 'Use this template →',
-    sub: null,
-    seed: {
-      s1: { narrator: 'no', style: 'realistic', output: '916', length: 56, projectId: 'ugc-explainer', editing: '' },
-      ideaBrief: '',
-      goal: { text: '', mode: '' },
-    },
-  },
-  {
-    id: 'expl',
-    cls: 't-explainer',
-    poster: '/explainer-poster.jpg',
-    video: asset('sessions/spoolcast-explainer/source/external-assets/pilot-proof-22s.mp4'),
-    badge: 'base template',
-    series: false,
-    duration: '0:22',
-    name: 'Stick-figure explainer',
-    sig: '16:9 · narrated · hand-drawn doodles (C&H / XKCD) · animated stills',
-    useLabel: 'Use this template →',
-    sub: null,
-    seed: {
-      s1: { narrator: 'yes', style: 'handdrawn', output: '169', length: 240, projectId: 'stick-figure-explainer', editing: '' },
-      ideaBrief: '',
-      goal: { text: '', mode: '' },
-    },
-  },
-]
-
-// In-progress projects — shown FIRST on /projects so returning users resume fast.
-const RECENTS: {
-  title: string
-  sub: string
-  step: string
-  pct: number
-  kind: 'series' | 'standalone'
-  thumb: string
-}[] = [
-  {
-    title: 'Dev Log #06',
-    sub: 'spoolcast dev-log · 2h ago',
-    step: '09 / 14',
-    pct: 58,
-    kind: 'series',
-    thumb: asset('sessions/spoolcast-dev-log-06/source/generated-assets/thumbnails/thumb-v2-three-answers.png'),
-  },
-  {
-    title: 'News drop · May 14',
-    sub: 'faux7-news · yesterday',
-    step: '13 / 14',
-    pct: 92,
-    kind: 'series',
-    thumb: '/news-poster.jpg',
-  },
-  {
-    title: 'Founder mode, explained',
-    sub: 'standalone · 3d ago',
-    step: '04 / 14',
-    pct: 23,
-    kind: 'standalone',
-    thumb: '/explainer-poster.jpg',
-  },
-]
-
 // /projects — pick a format template (or subtemplate/series), start blank, or resume.
 // Choosing a template imports its format settings (s1) into the workflow.
 function PickerView({
@@ -1340,150 +981,6 @@ function PickerView({
     </section>
   )
 }
-
-// Global asset library (/library), mapped to the real spoolcast-content layout:
-// Show (series/ or shows/) → Episode (a session folder) → assets (renders/,
-// generated-assets/scenes, frames shots, working/ screenplay, characters).
-type LibClip = { id: string; name: string; meta: string }
-type LibImage = { id: string; name: string; meta: string; thumb: string }
-type LibText = { id: string; name: string; meta: string; body?: string }
-type LibChar = { id: string; name: string; meta: string; thumb: string }
-type LibEpisode = {
-  id: string
-  name: string
-  folder: string
-  thumb: string
-  render: string
-  aspect: string
-  clips: LibClip[]
-  images: LibImage[]
-  prompts: LibText[]
-  charIds: string[]
-}
-type LibShow = {
-  id: string
-  name: string
-  template: string
-  thumb: string
-  voice: LibText
-  characters: LibChar[]
-  episodes: LibEpisode[]
-}
-
-const DEVLOG_THUMB = asset('sessions/spoolcast-dev-log-06/source/generated-assets/thumbnails/thumb-v2-three-answers.png')
-const devScene = (n: string) => asset(`sessions/spoolcast-dev-log-06/source/generated-assets/scenes/${n}.png`)
-
-const SHOWS: LibShow[] = [
-  {
-    id: 'devlog', name: 'spoolcast dev-log', template: 'Wojak · GPT-image', thumb: DEVLOG_THUMB,
-    voice: { id: 'v-puck', name: 'Google TTS · Puck', meta: 'series narration voice' },
-    characters: [
-      { id: 'builder', name: 'The builder', meta: 'Narrator · hooded wojak', thumb: devScene('C29') },
-      { id: 'ai', name: 'The AI', meta: 'Cracked-face wojak', thumb: asset('styles/wojak-gpt2/references/ai-figure.png') },
-      { id: 'chad', name: 'Chad', meta: 'Confident-mode insert', thumb: asset('styles/wojak-comic/references/chad.png') },
-    ],
-    episodes: [
-      {
-        id: 'dl06', name: 'Dev Log #06', folder: 'sessions/spoolcast-dev-log-06', thumb: DEVLOG_THUMB, render: '4:08 · 16:9 · MP4', aspect: '16 / 9',
-        clips: [
-          { id: 'dl06-b1', name: 'B1 · cold open', meta: 'shot' },
-          { id: 'dl06-c1', name: 'C1 · context', meta: 'shot' },
-          { id: 'dl06-c14', name: 'C14 · cast handling', meta: 'shot' },
-        ],
-        images: [
-          { id: 'dl06-b1i', name: 'Scene B1', meta: '1K · PNG', thumb: devScene('B1') },
-          { id: 'dl06-c1i', name: 'Scene C1', meta: '1K · PNG', thumb: devScene('C1') },
-          { id: 'dl06-c14i', name: 'Scene C14', meta: '1K · PNG', thumb: devScene('C14') },
-          { id: 'dl06-c29i', name: 'Scene C29', meta: '1K · PNG', thumb: devScene('C29') },
-        ],
-        prompts: [
-          { id: 'dl06-p1', name: 'Screenplay v2', meta: 'working/', body: 'Spine: practical, dry, slightly deadpan. This pass tightens the wrong-diagnoses act so each one is "partly right, structurally incomplete" rather than wrong. Cold open keeps every line plain English, no jargon. Spoolcast context intro stays under a minute. Ending holds ≥2.5s of silence (settle-and-hold).' },
-          { id: 'dl06-p2', name: 'Shot list · 44 shots', meta: 'shot-list.json', body: 'spoolcast-dev-log-06 — devlog about AI lying about progress and the tracker that fixed it. Audience: AI-curious non-coders. Cold-open shape: Hook → Objection → Context. Receipt visuals consumer-recognizable (phone tracker / checklist / sticky note), NOT terminal screenshots. 16:9 · 30fps · 44 shots.' },
-          { id: 'dl06-p3', name: 'Core message', meta: 'session.json', body: 'AI agents handling long-running work need a mechanical job tracker as the source of truth. Without one, the agent guesses from logs, partial files, and stale shells — and the guesses sound confident even when they\'re wrong.' },
-        ],
-        charIds: ['builder', 'ai', 'chad'],
-      },
-      {
-        id: 'dl05', name: 'Dev Log #05', folder: 'sessions/spoolcast-dev-log-05', thumb: asset('styles/wojak-comic/references/chad.png'), render: '3:52 · 16:9 · MP4', aspect: '16 / 9',
-        clips: [
-          { id: 'dl05-b1', name: 'B1 · cold open', meta: 'shot' },
-          { id: 'dl05-c1', name: 'C1 · the pivot', meta: 'shot' },
-        ],
-        images: [{ id: 'dl05-c1i', name: 'Scene C1', meta: '1K · PNG', thumb: devScene('C1') }],
-        prompts: [{ id: 'dl05-p1', name: 'Screenplay v1', meta: 'working/', body: 'First-pass draft — the original "wrong diagnosis 1/2/3/4" cadence, later reframed in v2.' }],
-        charIds: ['builder', 'chad'],
-      },
-    ],
-  },
-  {
-    id: 'news', name: 'faux7-news', template: 'Anime · Bleach key-art', thumb: '/news-poster.jpg',
-    voice: { id: 'v-anchor', name: 'ElevenLabs · anchor', meta: 'show narration voice' },
-    characters: [
-      { id: 'musk', name: 'Musk', meta: 'Recurring foil', thumb: asset('shows/news-anime-bot/characters/musk.png') },
-      { id: 'altman', name: 'Altman', meta: 'Tech-founder register', thumb: asset('shows/news-anime-bot/characters/altman.png') },
-      { id: 'huang', name: 'Huang', meta: 'Platform-vendor register', thumb: asset('shows/news-anime-bot/characters/huang.png') },
-    ],
-    episodes: [
-      {
-        id: 'n0528', name: 'Episode · May 28', folder: 'shows/news-anime-bot/sessions/2026-05-28', thumb: '/news-poster.jpg', render: '1:21 · 9:16 · MP4', aspect: '9 / 16',
-        clips: [
-          { id: 'n-c1', name: 'Headline', meta: 'clip' },
-          { id: 'n-c2', name: 'Reaction · Musk', meta: 'clip' },
-          { id: 'n-c3', name: 'Sign-off', meta: 'clip' },
-        ],
-        images: [{ id: 'n-i1', name: 'Key-art · Altman', meta: 'PNG', thumb: asset('shows/news-anime-bot/characters/altman.png') }],
-        prompts: [
-          { id: 'n-p1', name: 'script.md', meta: 'episode/', body: 'faux7 satire desk read — headline, reaction cutaways, sign-off. 9:16, burned-in captions, Bleach key-art look.' },
-          { id: 'n-p2', name: 'cast.txt', meta: 'session', body: 'Episode cast — Musk (recurring foil), Altman, Huang. Pinned character references so faces stay consistent.' },
-        ],
-        charIds: ['musk', 'altman', 'huang'],
-      },
-    ],
-  },
-  {
-    id: 'standalone', name: 'standalone', template: 'Mixed · one-offs', thumb: '/explainer-poster.jpg',
-    voice: { id: 'v-neutral', name: 'Google TTS · neutral', meta: 'per-video voice' },
-    characters: [],
-    episodes: [
-      {
-        id: 'expl', name: 'Stick-figure explainer', folder: 'sessions/spoolcast-explainer', thumb: '/explainer-poster.jpg', render: '0:22 · 16:9 · MP4', aspect: '16 / 9',
-        clips: [{ id: 'e-c1', name: 'Hook', meta: 'shot' }],
-        images: [{ id: 'e-i1', name: 'Doodle frame', meta: 'PNG', thumb: '/explainer-poster.jpg' }],
-        prompts: [{ id: 'e-p1', name: 'Screenplay', meta: 'working/', body: 'Stick-figure explainer — hand-drawn doodle style, single hook + explainer beat, 16:9.' }],
-        charIds: [],
-      },
-    ],
-  },
-]
-
-// distinct style templates (column 1 of the flow)
-const LIB_TEMPLATES = [...new Map(SHOWS.map((s) => [s.template, s.thumb])).entries()].map(([name, thumb]) => ({ name, thumb }))
-
-// derived flat lists for the by-type browser
-const LIB_VIDEOS = SHOWS.flatMap((sh) =>
-  sh.episodes.map((ep) => ({ id: ep.id, name: ep.name, project: sh.name, meta: ep.render, thumb: ep.thumb, clips: ep.clips })),
-)
-const LIB_IMAGES = SHOWS.flatMap((sh) => sh.episodes.flatMap((ep) => ep.images.map((i) => ({ ...i, project: sh.name }))))
-const LIB_CHARS = SHOWS.flatMap((sh) => sh.characters.map((c) => ({ ...c, project: sh.name })))
-const LIB_VOICES = SHOWS.map((sh) => ({ id: sh.voice.id, name: sh.voice.name, project: sh.name, meta: sh.voice.meta }))
-const LIB_PROMPTS = SHOWS.flatMap((sh) => sh.episodes.flatMap((ep) => ep.prompts.map((t) => ({ ...t, project: sh.name }))))
-
-type TypeKey = 'videos' | 'images' | 'characters' | 'voices' | 'prompts'
-const LIB_TABS: { key: TypeKey; label: string; count: number }[] = [
-  { key: 'videos', label: 'Videos', count: LIB_VIDEOS.length },
-  { key: 'images', label: 'Images', count: LIB_IMAGES.length },
-  { key: 'characters', label: 'Characters', count: LIB_CHARS.length },
-  { key: 'voices', label: 'Voices', count: LIB_VOICES.length },
-  { key: 'prompts', label: 'Prompts', count: LIB_PROMPTS.length },
-]
-
-// each project's assets split across two generation sessions (mock)
-// Flow view — lineage columns: Template → Project → Session → Assets, with
-// connectors between the selected node in each column. Unselected branches dim.
-type FlowAsset = { id: string; type: string; name: string; sub: string; thumb?: string; ar?: string; body?: string }
-const ASSET_TYPES = ['Video', 'Image', 'Character', 'Prompt']
-
-// rough grid span by aspect → landscape wide, portrait tall, ~equal area (Tetris)
 
 // what an asset is + how it was generated (grounded in the real session layout)
 function assetDetail(a: FlowAsset, ep: LibEpisode, show: LibShow): { prompt?: string; rows: [string, string][] } {
@@ -2014,41 +1511,6 @@ function ResumeRow({
     </button>
   )
 }
-
-export type OnboardSeed = {
-  s1: {
-    narrator: string
-    style: string
-    output: string
-    length: number
-    projectId: string
-    editing: string
-  }
-  ideaBrief: string
-  goal: { text: string; mode: '' | 'ai' | 'skip' }
-}
-
-const ONB_VID_WIDE = asset(
-  'sessions/spoolcast-dev-log-06/renders/spoolcast-dev-log-06-1.0x.mp4',
-)
-const ONB_VID_UGC = '/ugc-sample.mp4'
-const ONB_LOADER_STEPS = [
-  'Locking format & visual style',
-  'Saving the idea & references',
-  'Determining the core message',
-  'Drafting the structure outline',
-  'Opening your workflow at step 04',
-]
-const ONB_EYEBROWS = [
-  '01 · Canvas',
-  '02 · Audio',
-  '03 · Visuals',
-  '04 · Length',
-  '05 · Style',
-  '06 · Identity',
-  '07 · Idea',
-  '08 · Core message',
-]
 
 function FogVideoTile({
   selected,
@@ -3590,47 +3052,6 @@ function SaveTemplateContent({
   )
 }
 
-// The basic carry-over checklist handles the obvious reusable setup (format,
-// style, structure, cast). This section captures the soft, creative show
-// behavior that only exists as prompt fragments / patterns in the first video:
-// overlays, title cards, caption + humor style, recurring memes, motifs, etc.
-// AI suggestions are NEVER saved automatically — a rule is only saved once the
-// user keeps it (or adds one by hand).
-type TplRule = {
-  id: number
-  category: string
-  text: string
-  source?: string
-}
-
-const SCAN_SUGGESTIONS: Omit<TplRule, 'id'>[] = [
-  {
-    category: 'Ending style',
-    text: 'End each video with a notification-style teaser card for the next episode.',
-    source: 'Source: Storyboard · Beat 12',
-  },
-  {
-    category: 'Humor',
-    text: 'Dry, deadpan narration — undercut every serious claim with a one-line aside.',
-    source: 'Source: Screenplay · Scene 4',
-  },
-  {
-    category: 'Overlay',
-    text: 'Keep the persistent “DEV LOG” title bar in the top-left for the full runtime.',
-    source: 'Source: Final output · 0:00–end',
-  },
-  {
-    category: 'Caption style',
-    text: 'Burned-in captions, two lines max, bottom-center, bold weight.',
-    source: 'Source: Captions and cover',
-  },
-  {
-    category: 'Meme',
-    text: 'Reuse the “contract-locked” running gag whenever the engine is mentioned.',
-    source: 'Source: Screenplay · Scene 7',
-  },
-]
-
 function AdditionalTemplateRules() {
   const idRef = useRef(0)
   const nextId = () => (idRef.current += 1)
@@ -3834,16 +3255,6 @@ function AdditionalTemplateRules() {
 // element On/Off, or Locked); a standalone shows an empty state pointing at
 // the save-as-template step. Toggling an inherited element warns first, since
 // it overrides the template for this one episode.
-type TplComponent = { key: string; label: string; locked: boolean; on: boolean }
-
-const INHERITED_COMPONENTS: TplComponent[] = [
-  { key: 'titlebar', label: 'Title bar', locked: false, on: true },
-  { key: 'lowerthird', label: 'Lower-third', locked: false, on: true },
-  { key: 'endcard', label: 'End card', locked: false, on: true },
-  { key: 'watermark', label: 'Watermark', locked: false, on: true },
-  { key: 'caption', label: 'Caption style', locked: true, on: true },
-  { key: 'introoutro', label: 'Intro / outro pattern', locked: false, on: true },
-]
 
 function TemplateComponents({
   inherited,
@@ -5242,45 +4653,6 @@ function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
     </div>
   )
 }
-
-// World Kit "Share" scope hierarchy, narrow -> wide:
-//   Episode  <  Show / subtemplate  <  Format template
-// IMPORTANT: "Format template" is the whole-series PIPELINE format (e.g. the
-// Remotion illustration format, or the Anime news bot format) — NOT the image
-// / visual style (that's "Style Anchor", owned by Step 01). Keyed by show.
-const FORMAT_TEMPLATE_NAMES: Record<string, string> = {
-  'spoolcast dev log': 'Remotion illustration',
-  'faux7-news': 'Anime news bot',
-}
-
-// World Kit subsections — the visual-reference planning model. Cast is one of
-// them; nothing here implies a fixed "1 character + 1 environment" recipe.
-// Share scope values stay single words; the dropdown labels name the actual
-// show / template so it's clear where a reference gets shared to.
-const WORLD_KIT_SCOPES = ['Episode', 'Show', 'Template'] as const
-
-type WorldKitSection = {
-  id: string
-  name: string
-  desc: string
-  scope: string
-  cast?: boolean
-  locked?: boolean
-  image?: string
-  caption?: string
-  items?: string[]
-}
-
-const WORLD_KIT_SECTIONS: WorldKitSection[] = [
-  // Style Anchor is owned by Project setup (Step 01) — shown here read-only.
-  { id: 'style', name: 'Style Anchor', desc: 'Set in Project setup — locked here.', scope: 'Template', locked: true, image: asset('styles/wojak-comic/references/chad.png'), caption: 'Wojak comic' },
-  { id: 'cast', name: 'Cast', desc: 'Characters who appear. Manifest: cast.txt.', scope: 'Show', cast: true },
-  { id: 'env', name: 'Environments', desc: 'Locations and backdrops.', scope: 'Show', items: ['Hooded-desk home office', 'Whiteboard wall', 'Night-city skyline'] },
-  { id: 'props', name: 'Props / Objects', desc: 'Recurring objects and held items.', scope: 'Episode', items: ['"OUCH!" mug', 'Job-tracker board', 'Mechanical keyboard'] },
-  { id: 'docs', name: 'Documents / Screens', desc: 'On-screen UI, documents, and charts.', scope: 'Episode', items: ['shot-list.json table', 'session.json core_message', 'Terminal log'] },
-  { id: 'motion', name: 'Motion / Camera References', desc: 'Camera moves and motion cues.', scope: 'Template', items: ['Slow push-in', 'Static medium', 'Whip-pan to reaction'] },
-  { id: 'beat', name: 'Beat-Specific References', desc: 'One-off refs scoped to a single beat.', scope: 'Episode', items: ['B1 — "THE SYMPTOM" title card', 'C14 — four thought-bubble inserts'] },
-]
 
 function WorldKitPanel({
   castData,
