@@ -9,7 +9,7 @@ import {
   useParams,
 } from 'react-router-dom'
 import { Pill } from './components/common/Pill'
-import illContract from './contracts/illustration-chunk-remotion.json'
+import explainerContract from './contracts/explainer.json'
 import newsContract from './contracts/news-anime-bot.json'
 
 type Status = 'done' | 'work' | 'later'
@@ -186,20 +186,7 @@ const sceneFiles = [
   'C31.png',
 ]
 
-const outline = [
-  ['01', 'Cold open', 'Hook with the central tension.'],
-  ['02', 'Problem framing', 'Name the three constraints.'],
-  ['03', 'Issue 1', 'Audio rendering serialized everything.'],
-  ['04', 'Issue 2', 'Render pass had no caching.'],
-  ['05', 'Issue 3', 'API surface drifted from the contract.'],
-  ['06', 'Solution intro', 'Contract-locked workflow node.'],
-  ['07', 'Implementation', 'Each stage names a status word.'],
-  ['08', 'Render path', 'Parallel audio + visual generation.'],
-  ['09', 'Audit demo', 'A failed gate bounces flow back.'],
-  ['10', 'Approval gates', 'Human sign-off on three steps.'],
-  ['11', 'Mobile branch', 'Vertical cut is optional.'],
-  ['12', 'Outro', 'Close with the contract excerpt.'],
-] as const
+const outline: [string, string, string][] = []
 
 const stepAlias: Record<string, { id: string; name: string; blurb: string }> = {
   format_setup: {
@@ -279,8 +266,8 @@ const stepAlias: Record<string, { id: string; name: string; blurb: string }> = {
   },
 }
 
-function buildStepsFromContract(blank = false): Step[] {
-  const stages = (illContract as { stages: StageContract[] }).stages
+function buildStepsFromContract(blank = false, apiStatusData?: any): Step[] {
+  const stages = (explainerContract as { stages: StageContract[] }).stages
   // Node positions, in final main-line order. World Kit (05) sits between
   // Structure outline (04) and Screenplay (06); Visual pacing (07) sits between
   // Screenplay and Storyboard (08). Both are real contract stages now, so the
@@ -303,8 +290,7 @@ function buildStepsFromContract(blank = false): Step[] {
     [2772, 210], // 14 Vertical cut (optional branch off Captions)
     [3030, 110], // 15 Video output
   ]
-  // Demo state: everything through narration audio reads done, visuals in progress.
-  const doneIds = ['setup', 'idea', 'goal', 'plan', 'worldkit', 'script', 'pacing', 'shots', 'voice']
+  
   return stages
     .filter((stage) => stage.id !== 'narration_voice_check')
     .map((stage, index) => {
@@ -313,13 +299,19 @@ function buildStepsFromContract(blank = false): Step[] {
         name: stage.label,
         blurb: stage.gate ?? '',
       }
-      const status: Status = blank
-        ? 'later'
-        : doneIds.includes(alias.id)
-          ? 'done'
-          : alias.id === 'pics'
-            ? 'work'
-            : 'later'
+      
+      // Derive status from live API data if available, otherwise default to 'later'
+      let status: Status = 'later'
+      if (apiStatusData?.workflow_graph?.nodes) {
+        const apiNode = apiStatusData.workflow_graph.nodes.find((n: any) => n.id === stage.id)
+        if (apiNode) {
+          if (apiNode.status === 'passed' || apiNode.status === 'approved') status = 'done'
+          else if (apiNode.status === 'running') status = 'work'
+          else status = 'later'
+        }
+      } else if (blank) {
+        status = 'later'
+      }
       const progress = alias.id === 'pics' && !blank ? { done: 14, total: 22 } : undefined
       const [x, y] = positions[index]
       return {
@@ -337,7 +329,21 @@ function buildStepsFromContract(blank = false): Step[] {
     })
 }
 
-function buildGates(blank = false): Gate[] {
+function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[] {
+  const artifacts = apiStatusData?.artifacts || []
+  
+  // DATA SHAPE ADAPTER: Engine returns nested { approvals: [...] }, but UI expects flat array.
+  const approvalsList = Array.isArray(apiStatusData?.approvals) 
+    ? apiStatusData.approvals 
+    : (apiStatusData?.approvals?.approvals || [])
+  
+  const isPassed = (pattern: string) => {
+    const match = artifacts.find((a: any) => a.pattern === pattern || a.path?.includes(pattern))
+    return match?.exists === true
+  }
+
+  // STRICT RULE: All gates default to pending/awaiting. They ONLY turn green if the engine explicitly confirms it.
+
   return [
     {
       id: 'g-setup',
@@ -345,8 +351,9 @@ function buildGates(blank = false): Gate[] {
       step: 'setup',
       pos: 'after',
       label: 'Approve project setup',
-      state: blank ? 'awaiting' : 'approved',
-      source: 'working/approvals.json',
+      // STRICT: Human gates require explicit approval, not just file existence.
+      state: approvalsList.some((a: any) => a.stage_id === 'format_setup') ? 'approved' : 'awaiting',
+      source: 'session.json',
     },
     {
       id: 'g-angle',
@@ -354,8 +361,8 @@ function buildGates(blank = false): Gate[] {
       step: 'goal',
       pos: 'after',
       label: 'Approve the core message / angle',
-      state: blank ? 'awaiting' : 'approved',
-      source: 'working/approvals.json',
+      state: approvalsList.some((a: any) => a.stage_id === 'story_lock') ? 'approved' : 'awaiting',
+      source: 'session.json:core_message',
     },
     {
       id: 'g-voice',
@@ -363,8 +370,8 @@ function buildGates(blank = false): Gate[] {
       step: 'script',
       pos: 'before',
       label: 'Narration voice rules force-fed',
-      state: blank ? 'not-yet' : 'consumed',
-      source: 'working/.rule-gates/voice-rules.json',
+      state: isPassed('working/narration-voice-review-v2.json') ? 'consumed' : 'not-yet',
+      source: 'working/narration-voice-review-v2.json',
     },
     {
       id: 'g-style',
@@ -372,7 +379,7 @@ function buildGates(blank = false): Gate[] {
       step: 'shots',
       pos: 'before',
       label: 'Style + character rules force-fed',
-      state: blank ? 'not-yet' : 'consumed',
+      state: isPassed('shot-list/shot-list.json') ? 'consumed' : 'not-yet',
       source: 'working/.rule-gates/style-rules.json',
     },
     {
@@ -381,7 +388,7 @@ function buildGates(blank = false): Gate[] {
       step: 'shots',
       pos: 'after',
       label: 'Shot-list + character-registry validation',
-      state: blank ? 'pending' : 'passed',
+      state: isPassed('working/shot-list-validation.passed.json') ? 'passed' : 'pending',
       source: 'validate_shot_list.py',
     },
     {
@@ -390,7 +397,7 @@ function buildGates(blank = false): Gate[] {
       step: 'voice',
       pos: 'after',
       label: 'Listener/script audits',
-      state: blank ? 'pending' : 'passed',
+      state: isPassed('working/narration-voice-review-v2.json') ? 'passed' : 'pending',
       source: 'working/narration-voice-review-v2.json',
     },
     {
@@ -399,7 +406,7 @@ function buildGates(blank = false): Gate[] {
       step: 'pics',
       pos: 'after',
       label: 'Scene audit',
-      state: blank ? 'pending' : 'failed',
+      state: isPassed('working/scene-audit.json') ? 'passed' : 'pending',
       source: 'working/scene-audit.json',
     },
     {
@@ -408,7 +415,7 @@ function buildGates(blank = false): Gate[] {
       step: 'build',
       pos: 'after',
       label: 'Render audit',
-      state: 'pending',
+      state: isPassed('working/render-audit.passed') ? 'passed' : 'pending',
       source: 'working/render-audit.passed',
     },
     {
@@ -438,9 +445,9 @@ function SpoolcastApp() {
   const initialStandalone = route === '/p/new' || route === '/p/new/world-kit'
   const [setupMode, setSetupMode] = useState<SetupMode>(initialStandalone ? 'standalone' : 'series')
   const [showName, setShowName] = useState(initialStandalone ? 'standalone' : 'spoolcast dev log')
-  const [steps, setSteps] = useState(() => buildStepsFromContract(initialStandalone))
-  const [gates, setGates] = useState(() => buildGates(initialStandalone))
-  const [selected, setSelected] = useState(initialStandalone ? 'setup' : 'pics')
+  const [steps, setSteps] = useState(() => buildStepsFromContract(initialStandalone, null))
+  const [gates, setGates] = useState(() => buildGates(initialStandalone, null))
+  const [selected, setSelected] = useState<string>('setup') // Will be updated by useEffect once API loads
   const [autopilot, setAutopilot] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [chatState, setChatState] = useState<ChatState>('closed')
@@ -461,6 +468,75 @@ function SpoolcastApp() {
   const [pendingFinish, setPendingFinish] = useState<{ seed: OnboardSeed; auto: boolean } | null>(
     null,
   )
+
+  // Live API State: Fetches real engine status to enforce gates
+  const [apiStatus, setApiStatus] = useState<any>(null)
+  const [apiLoading, setApiLoading] = useState(true)
+
+  // Fetch real status from local API on mount
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+        if (response.ok) {
+          const data = await response.json()
+          setApiStatus(data)
+          // Update steps and gates with live API data to remove fake mock statuses
+          setSteps(buildStepsFromContract(initialStandalone, data.data))
+          setGates(buildGates(initialStandalone, data.data))
+        }
+      } catch (error) {
+        console.error('Failed to fetch Spoolcast API status:', error)
+      } finally {
+        setApiLoading(false)
+      }
+    }
+    fetchStatus()
+  }, [initialStandalone])
+
+  // AUTO-NAVIGATION RULE: Only run ONCE on initial load to set the starting point.
+  // Prevents race conditions where manual navigation is overridden by background API updates.
+  const hasAutoNavigatedRef = useRef(false)
+  
+  useEffect(() => {
+    if (!apiLoading && apiStatus?.data?.workflow_graph?.nodes) {
+      if (hasAutoNavigatedRef.current) return // Skip if we've already auto-navigated once
+      
+      const nodes = apiStatus.data.workflow_graph.nodes
+      const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+      
+      // Map the contract stage id to our UI step id
+      const stepMap: Record<string, string> = {
+        'format_setup': 'setup',
+        'input_intake': 'idea',
+        'story_lock': 'goal',
+        'structure': 'plan',
+        'world_kit': 'worldkit',
+        'screenplay_plan': 'script',
+        'visual_pacing': 'pacing',
+        'shot_list_json': 'shots',
+        'narration_audio': 'voice',
+        'visual_assets': 'pics',
+        'asset_audit': 'check',
+        'preprocess_review_render': 'build',
+        'package_widescreen': 'caps',
+        'mobile_variant': 'phone',
+        'publish': 'post'
+      }
+      
+      if (firstIncomplete && stepMap[firstIncomplete.id]) {
+        setSelected(stepMap[firstIncomplete.id])
+        hasAutoNavigatedRef.current = true
+      } else if (nodes.length > 0) {
+        // If everything is done, go to the last step
+        const lastNode = nodes[nodes.length - 1]
+        if (stepMap[lastNode.id]) {
+          setSelected(stepMap[lastNode.id])
+          hasAutoNavigatedRef.current = true
+        }
+      }
+    }
+  }, [apiLoading, apiStatus])
 
   const markStepDone = useCallback(
     (id: string) =>
@@ -490,6 +566,7 @@ function SpoolcastApp() {
   const castData =
     castByShow[showName as keyof typeof castByShow] ?? castByShow['spoolcast dev log']
   const activeStep = steps.find((step) => step.id === selected) ?? steps[0]
+  const isBlocked = apiStatus?.data?.status === 'blocked'
 
   useEffect(() => {
     document.body.classList.toggle('profile-open', profileOpen)
@@ -688,6 +765,9 @@ function SpoolcastApp() {
                 selected={selected}
                 setSelected={setSelected}
                 activeStep={activeStep}
+                apiStatus={apiStatus}
+                apiLoading={apiLoading}
+                isBlocked={isBlocked}
                 setupMode={setupMode}
                 showName={showName}
                 castData={castData}
@@ -695,11 +775,50 @@ function SpoolcastApp() {
                 autopilot={autopilot}
                 onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
                 onToast={setToast}
-                onAdvance={(id) =>
-                  setSteps((prev) =>
-                    prev.map((step) => (step.id === id ? { ...step, status: 'done' } : step)),
-                  )
-                }
+                onAdvance={async (id: string) => {
+                  // REAL APPROVAL RULE: Actually tell the engine we are approving this stage.
+                  try {
+                    // id is the UI step id, we need to map it to the sourceId (contract stage id)
+                    const currentStep = steps.find((s: any) => s.id === id)
+                    const sourceId = currentStep?.sourceId || id
+                    
+                    const currentNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === sourceId)
+                    const needsApproval = currentNode?.requires_approval === true
+                    
+                    if (needsApproval && currentNode?.actions?.length > 0) {
+                      const actionToApprove = currentNode.actions[0]
+                      await fetch('http://localhost:8000/api/action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          session: 'spoolcast-dev-log-12',
+                          tenant: 'local',
+                          action: actionToApprove,
+                          approve: true,
+                          approval_note: 'User approved via UI'
+                        })
+                      })
+                    }
+                    
+                    // Update local state
+                    setSteps((prev) =>
+                      prev.map((step) => (step.id === id ? { ...step, status: 'done' } : step)),
+                    )
+                    setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
+                    
+                    // Force a status refresh so the UI immediately reflects the engine's new state (green gate, no warning)
+                    const res = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                    if (res.ok) {
+                      const apiData = await res.json()
+                      setApiStatus(apiData)
+                      setSteps(buildStepsFromContract(initialStandalone, apiData.data))
+                      setGates(buildGates(initialStandalone, apiData.data))
+                    }
+                  } catch (err) {
+                    console.error('Failed to approve stage:', err)
+                    setToast('Error approving stage.')
+                  }
+                }}
                 onScrolledChange={setHeaderScrolled}
                 onAutopilot={() => setConfirmAuto(true)}
                 runningId={autopilotActiveId}
@@ -2443,6 +2562,9 @@ function WorkflowView({
   selected,
   setSelected,
   activeStep,
+  apiStatus,
+  apiLoading,
+  isBlocked,
   setupMode,
   showName,
   castData,
@@ -2462,6 +2584,9 @@ function WorkflowView({
   selected: string
   setSelected: (id: string) => void
   activeStep: Step
+  apiStatus: any
+  apiLoading: boolean
+  isBlocked: boolean
   setupMode: SetupMode
   showName: string
   castData: (typeof castByShow)['spoolcast dev log']
@@ -2476,7 +2601,6 @@ function WorkflowView({
   origin: 'blank' | 'template' | 'series'
 }) {
   const [full, setFull] = useState(false)
-  // on phones the detail card is always full-screen (focused single-surface view)
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -2491,6 +2615,14 @@ function WorkflowView({
     }
   }, [])
   const fullView = full || isMobile
+  
+  // DIRTY STATE TRACKING: Define inside WorkflowView where it's actually used
+  const [isDirty, setIsDirty] = useState(false)
+  
+  useEffect(() => {
+    setIsDirty(false) // Reset dirty state when navigating to a new step
+  }, [selected])
+
   const [s1, setS1] = useState(
     () =>
       seed?.s1 ?? {
@@ -2503,19 +2635,26 @@ function WorkflowView({
       },
   )
   const [ideaBrief, setIdeaBrief] = useState(() =>
-    seed
-      ? seed.ideaBrief
-      : blankProject
-        ? ''
-        : 'A behind-the-scenes dev log about turning Spoolcast into a contract-locked video pipeline, with the UI as the next wrapper around the engine.',
+    seed ? seed.ideaBrief : '' // ZERO DUMMY DATA RULE: Always start blank if no seed
   )
   const [goal, setGoal] = useState<{ text: string; mode: '' | 'ai' | 'skip' }>(() =>
-    seed
-      ? seed.goal
-      : blankProject
-        ? { text: '', mode: '' }
-        : { text: 'The engine is stable enough to build a product wrapper around it.', mode: '' },
+    seed ? seed.goal : { text: '', mode: '' } // ZERO DUMMY DATA RULE: Always start blank if no seed
   )
+  
+  // DIRTY STATE TRACKING: Wrapped setters to flag the step as modified
+  const dirtySetIdeaBrief = (val: string) => {
+    setIsDirty(true)
+    setIdeaBrief(val)
+  }
+  const dirtySetGoal: React.Dispatch<React.SetStateAction<{ text: string; mode: '' | 'ai' | 'skip' }>> = (updater) => {
+    setIsDirty(true)
+    setGoal(updater)
+  }
+  const dirtySetS1: React.Dispatch<React.SetStateAction<typeof s1>> = (updater) => {
+    setIsDirty(true)
+    setS1(updater)
+  }
+  
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [cardBox, setCardBox] = useState<{ left: number; top: number; width: number } | null>(null)
   const [restLeft, setRestLeft] = useState<number | null>(null)
@@ -2553,12 +2692,32 @@ function WorkflowView({
 
   const orderedSteps = steps
   const selectableIndex = orderedSteps.findIndex((step) => step.id === selected)
-  const statusLabel =
-    activeStep.status === 'done'
-      ? 'Complete'
-      : activeStep.status === 'work'
-        ? 'In progress'
-        : 'Pending'
+  
+  // RULE 3: Robust "In Progress" State Rule
+  // EVENT-DRIVEN DIRTY STATE RULE: If the user has typed ANYTHING in the main fields of the current step, force "In progress".
+  const isCurrentlyEditing = 
+    ideaBrief.trim().length > 0 || 
+    goal.text.trim().length > 0 || 
+    (s1.narrator && s1.narrator.trim().length > 0) ||
+    (s1.style && s1.style.trim().length > 0)
+
+  const engineNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === activeStep.sourceId)
+  const engineStatus = engineNode?.status || 'not_started'
+  
+  // Also consider it "In progress" if this is the first incomplete step and it's just waiting to be worked on
+  const nodes = apiStatus?.data?.workflow_graph?.nodes || []
+  const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+  const isFirstIncompleteStep = activeStep.sourceId === firstIncomplete?.id
+
+  const statusLabel = 
+    isCurrentlyEditing ? 'In progress' :
+    engineStatus === 'passed' || engineStatus === 'approved' ? 'Complete' :
+    engineStatus === 'running' ? 'In progress' :
+    engineStatus === 'blocked' ? 'Blocked' :
+    isFirstIncompleteStep && (engineStatus === 'ready' || engineStatus === 'not_started') ? 'In progress' :
+    engineStatus === 'not_started' ? 'Not started' :
+    engineStatus === 'ready' ? 'Ready' :
+    'Pending'
   const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing'].includes(activeStep.id)
 
   const NODE_W = 172
@@ -2955,7 +3114,15 @@ function WorkflowView({
               {activeStep.optional ? ' · OPTIONAL' : ''}
             </span>
             <h2>{activeStep.name}</h2>
-            <span className={`status-pill ${activeStep.status}`}>{statusLabel}</span>
+            {apiLoading ? (
+              <span className="status-pill work">Checking engine...</span>
+            ) : apiStatus?.data?.status ? (
+              <span className={`status-pill ${apiStatus.data.status === 'blocked' ? 'work' : 'done'}`}>
+                {apiStatus.data.status.toUpperCase()}
+              </span>
+            ) : (
+              <span className={`status-pill ${activeStep.status}`}>{statusLabel}</span>
+            )}
             {activeStep.status === 'done' ? <button>View output</button> : null}
             {activeStep.progress ? (
               <>
@@ -2971,7 +3138,7 @@ function WorkflowView({
               ‹ Previous
             </button>
             <button
-              disabled={selectableIndex >= orderedSteps.length - 1}
+              disabled={selectableIndex >= orderedSteps.length - 1 || isBlocked}
               onClick={() => setSelected(orderedSteps[selectableIndex + 1].id)}
             >
               Next ›
@@ -2981,27 +3148,81 @@ function WorkflowView({
             </button>
           </div>
           <div className="detail-body">
+            {/* 1. Always show the normal step content first */}
             <StepContent
               step={activeStep}
               setupMode={setupMode}
               showName={showName}
               castData={castData}
               s1={s1}
-              setS1={setS1}
+              setS1={dirtySetS1}
               ideaBrief={ideaBrief}
-              setIdeaBrief={setIdeaBrief}
+              setIdeaBrief={dirtySetIdeaBrief}
               goal={goal}
-              setGoal={setGoal}
+              setGoal={dirtySetGoal}
               blankProject={blankProject}
               onOpenCast={onOpenCast}
               onToast={onToast}
               origin={origin}
               formatDirty={formatDirty}
             />
+            
+            {/* SCOPED BLOCKER RULE: Show engine blocker card ONLY if the current step is at or beyond the blocked step. 
+                Includes explicit step labeling so the user knows exactly where the problem is.
+                UX RULE: Hide the blocker while the user is actively typing/working on the step. */}
+            {!apiLoading && (() => {
+              const nodes = apiStatus?.data?.workflow_graph?.nodes || []
+              const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+              
+              if (!firstIncomplete) return null
+
+              // Only show the red blocker card if the engine explicitly marks the stage as "blocked"
+              if (firstIncomplete.status !== 'blocked') {
+                return null
+              }
+
+              // UX FIX: If the user is actively working on this step (isDirty is true), get out of their way.
+              // The machine still knows it's blocked, but we don't scream "BLOCKED" while they are typing.
+              if (isDirty) {
+                return null
+              }
+
+              // SCOPE CHECK: Only show this blocker if we are currently viewing this step or a downstream step.
+              const blockedStepIndex = nodes.findIndex((n: any) => n.id === firstIncomplete.id)
+              const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
+              
+              if (currentStepIndex < blockedStepIndex) {
+                return null // We are on an earlier, already-completed step. Don't show downstream blockers here.
+              }
+
+              const missingArtifacts = firstIncomplete.artifacts?.filter((a: any) => a.required && !a.exists) || []
+              
+              const stepNumber = String(blockedStepIndex + 1).padStart(2, '0')
+              const blockersToShow = missingArtifacts.length > 0 
+                ? missingArtifacts.map((a: any) => `Missing required: ${a.pattern}`)
+                : (apiStatus.data.blockers?.slice(0, 1) || ['Unknown blocker'])
+
+              return (
+                <div className="card" style={{ marginTop: 24, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
+                  <div className="ch" style={{ marginBottom: 12 }}>
+                    <h3 style={{ color: 'var(--red)' }}>Step {stepNumber} ({firstIncomplete.label}) is blocked</h3>
+                    <span className="label">Fix this first before proceeding</span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 20, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+                    {blockersToShow.map((blocker: string, idx: number) => (
+                      <li key={idx}>{blocker}</li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })()}
+
             <div className="detail-foot">
               {(() => {
-                // whether a step counts as resolved: already saved (done), or its
-                // own inputs are filled. display-only steps only count once saved.
+                const nodes = apiStatus?.data?.workflow_graph?.nodes || []
+                const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+                
+                // 1. STATE CALCULATOR: Pure logic, isolated from UI rendering
                 const isComplete = (st: Step) => {
                   if (st.status === 'done') return true
                   if (st.id === 'setup') return blankProject ? Boolean(s1.narrator && s1.style && s1.output) : true
@@ -3009,7 +3230,7 @@ function WorkflowView({
                   if (st.id === 'goal') return goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                   return false
                 }
-                // the CURRENT step's own inputs (a display step has none to fill).
+                
                 const currentInputComplete =
                   activeStep.id === 'setup' && blankProject
                     ? Boolean(s1.narrator && s1.style && s1.output)
@@ -3018,68 +3239,103 @@ function WorkflowView({
                       : activeStep.id === 'goal'
                         ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                         : true
-                // every earlier step must be resolved before you can act on this one.
+                        
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete
-                const isLast = selectableIndex >= orderedSteps.length - 1
-                // autopilot becomes available from the core-message step onward —
-                // the creative input is captured, AI can finish the rest.
+                
+                const currentNode = nodes.find((n: any) => n.id === activeStep.sourceId)
+                const isAlreadyApproved = currentNode?.status === 'passed' || currentNode?.status === 'approved'
+                const needsApproval = currentNode?.requires_approval === true
+                
+                const isFirstIncomplete = activeStep.sourceId === firstIncomplete?.id
+                const blockedStepIndex = firstIncomplete ? nodes.findIndex((n: any) => n.id === firstIncomplete.id) : -1
+                const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
+                const isBeyondBlocked = firstIncomplete ? currentStepIndex > blockedStepIndex : false
+                
+                // PROGRESSION RULE: Can proceed only if complete, not beyond a blocker, and not already approved (unless dirty)
+                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !isDirty)
+                
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
-                const canAutopilot =
-                  !autopilot &&
-                  goalIndex >= 0 &&
-                  selectableIndex >= goalIndex &&
-                  activeStep.id !== 'post' // the final Video output step is the finish line — nothing left to autopilot
-                const saveChoice = (
-                  <div className="foot-choice">
-                    <button
-                      className="save-continue"
-                      disabled={!stepComplete || autopilot}
-                      onClick={() => {
-                        if (!stepComplete || autopilot) return
-                        onAdvance(activeStep.id)
-                        if (isLast) onToast('Saved.')
-                        else setSelected(orderedSteps[selectableIndex + 1].id)
-                      }}
-                    >
-                      {isLast ? 'Save and finish' : 'Save and continue →'}
-                    </button>
-                    <span className="foot-sub">
-                      {autopilot
-                        ? 'Autopilot is running — stop it to edit by hand'
-                        : stepComplete
-                          ? 'You review each remaining step'
-                          : !priorsComplete
-                            ? 'Complete the earlier steps first'
-                            : 'Finish this step’s sections first'}
-                    </span>
-                  </div>
-                )
-                if (!canAutopilot) return saveChoice
+                const canAutopilot = !autopilot && !isBeyondBlocked && goalIndex >= 0 && selectableIndex >= goalIndex && activeStep.id !== 'post'
+                const isLast = selectableIndex >= orderedSteps.length - 1
+
+                // 2. UI RENDERER: Dumb display based on calculator outputs
                 return (
                   <>
+                    {/* Autopilot UI (Always renders first to stay on the left) */}
+                    {canAutopilot && (
+                      <>
+                        <div className="foot-choice">
+                          <button
+                            className="autopilot-btn"
+                            disabled={!stepComplete}
+                            title={!stepComplete ? (!priorsComplete ? 'Complete the earlier steps first' : 'Make a choice for this step first') : undefined}
+                            onClick={() => {
+                              if (!stepComplete) return
+                              onAutopilot()
+                            }}
+                          >
+                            <span className="ap-spark">✦</span> Autopilot
+                          </button>
+                          <span className="foot-sub">AI finishes every step — no input needed</span>
+                        </div>
+                        <span className="foot-or">or</span>
+                      </>
+                    )}
+
+                    {/* Main Save/Continue Choice */}
                     <div className="foot-choice">
+                      {/* Subtle hint if on the current blocked step */}
+                      {isFirstIncomplete && !stepComplete && (
+                        <div style={{ color: 'var(--ink-3)', fontSize: 13, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>ℹ️</span> Complete all requirements in this step to proceed.
+                        </div>
+                      )}
+
+                      {/* Blocker card ONLY for steps beyond the blocked step */}
+                      {isBeyondBlocked && firstIncomplete && (
+                        <div className="card" style={{ marginTop: 12, marginBottom: 12, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
+                          <div className="ch" style={{ marginBottom: 8 }}>
+                            <h3 style={{ color: 'var(--red)', fontSize: 14, margin: 0 }}>Step {String(blockedStepIndex + 1).padStart(2, '0')} ({firstIncomplete.label}) must be completed first</h3>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Native button: relies entirely on .save-continue:disabled CSS for muted styling */}
                       <button
-                        className="autopilot-btn"
-                        disabled={!stepComplete}
-                        title={
-                          stepComplete
-                            ? undefined
-                            : !priorsComplete
-                              ? 'Complete the earlier steps first'
-                              : 'Make a choice for this step first'
-                        }
+                        className="save-continue"
+                        disabled={!canProceed}
                         onClick={() => {
-                          if (!stepComplete) return
-                          onAutopilot()
+                          if (!canProceed) return
+                          onAdvance(activeStep.id)
+                          if (isLast) onToast('Approved and finished.')
+                          else {
+                            setSelected(orderedSteps[selectableIndex + 1].id)
+                            onToast(isAlreadyApproved ? 'Stage re-approved.' : (needsApproval ? 'Stage approved.' : 'Saved.'))
+                          }
                         }}
                       >
-                        <span className="ap-spark">✦</span> Autopilot
+                        {isAlreadyApproved && !isDirty 
+                          ? 'Completed' 
+                          : needsApproval 
+                            ? (isLast ? 'Approve & finish' : 'Approve & continue →') 
+                            : (isLast ? 'Save and finish' : 'Save and continue →')
+                        }
                       </button>
-                      <span className="foot-sub">AI finishes every step — no input needed</span>
+                      <span className="foot-sub">
+                        {autopilot
+                          ? 'Autopilot is running — stop it to edit by hand'
+                          : isAlreadyApproved && !isDirty
+                            ? 'Step is complete. Edit to re-approve.'
+                            : !stepComplete
+                              ? 'Finish this step’s sections first'
+                              : isBeyondBlocked
+                                ? 'Resolve the blocker above before continuing'
+                                : needsApproval
+                                  ? 'Click to grant approval and proceed'
+                                  : 'You review each remaining step'}
+                      </span>
                     </div>
-                    <span className="foot-or">or</span>
-                    {saveChoice}
                   </>
                 )
               })()}
@@ -3087,7 +3343,7 @@ function WorkflowView({
           </div>
         </div>
         <span className="canvas-meta">
-          Format template: illustration-chunk-remotion · {((illContract as { stages: unknown[] }).stages.length)} steps
+          Format template: explainer · {((explainerContract as { stages: unknown[] }).stages.length)} steps
           · anime-news-video available ({((newsContract as { stages: unknown[] }).stages.length)} steps)
         </span>
       </div>
@@ -3923,35 +4179,57 @@ function IdeaBriefContent({
   const [files, setFiles] = useState<SourceFile[]>(
     blankProject
       ? []
-      : [
-          {
-            id: 'f1',
-            name: 'contract-locked-engine.md',
-            meta: '12 KB · markdown',
-            kind: 'doc',
-            desc: 'Design doc explaining the contract → engine boundary. Use for sections 2 + 4.',
-          },
-          {
-            id: 'f2',
-            name: 'dev-log-05-transcript.txt',
-            meta: '38 KB · text',
-            kind: 'clock',
-            desc: 'Last episode’s transcript — pull the “why this matters” framing from the cold open.',
-          },
-          {
-            id: 'f3',
-            name: 'workflow-shot-2026-05-22.png',
-            meta: '412 KB · image',
-            kind: 'image',
-            desc: '',
-          },
-        ],
+      : [], // ZERO DUMMY DATA RULE: Source material must come from the engine, not hardcoded mocks.
   )
 
   const setDesc = (id: string, desc: string) =>
     setFiles((current) => current.map((file) => (file.id === id ? { ...file, desc } : file)))
   const removeFile = (id: string) =>
     setFiles((current) => current.filter((file) => file.id !== id))
+
+  // RULE 5: Functional Input Rule - Handle real file uploads to the local API
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      // Read file as base64
+      const buffer = await file.arrayBuffer()
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)))
+      
+      // Send to local API
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'upload_file',
+          filename: file.name,
+          content: base64
+        })
+      })
+
+      if (res.ok) {
+      await res.json() // Consume the response to ensure request completes
+        setFiles(prev => [...prev, { 
+          id: `f${Date.now()}`, 
+          name: file.name, 
+          meta: `${(file.size / 1024).toFixed(1)} KB · Uploaded`, 
+          kind: 'doc', 
+          desc: '' 
+        }])
+        alert(`Successfully uploaded ${file.name} to the engine!`)
+      } else {
+        alert('Failed to upload file to the engine.')
+      }
+    } catch (err) {
+      console.error('Upload error:', err)
+      alert('Error uploading file. Is the local API running?')
+    }
+    // Clear input so the same file can be selected again
+    e.target.value = ''
+  }
 
   return (
     <div className="idea-v2">
@@ -4003,13 +4281,18 @@ function IdeaBriefContent({
           </div>
         ) : null}
 
-        <button className="idea-attach">
+        <label className="idea-attach" style={{ cursor: 'pointer' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 5v14" />
             <path d="M5 12h14" />
           </svg>
           Attach files
-        </button>
+          <input 
+            type="file" 
+            style={{ display: 'none' }} 
+            onChange={handleFileUpload} 
+          />
+        </label>
       </section>
     </div>
   )
