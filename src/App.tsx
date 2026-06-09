@@ -10,6 +10,7 @@ import {
 import type { ChatState, ChatTab, OnboardSeed, SetupMode } from './types'
 import { castByShow } from './data/cast'
 import { buildGates, buildStepsFromContract } from './lib/workflow-graph'
+import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
 import { ChatWidget } from './components/ChatWidget'
 import { ConfirmModal } from './components/ConfirmModal'
@@ -368,38 +369,108 @@ function SpoolcastApp() {
                 autopilot={autopilot}
                 onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
                 onToast={setToast}
-                onAdvance={async (id: string) => {
-                  // REAL APPROVAL RULE: Actually tell the engine we are approving this stage.
+                onAdvance={async (id: string): Promise<boolean> => {
+                  // SAVE-TO-ENGINE PROTOCOL: Save/Approve must actually move the engine, for EVERY stage:
+                  //   1. Persist the user's typed input into the session's source/ folder.
+                  //   2. Run the stage's contract action (the engine produces the stage's artifacts).
+                  //   3. Only report success if the engine accepts — the UI never advances on its own.
                   try {
                     // id is the UI step id, we need to map it to the sourceId (contract stage id)
                     const currentStep = steps.find((s: any) => s.id === id)
                     const sourceId = currentStep?.sourceId || id
-                    
+
                     const currentNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === sourceId)
                     const needsApproval = currentNode?.requires_approval === true
-                    
-                    if (needsApproval && currentNode?.actions?.length > 0) {
-                      const actionToApprove = currentNode.actions[0]
-                      await fetch('http://localhost:8000/api/action', {
+
+                    // 1. PERSIST USER INPUT: typed input must reach the engine before the
+                    //    stage action runs — the engine only believes what's on disk.
+                    if (sourceId === 'input_intake') {
+                      // The idea brief is source material — write it to source/.
+                      const ideaBrief = useWorkflowStore.getState().ideaBrief
+                      if (ideaBrief.trim().length > 0) {
+                        const toB64 = (s: string) => btoa(unescape(encodeURIComponent(s)))
+                        const up = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'upload_file',
+                            filename: 'idea-brief.md',
+                            content: toB64(`# Video idea\n\n${ideaBrief.trim()}\n`),
+                          }),
+                        })
+                        if (!up.ok) {
+                          setToast('Could not save your input to the engine.')
+                          return false
+                        }
+                      }
+                    }
+                    if (sourceId === 'story_lock') {
+                      // The core message is the stage's contract output — record it in session.json.
+                      const goal = useWorkflowStore.getState().goal
+                      if (goal.text.trim().length > 0) {
+                        const cm = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'set_core_message',
+                            content: goal.text.trim(),
+                          }),
+                        })
+                        if (!cm.ok) {
+                          setToast('Could not record the core message in the engine.')
+                          return false
+                        }
+                      }
+                    }
+
+                    // 2. RUN THE STAGE'S ENGINE ACTION (not just for approval stages).
+                    //    Prefer an action the engine currently lists as legal.
+                    if (currentNode?.actions?.length > 0) {
+                      const legalRaw = apiStatus?.data?.legal_next_actions || []
+                      const legalIds = legalRaw.map((a: any) => (typeof a === 'string' ? a : a?.id))
+                      const actionToRun =
+                        currentNode.actions.find((a: string) => legalIds.includes(a)) ?? currentNode.actions[0]
+                      const res = await fetch('http://localhost:8000/api/action', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           session: 'spoolcast-dev-log-12',
                           tenant: 'local',
-                          action: actionToApprove,
-                          approve: true,
-                          approval_note: 'User approved via UI'
-                        })
+                          action: actionToRun,
+                          approve: needsApproval,
+                          approval_note: needsApproval ? 'User approved via UI' : '',
+                        }),
                       })
+                      const out = await res.json().catch(() => null)
+                      const engineErr = out?.data?.error || out?.error
+                      const alreadyPassed = currentNode?.status === 'passed' || currentNode?.status === 'approved'
+                      if (engineErr === 'illegal_action' && alreadyPassed) {
+                        // Re-saving an already-approved step: the engine has moved past this
+                        // stage, so its action is no longer legal. The input above WAS
+                        // persisted; keep the engine's approval as-is and move on.
+                        setToast('Input saved. The engine keeps its earlier approval for this step.')
+                      } else if (!res.ok || out?.ok === false || out?.data?.ok === false) {
+                        const msg = out?.data?.message || out?.data?.error || out?.error || 'Engine rejected this step.'
+                        setToast(`Engine: ${msg}`)
+                        // Still refresh so blockers/statuses shown are the engine's current truth.
+                        const r = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                        if (r.ok) {
+                          const apiData = await r.json()
+                          setApiStatus(apiData)
+                          setSteps(buildStepsFromContract(initialStandalone, apiData.data))
+                          setGates(buildGates(initialStandalone, apiData.data))
+                        }
+                        return false
+                      }
                     }
-                    
-                    // Update local state
-                    setSteps((prev) =>
-                      prev.map((step) => (step.id === id ? { ...step, status: 'done' } : step)),
-                    )
+
                     setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
-                    
-                    // Force a status refresh so the UI immediately reflects the engine's new state (green gate, no warning)
+
+                    // 3. REFRESH: the UI reflects the engine's new state (green gate, statuses, no warning).
                     const res = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
                     if (res.ok) {
                       const apiData = await res.json()
@@ -407,9 +478,11 @@ function SpoolcastApp() {
                       setSteps(buildStepsFromContract(initialStandalone, apiData.data))
                       setGates(buildGates(initialStandalone, apiData.data))
                     }
+                    return true
                   } catch (err) {
-                    console.error('Failed to approve stage:', err)
-                    setToast('Error approving stage.')
+                    console.error('Failed to advance stage:', err)
+                    setToast('Error talking to the engine.')
+                    return false
                   }
                 }}
                 onScrolledChange={setHeaderScrolled}

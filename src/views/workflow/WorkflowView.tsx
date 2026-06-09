@@ -45,7 +45,7 @@ export function WorkflowView({
   autopilot: boolean
   onOpenCast: () => void
   onToast: (message: string) => void
-  onAdvance: (id: string) => void
+  onAdvance: (id: string) => void | boolean | Promise<boolean | void>
   onScrolledChange: (scrolled: boolean) => void
   onAutopilot: () => void
   runningId: string | null
@@ -750,9 +750,14 @@ export function WorkflowView({
                       <button
                         className="save-continue"
                         disabled={!canProceed}
-                        onClick={() => {
+                        onClick={async () => {
                           if (!canProceed) return
-                          onAdvance(activeStep.id)
+                          // ENGINE-FIRST RULE: only advance and clear the dirty flag if the
+                          // engine actually accepted the save/approval. If it refused, stay
+                          // put — the step keeps its "in progress" state and the refreshed
+                          // blockers explain what's missing.
+                          const ok = await onAdvance(activeStep.id)
+                          if (ok === false) return
                           clearDirty(activeStep.sourceId ?? activeStep.id)
                           if (isLast) onToast('Approved and finished.')
                           else {
