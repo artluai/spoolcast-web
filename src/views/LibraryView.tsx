@@ -7,6 +7,7 @@ import {
   LIB_TABS,
   LIB_TEMPLATES,
   LIB_VIDEOS,
+  LIB_VOICES,
   SHOWS,
   type FlowAsset,
   type LibEpisode,

@@ -11,6 +11,22 @@ export type TplRule = {
   source?: string
 }
 
+// Inherited show elements, surfaced inside Step 01 (Project setup) — NOT a
+// workflow node. A series shows what it inherited from its template (each
+// element On/Off, or Locked); a standalone shows an empty state pointing at
+// the save-as-template step. Toggling an inherited element warns first, since
+// it overrides the template for this one episode.
+export type TplComponent = { key: string; label: string; locked: boolean; on: boolean }
+
+export const INHERITED_COMPONENTS: TplComponent[] = [
+  { key: 'titlebar', label: 'Title bar', locked: false, on: true },
+  { key: 'lowerthird', label: 'Lower-third', locked: false, on: true },
+  { key: 'endcard', label: 'End card', locked: false, on: true },
+  { key: 'watermark', label: 'Watermark', locked: false, on: true },
+  { key: 'caption', label: 'Caption style', locked: true, on: true },
+  { key: 'introoutro', label: 'Intro / outro pattern', locked: false, on: true },
+]
+
 export const SCAN_SUGGESTIONS: Omit<TplRule, 'id'>[] = [
   {
     category: 'Ending style',
