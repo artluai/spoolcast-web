@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
+import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { WorldKitEditor } from './WorldKitEditor'
 
@@ -29,6 +30,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const seededRef = useRef(false)
   const [open, setOpen] = useState(false)
+  const sourceWords = useSourceWords()
   const [model, setModel] = useState(DRAFT_MODELS[0].id)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
@@ -186,6 +188,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           <span className="label">
             drafts from your earlier steps · uses model credits{draft.trim() ? ' · replaces the text' : ''}
           </span>
+          <ThinSourceNote words={sourceWords} />
           {draftError && (
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
           )}

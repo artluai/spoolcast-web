@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 
 const SESSION = 'spoolcast-dev-log-12'
@@ -37,6 +38,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [audit, setAudit] = useState<AuditView | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
   const seededRef = useRef(false)
+  const sourceWords = useSourceWords()
 
   const key = (st: StationKey) => `${stageId}:${st}`
   const draftOf = (st: StationKey) => drafts[key(st)] ?? ''
@@ -264,6 +266,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   return (
     <div>
       {err && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 10 }}>Engine: {err}</div>}
+      <div style={{ marginBottom: 4 }}>
+        <ThinSourceNote words={sourceWords} />
+      </div>
 
       {station('listener', '1', 'Draft script', 'the first full draft — written to work by ear alone', 'Write it')}
       {station('screenplay', '2', 'Polished script', 'the version that gets recorded — refine it, or take the draft as-is', 'Polish it',
