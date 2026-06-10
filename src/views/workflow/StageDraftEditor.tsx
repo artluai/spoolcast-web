@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
+import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { WorldKitEditor } from './WorldKitEditor'
@@ -69,7 +70,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
 
   if (!cfg) return null
 
-  const runDraft = async () => {
+  const runDraft = async (feedback = '') => {
     setDrafting(true)
     setDraftError(null)
     try {
@@ -82,7 +83,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           action: 'draft_stage',
           stage_id: stageId,
           model,
-          allow_cost: true, // user clicked the explicit confirm
+          allow_cost: true,
+          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -161,15 +163,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       )}
       {!needRewind && cfg.aiDraft ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <button
-            className="save-continue"
-            style={{ width: 'auto', padding: '10px 18px' }}
-            disabled={drafting}
-            onClick={runDraft}
+          <FeedbackButton
+            label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
+            busy={drafting}
             title="Runs the AI — uses model credits"
-          >
-            ✦ {drafting ? 'Writing…' : draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
-          </button>
+            onRun={(fb) => runDraft(fb)}
+          />
           <select
             value={model}
             disabled={drafting}

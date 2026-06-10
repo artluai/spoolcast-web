@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 
@@ -94,12 +95,18 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return r.ok
   }
 
-  const runDraft = async (st: StationKey) => {
+  const runDraft = async (st: StationKey, feedback = '') => {
     setBusy(st)
     setErr(null)
     try {
       if (st === 'screenplay') await saveDraft('listener')
-      const r = await post({ action: 'draft_stage', stage_id: stageId, variant: st, allow_cost: true })
+      const r = await post({
+        action: 'draft_stage',
+        stage_id: stageId,
+        variant: st,
+        allow_cost: true,
+        ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+      })
       const out = await r.json().catch(() => null)
       if (!r.ok || out?.ok === false) {
         setErr(out?.message || out?.error || 'Drafting failed.')
@@ -193,11 +200,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const station = (st: StationKey, num: string, title: string, blurb: string, actionLabel: string, disabledReason?: string) => {
     const draft = draftOf(st)
     const enabled = !disabledReason && !busy
-    const b = aiBtn(enabled)
     const s = stats(draft)
     return (
       <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0, fontSize: 15, cursor: 'help' }} title={blurb}>{num} · {title}</h3>
           <span style={{ flex: 1 }} />
           {draft.trim() && (
@@ -219,15 +225,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               Use draft as-is
             </button>
           )}
-          <button
-            className={b.className}
-            style={b.style}
+          <FeedbackButton
+            label={draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
+            busy={busy === st}
             disabled={!enabled}
             title={disabledReason || `Uses model credits${draft.trim() ? ' · replaces the current text' : ''}`}
-            onClick={() => runDraft(st)}
-          >
-            ✦ {busy === st ? 'Writing…' : draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
-          </button>
+            onRun={(fb) => runDraft(st, fb)}
+          />
         </div>
         {editing === st ? (
           <textarea
