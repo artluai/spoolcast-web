@@ -750,6 +750,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [aiError, setAiError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   // MULTI-MESSAGE: goal.text holds messages separated by blank lines (e.g. a
   // UGC product video may carry 3 selling points). Default is one; "+ Add"
@@ -905,45 +906,69 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 {c}
               </button>
             ))}
-            {/* FEEDBACK + RE-SUGGEST: the button lives inside the textbox,
-                chat-input style — one control, distinct from the cards. */}
-            <div style={{ position: 'relative', marginTop: 4 }}>
-              <input
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !generating) suggest()
-                }}
-                placeholder="Not right? Tell the AI what to change — e.g. “easier to understand”…"
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  background: 'rgba(255,255,255,.02)',
-                  color: 'var(--ink-1)',
-                  border: '1px dashed var(--line, #2a3142)',
-                  borderRadius: 8,
-                  padding: '11px 118px 11px 12px',
-                  fontSize: 13,
-                  fontStyle: feedback ? 'normal' : 'italic',
-                }}
-              />
-              <button
-                type="button"
-                className="core-create"
-                disabled={generating}
-                onClick={suggest}
-                style={{
-                  position: 'absolute',
-                  right: 5,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  padding: '6px 14px',
-                  fontSize: 12,
-                }}
-              >
-                {generating ? (<><span className="spin" /> …</>) : 'Re-suggest'}
-              </button>
-            </div>
+            {/* RE-SUGGEST: plain button by default; the expand toggle opens a
+                multi-line feedback box with the button inside it. */}
+            {!feedbackOpen ? (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <button type="button" className="core-create" disabled={generating} onClick={suggest}>
+                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
+                </button>
+                <button
+                  type="button"
+                  title="Add feedback for the next suggestions"
+                  onClick={() => setFeedbackOpen(true)}
+                  style={{
+                    background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                    color: 'var(--ink-2)', padding: '8px 10px', cursor: 'pointer', fontSize: 12,
+                  }}
+                >
+                  ▾
+                </button>
+              </div>
+            ) : (
+              <div style={{ position: 'relative', marginTop: 4 }}>
+                <textarea
+                  autoFocus
+                  rows={3}
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Tell the AI what to change — e.g. “easier to understand”, “more dramatic”, “focus on the cost angle”…"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    resize: 'vertical',
+                    background: 'rgba(255,255,255,.02)',
+                    color: 'var(--ink-1)',
+                    border: '1px dashed var(--line, #2a3142)',
+                    borderRadius: 8,
+                    padding: '11px 12px 46px',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                />
+                <button
+                  type="button"
+                  title="Collapse"
+                  onClick={() => setFeedbackOpen(false)}
+                  style={{
+                    position: 'absolute', right: 8, top: 8,
+                    background: 'none', border: 'none', color: 'var(--ink-3)',
+                    cursor: 'pointer', fontSize: 12, padding: 2,
+                  }}
+                >
+                  ▴
+                </button>
+                <button
+                  type="button"
+                  className="core-create"
+                  disabled={generating}
+                  onClick={suggest}
+                  style={{ position: 'absolute', right: 8, bottom: 12, padding: '6px 14px', fontSize: 12 }}
+                >
+                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
