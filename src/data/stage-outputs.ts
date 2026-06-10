@@ -6,7 +6,7 @@
 // gate-token audits and need their own flow.
 export const STAGE_DRAFT_OUTPUTS: Record<
   string,
-  { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean }
+  { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean; structured?: boolean }
 > = {
   structure: {
     path: 'working/structure.md',
@@ -20,6 +20,7 @@ export const STAGE_DRAFT_OUTPUTS: Record<
     label: 'World Kit',
     aiDraft: true, // draft_world_kit: inherits show-shared items, proposes episode-only ones
     autoSuggest: true, // arriving with no kit pre-opens the one-click suggest confirm
+    structured: true, // per-item editor (WorldKitEditor) instead of the md preview/textarea
     placeholder:
       '# World Kit\n\nStyle anchor, cast, environments, props, beat refs — house table format.\nUse “Draft with AI” to suggest items from the approved structure.',
   },

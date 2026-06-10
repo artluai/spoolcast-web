@@ -3,6 +3,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
+import { WorldKitEditor } from './WorldKitEditor'
 
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
 // pricing tiers will hang off this list when the credit system lands.
@@ -218,6 +219,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           AI drafting for this step isn’t wired up yet — write it below for now.
         </p>
       )}
+      {cfg.structured ? (
+        // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
+        // warnings, undo, and reset-to-default — always visible when content exists.
+        <WorldKitEditor stageId={stageId} path={cfg.path} />
+      ) : (
+        <>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -284,6 +291,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             {draft.trim() && !editing ? 'Click the text to edit the raw markdown · ' : ''}
             Saved to the engine on “Approve & continue” — this is the stage’s real contract output.
           </span>
+        </>
+      )}
         </>
       )}
     </div>
