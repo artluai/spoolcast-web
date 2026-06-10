@@ -1,12 +1,18 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 
 /**
  * Draft editor for stages whose contract output is a single drafted file
- * (structure, world kit, visual pacing). Prefills from the engine's real
- * on-disk artifact via GET /api/file — never fake data — and writes back via
- * set_stage_output when the user saves (handled in App.tsx onAdvance).
+ * (structure, visual pacing). Prefills from the engine's real on-disk artifact
+ * via GET /api/file — never fake data — and writes back via set_stage_output
+ * when the user saves (handled in App.tsx onAdvance).
+ *
+ * UX rules (per Romy):
+ * - No box-in-box: the textarea is the only box; the step panel is the frame.
+ * - AI drafting will be the default path for these stages; writing it yourself
+ *   is the secondary option, collapsed by default (auto-expanded when content
+ *   already exists on disk or the user has typed).
  */
 export function StageDraftEditor({ stageId }: { stageId: string }) {
   const cfg = STAGE_DRAFT_OUTPUTS[stageId]
@@ -14,6 +20,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const seededRef = useRef(false)
+  const [open, setOpen] = useState(false)
 
   // Prefill once per mount from the engine's real file — but never clobber
   // text the user has already typed (dirty steps keep their draft).
@@ -21,7 +28,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     if (!cfg || seededRef.current) return
     seededRef.current = true
     const store = useWorkflowStore.getState()
-    if ((store.stageDrafts[stageId] ?? '').length > 0 || store.dirtySteps[stageId]) return
+    if ((store.stageDrafts[stageId] ?? '').length > 0 || store.dirtySteps[stageId]) {
+      setOpen(true)
+      return
+    }
     fetch(
       `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
     )
@@ -31,6 +41,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           const current = useWorkflowStore.getState()
           if ((current.stageDrafts[stageId] ?? '').length === 0 && !current.dirtySteps[stageId]) {
             seedStageDraft(stageId, out.data.content)
+            setOpen(true) // real content exists on disk — show it
           }
         }
       })
@@ -42,33 +53,58 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   if (!cfg) return null
 
   return (
-    <div className="card" style={{ marginBottom: 20 }}>
-      <div className="ch" style={{ marginBottom: 10 }}>
-        <h3>{cfg.label}</h3>
-        <span className="label">{cfg.path}</span>
-      </div>
-      <textarea
-        value={draft}
-        placeholder={cfg.placeholder}
-        onChange={(e) => setStageDraft(stageId, e.target.value)}
+    <div style={{ marginBottom: 24 }}>
+      {/* AI drafting is the intended default for this stage. Not wired up yet —
+          stated honestly rather than faked with a dead button. */}
+      <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: '0 0 10px' }}>
+        AI will draft the {cfg.label.toLowerCase()} from the earlier steps — that flow lands next.
+        Until then, write it yourself below.
+      </p>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
         style={{
-          width: '100%',
-          minHeight: 260,
-          resize: 'vertical',
-          background: 'transparent',
-          color: 'var(--ink-1, inherit)',
-          border: '1px solid var(--line, #2a3142)',
-          borderRadius: 8,
-          padding: 12,
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          color: 'var(--ink-2)',
           fontSize: 13,
-          lineHeight: 1.55,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
         }}
-      />
-      <span className="label" style={{ display: 'block', marginTop: 8 }}>
-        Saved to the engine on “Save / Approve & continue”. This is the stage’s real contract output —
-        no placeholder data.
-      </span>
+      >
+        <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+        Write it yourself
+        <span className="label" style={{ marginLeft: 8 }}>{cfg.path}</span>
+      </button>
+      {open && (
+        <>
+          <textarea
+            value={draft}
+            placeholder={cfg.placeholder}
+            onChange={(e) => setStageDraft(stageId, e.target.value)}
+            style={{
+              width: '100%',
+              minHeight: 240,
+              marginTop: 10,
+              resize: 'vertical',
+              background: 'transparent',
+              color: 'var(--ink-1, inherit)',
+              border: '1px solid var(--line, #2a3142)',
+              borderRadius: 8,
+              padding: 12,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 13,
+              lineHeight: 1.55,
+            }}
+          />
+          <span className="label" style={{ display: 'block', marginTop: 6 }}>
+            Saved to the engine on “Approve & continue” — this is the stage’s real contract output.
+          </span>
+        </>
+      )}
     </div>
   )
 }

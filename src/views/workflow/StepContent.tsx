@@ -1,4 +1,4 @@
-import { outline, castByShow } from '../../data/cast'
+import { castByShow } from '../../data/cast'
 import { asset } from '../../lib/assets'
 import type { SetupMode, Step } from '../../types'
 import {
@@ -71,36 +71,15 @@ export function StepContent({
   if (step.id === 'goal')
     return <CoreMessageContent stepId={stepId} />
   if (step.id === 'plan') {
-    // Real contract output editor first; the beat-list mock stays below as a
-    // design reference until the structured outline UI is built.
-    return (
-      <>
-        <StageDraftEditor stageId={stepId} />
-        <div className="struct-head">
-          <span className="sub">12-beat outline</span>
-          <button onClick={() => onToast('Outline editor is not wired up in this mock app.')}>
-            Edit outline
-          </button>
-        </div>
-        <div className="beat-list">
-          {outline.map(([num, title, note]) => (
-            <div className="beat-row" key={num}>
-              <span>{num}</span>
-              <b>{title}</b>
-              <small>{note}</small>
-            </div>
-          ))}
-        </div>
-      </>
-    )
+    // Real contract output only — no mock outline UI until the structured
+    // act/beat editor is designed (AI drafts, user edits per beat).
+    return <StageDraftEditor stageId={stepId} />
   }
   if (step.id === 'worldkit') {
-    return (
-      <>
-        <StageDraftEditor stageId={stepId} />
-        <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
-      </>
-    )
+    // No freeform textbox here: world-kit items are individually scoped
+    // (episode-only / show-shared / template-shared), so editing needs
+    // per-section UI with scope awareness — separate design pass.
+    return <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'pacing')

@@ -11,12 +11,9 @@ export const STAGE_DRAFT_OUTPUTS: Record<string, { path: string; label: string; 
     placeholder:
       '# Structure\n\nThe high-level arc of the video — the beats from hook to outro.\nWrite or paste the outline here (markdown).',
   },
-  world_kit: {
-    path: 'working/world-kit.md',
-    label: 'World Kit',
-    placeholder:
-      '# World Kit\n\nStyle anchor, cast, environments, props, and beat-specific references.\nWrite or paste the world kit here (markdown).',
-  },
+  // world_kit intentionally NOT here: its items are individually scoped
+  // (episode / show / template) and need per-section editing UI, not a
+  // freeform file editor. See WorldKitPanel design pass.
   visual_pacing: {
     path: 'working/visual-pacing-plan.md',
     label: 'Visual pacing plan',

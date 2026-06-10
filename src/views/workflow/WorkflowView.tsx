@@ -702,7 +702,6 @@ export function WorkflowView({
                 const isAlreadyApproved = currentNode?.status === 'passed' || currentNode?.status === 'approved'
                 const needsApproval = currentNode?.requires_approval === true
                 
-                const isFirstIncomplete = activeStep.sourceId === firstIncomplete?.id
                 const blockedStepIndex = firstIncomplete ? nodes.findIndex((n: any) => n.id === firstIncomplete.id) : -1
                 const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
                 const isBeyondBlocked = firstIncomplete ? currentStepIndex > blockedStepIndex : false
@@ -739,15 +738,10 @@ export function WorkflowView({
                       </>
                     )}
 
-                    {/* Main Save/Continue Choice */}
+                    {/* Main Save/Continue Choice — the foot-sub under the button
+                        explains what's missing, so no extra hint that would
+                        displace the button layout. */}
                     <div className="foot-choice">
-                      {/* Subtle hint if on the current blocked step */}
-                      {isFirstIncomplete && !stepComplete && (
-                        <div style={{ color: 'var(--ink-3)', fontSize: 13, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span>ℹ️</span> Complete all requirements in this step to proceed.
-                        </div>
-                      )}
-
                       {isAlreadyApproved && dirty && (
                         <div className="card" style={{ borderColor: 'var(--amber)', background: 'rgba(224,163,56,.08)', marginTop: 12, marginBottom: 12 }}>
                           <span style={{ color: 'var(--amber)', fontSize: 13 }}>
