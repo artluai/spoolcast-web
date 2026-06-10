@@ -150,17 +150,28 @@ export function WorkflowView({
   const orderedSteps = steps
   const selectableIndex = orderedSteps.findIndex((step) => step.id === selected)
   
-  // RULE 3: Robust "In Progress" State Rule
-  // EVENT-DRIVEN DIRTY STATE RULE: If the user has typed ANYTHING in the main fields of the current step, force "In progress".
-  const isCurrentlyEditing = 
-    ideaBrief.trim().length > 0 || 
-    goal.text.trim().length > 0 || 
-    (s1.narrator && s1.narrator.trim().length > 0) ||
-    (s1.style && s1.style.trim().length > 0)
+  // RULE 3: "In Progress" = THIS step is dirty (user typed in it since last
+  // approval). Per-step via the store's dirty flags — covers the seed fields
+  // AND the stage draft editors, and never bleeds across steps.
+  const isCurrentlyEditing = dirty
 
   const engineNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === activeStep.sourceId)
   const engineStatus = engineNode?.status || 'not_started'
-  
+
+  // INVALIDATION WARNING as a toast (not an inline card that displaces the
+  // footer layout): fire once when the user starts editing an already-approved
+  // step; re-arm when the step is re-approved (dirty resets).
+  const warnedRef = useRef<Record<string, boolean>>({})
+  const activeEngineId = activeStep.sourceId ?? activeStep.id
+  const activeApproved = engineStatus === 'passed' || engineStatus === 'approved'
+  useEffect(() => {
+    if (activeApproved && dirty && !warnedRef.current[activeEngineId]) {
+      warnedRef.current[activeEngineId] = true
+      onToast('Changes here will invalidate downstream approvals — re-approve to continue.')
+    }
+    if (!dirty) warnedRef.current[activeEngineId] = false
+  }, [activeApproved, dirty, activeEngineId, onToast])
+
   // Also consider it "In progress" if this is the first incomplete step and it's just waiting to be worked on
   const nodes = apiStatus?.data?.workflow_graph?.nodes || []
   const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
@@ -742,14 +753,8 @@ export function WorkflowView({
                         explains what's missing, so no extra hint that would
                         displace the button layout. */}
                     <div className="foot-choice">
-                      {isAlreadyApproved && dirty && (
-                        <div className="card" style={{ borderColor: 'var(--amber)', background: 'rgba(224,163,56,.08)', marginTop: 12, marginBottom: 12 }}>
-                          <span style={{ color: 'var(--amber)', fontSize: 13 }}>
-                            ⚠ Changes here will invalidate downstream approvals. Re-approve to continue.
-                          </span>
-                        </div>
-                      )}
-
+                      {/* Invalidation warning is a toast (fired on first edit of an
+                          approved step) — nothing inline that shifts the buttons. */}
                       {/* Native button: relies entirely on .save-continue:disabled CSS for muted styling */}
                       <button
                         className="save-continue"
