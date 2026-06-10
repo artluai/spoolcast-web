@@ -30,7 +30,6 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const seededRef = useRef(false)
   const [open, setOpen] = useState(false)
   const [model, setModel] = useState(DRAFT_MODELS[0].id)
-  const [confirming, setConfirming] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
@@ -59,11 +58,6 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             seedStageDraft(stageId, out.data.content)
             setOpen(true) // real content exists on disk — show it
           }
-        } else if (out?.ok && !out.data?.exists && cfg.autoSuggest) {
-          // ONE-TIME SUGGESTION RULE: arriving at this step with no kit on disk
-          // pre-opens the suggest confirm — one click to generate, but never
-          // spends money without that click.
-          setConfirming(true)
         }
       })
       .catch(() => {
@@ -74,7 +68,6 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   if (!cfg) return null
 
   const runDraft = async () => {
-    setConfirming(false)
     setDrafting(true)
     setDraftError(null)
     try {
@@ -164,52 +157,35 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       )}
       {cfg.aiDraft ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          {!confirming ? (
-            <>
-              <button
-                className="save-continue"
-                style={{ width: 'auto', padding: '10px 18px' }}
-                disabled={drafting}
-                onClick={() => setConfirming(true)}
-              >
-                ✦ {drafting ? 'Drafting…' : draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
-              </button>
-              <select
-                value={model}
-                disabled={drafting}
-                onChange={(e) => setModel(e.target.value)}
-                style={{
-                  background: 'transparent',
-                  color: 'var(--ink-2)',
-                  border: '1px solid var(--line, #2a3142)',
-                  borderRadius: 6,
-                  padding: '8px 10px',
-                  fontSize: 13,
-                }}
-              >
-                {DRAFT_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-              <span className="label">drafts from your earlier steps · uses model credits</span>
-            </>
-          ) : (
-            <>
-              <span style={{ color: 'var(--ink-2)', fontSize: 13 }}>
-                Run {DRAFT_MODELS.find((m) => m.id === model)?.label} on your source material?
-                {draft.trim() ? ' This replaces the current draft below.' : ''} Small model cost applies.
-              </span>
-              <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={runDraft}>
-                Generate
-              </button>
-              <button
-                style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
-                onClick={() => setConfirming(false)}
-              >
-                Cancel
-              </button>
-            </>
-          )}
+          <button
+            className="save-continue"
+            style={{ width: 'auto', padding: '10px 18px' }}
+            disabled={drafting}
+            onClick={runDraft}
+            title="Runs the AI — uses model credits"
+          >
+            ✦ {drafting ? 'Writing…' : draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
+          </button>
+          <select
+            value={model}
+            disabled={drafting}
+            onChange={(e) => setModel(e.target.value)}
+            style={{
+              background: 'transparent',
+              color: 'var(--ink-2)',
+              border: '1px solid var(--line, #2a3142)',
+              borderRadius: 6,
+              padding: '8px 10px',
+              fontSize: 13,
+            }}
+          >
+            {DRAFT_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+          <span className="label">
+            drafts from your earlier steps · uses model credits{draft.trim() ? ' · replaces the text' : ''}
+          </span>
           {draftError && (
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
           )}

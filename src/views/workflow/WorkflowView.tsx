@@ -46,7 +46,7 @@ export function WorkflowView({
   autopilot: boolean
   onOpenCast: () => void
   onToast: (message: string) => void
-  onAdvance: (id: string, opts?: { updateWorldKit?: boolean }) => void | boolean | Promise<boolean | void>
+  onAdvance: (id: string, opts?: { aiHandoff?: boolean }) => void | boolean | Promise<boolean | void>
   onScrolledChange: (scrolled: boolean) => void
   onAutopilot: () => void
   runningId: string | null
@@ -717,11 +717,11 @@ export function WorkflowView({
               )
             })()}
 
-            {/* STEP 4 → 5 HAND-OFF option: lives in the content area so the
-                standard Autopilot/Approve button block stays untouched. */}
-            {activeStep.id === 'plan' && (
+            {/* AI HAND-OFF option (content area — the standard button block below
+                stays untouched): after approving this step, AI prepares the next. */}
+            {(activeStep.id === 'plan' || activeStep.id === 'worldkit') && (
               <label
-                title="Runs the World Kit AI update right after your approval — uses model credits"
+                title="Runs right after your approval — uses model credits"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
                   marginTop: 16, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer',
@@ -733,7 +733,9 @@ export function WorkflowView({
                   onChange={(e) => setUpdateKitAfter(e.target.checked)}
                   style={{ accentColor: 'var(--ink-2)', margin: 0 }}
                 />
-                after approval, AI adds this structure’s new characters, places &amp; props to the World Kit
+                {activeStep.id === 'plan'
+                  ? 'after approval, AI adds this structure’s new characters, places & props to the World Kit'
+                  : 'after approval, AI writes the initial script from this kit on the next step'}
               </label>
             )}
 
@@ -836,7 +838,7 @@ export function WorkflowView({
                           // put — the step keeps its "in progress" state and the refreshed
                           // blockers explain what's missing.
                           const ok = await onAdvance(activeStep.id, {
-                            updateWorldKit: activeStep.id === 'plan' && updateKitAfter,
+                            aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit') && updateKitAfter,
                           })
                           if (ok === false) return
                           clearDirty(activeStep.sourceId ?? activeStep.id)

@@ -27,7 +27,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setStageFileDraft = useWorkflowStore((s) => s.setStageFileDraft)
   const seedStageFileDraft = useWorkflowStore((s) => s.seedStageFileDraft)
   const [busy, setBusy] = useState<string | null>(null) // which station is running
-  const [confirming, setConfirming] = useState<StationKey | null>(null)
   const [editing, setEditing] = useState<StationKey | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [audit, setAudit] = useState<{ passed: boolean; exit: number; blocking: any[]; warnings: any[] } | null>(null)
@@ -69,7 +68,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   }
 
   const runDraft = async (st: StationKey) => {
-    setConfirming(null)
     setBusy(st)
     setErr(null)
     try {
@@ -139,26 +137,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           <h3 style={{ margin: 0, fontSize: 15 }}>{num} · {title}</h3>
           <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{blurb}</span>
           <span style={{ flex: 1 }} />
-          {confirming === st ? (
-            <>
-              <span style={{ color: 'var(--ink-2)', fontSize: 12 }}>
-                Uses model credits{draft.trim() ? ' · replaces the current text' : ''}.
-              </span>
-              <button className="save-continue" style={{ width: 'auto', padding: '6px 14px' }} onClick={() => runDraft(st)}>
-                Generate
-              </button>
-              <button style={btn} onClick={() => setConfirming(null)}>Cancel</button>
-            </>
-          ) : (
-            <button
-              style={{ ...btn, opacity: disabledReason || busy ? 0.5 : 1 }}
-              disabled={!!disabledReason || !!busy}
-              title={disabledReason}
-              onClick={() => setConfirming(st)}
-            >
-              ✦ {busy === st ? 'Drafting…' : draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
-            </button>
-          )}
+          <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>uses model credits{draft.trim() ? ' · replaces the text' : ''}</span>
+          <button
+            style={{ ...btn, opacity: disabledReason || busy ? 0.5 : 1 }}
+            disabled={!!disabledReason || !!busy}
+            title={disabledReason || 'Runs the AI — uses model credits'}
+            onClick={() => runDraft(st)}
+          >
+            ✦ {busy === st ? 'Writing…' : draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
+          </button>
         </div>
         {draft.trim() ? (
           editing === st ? (
@@ -198,25 +185,25 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       {station(
         'listener',
         '1',
-        'Listener draft',
-        'the narration as heard — judged by ear alone',
-        'Draft with AI',
+        'Initial script',
+        'the first full draft — written to work by ear alone',
+        'Write it',
       )}
       {station(
         'screenplay',
         '2',
-        'Final narration',
-        'tightened production pass of the listener draft',
-        'Refine with AI',
-        draftOf('listener').trim() ? undefined : 'Draft the listener narration first',
+        'Final script',
+        'the polished version that gets recorded',
+        'Polish it',
+        draftOf('listener').trim() ? undefined : 'Write the initial script first',
       )}
 
       {/* STATION 3 — the deterministic, rule-gated audit */}
       <div className="card" style={{ marginBottom: 12, padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>3 · Audit</h3>
+          <h3 style={{ margin: 0, fontSize: 15 }}>3 · Final check</h3>
           <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
-            deterministic rule check — free, no AI · the step passes only when this is green
+            automatic rule check — free · must pass before you can continue
           </span>
           <span style={{ flex: 1 }} />
           {audit && (
@@ -227,10 +214,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           <button
             style={{ ...btn, opacity: busy || !draftOf('screenplay').trim() ? 0.5 : 1 }}
             disabled={!!busy || !draftOf('screenplay').trim()}
-            title={!draftOf('screenplay').trim() ? 'Produce the final narration first' : 'Saves your edits, then runs the rule-gated audit'}
+            title={!draftOf('screenplay').trim() ? 'Produce the final script first' : 'Saves your edits, then runs the rule check'}
             onClick={runAudit}
           >
-            {busy === 'audit' ? 'Auditing…' : 'Run audit'}
+            {busy === 'audit' ? 'Checking…' : 'Run check'}
           </button>
         </div>
         {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (

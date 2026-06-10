@@ -374,7 +374,7 @@ function SpoolcastApp() {
                 autopilot={autopilot}
                 onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
                 onToast={setToast}
-                onAdvance={async (id: string, opts?: { updateWorldKit?: boolean }): Promise<boolean> => {
+                onAdvance={async (id: string, opts?: { aiHandoff?: boolean }): Promise<boolean> => {
                   // SAVE-TO-ENGINE PROTOCOL: Save/Approve must actually move the engine, for EVERY stage:
                   //   1. Persist the user's typed input into the session's source/ folder.
                   //   2. Run the stage's contract action (the engine produces the stage's artifacts).
@@ -557,30 +557,36 @@ function SpoolcastApp() {
 
                     setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
 
-                    // 3a. STEP 4 → 5 HAND-OFF (user-checked): the approved structure
-                    //     feeds the World Kit AI update before we land on step 5.
-                    if (opts?.updateWorldKit && sourceId === 'structure') {
-                      setToast('Approved. AI is updating the World Kit from the new structure…')
+                    // 3a. AI HAND-OFF (user-checked): after approving this stage, AI
+                    //     prepares the next one. structure → world kit update;
+                    //     world kit → initial script. Checkbox = spend consent.
+                    if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit')) {
+                      const handoff =
+                        sourceId === 'structure'
+                          ? { stage_id: 'world_kit', variant: undefined, busy: 'AI is updating the World Kit from the new structure…', done: 'World Kit updated — review it on step 5.', fail: 'World Kit update failed' }
+                          : { stage_id: 'screenplay_plan', variant: 'listener', busy: 'AI is writing the initial script from the kit…', done: 'Initial script ready — review it on the Screenplay step.', fail: 'Script drafting failed' }
+                      setToast(`Approved. ${handoff.busy}`)
                       try {
-                        const wk = await fetch('http://localhost:8000/api/action', {
+                        const r = await fetch('http://localhost:8000/api/action', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
                             session: 'spoolcast-dev-log-12',
                             tenant: 'local',
                             action: 'draft_stage',
-                            stage_id: 'world_kit',
-                            allow_cost: true, // the checkbox is the spend consent
+                            stage_id: handoff.stage_id,
+                            ...(handoff.variant ? { variant: handoff.variant } : {}),
+                            allow_cost: true,
                           }),
                         })
-                        const wkOut = await wk.json().catch(() => null)
+                        const out = await r.json().catch(() => null)
                         setToast(
-                          wk.ok && wkOut?.ok !== false
-                            ? 'World Kit updated — review it on step 5.'
-                            : `World Kit update failed: ${wkOut?.message || wkOut?.error || 'engine error'} — step 5 still has the inherited kit.`,
+                          r.ok && out?.ok !== false
+                            ? handoff.done
+                            : `${handoff.fail}: ${out?.message || out?.error || 'engine error'} — you can draft it manually on the next step.`,
                         )
                       } catch {
-                        setToast('World Kit update failed — step 5 still has the inherited kit.')
+                        setToast(`${handoff.fail} — you can draft it manually on the next step.`)
                       }
                     }
 
