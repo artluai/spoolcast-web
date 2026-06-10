@@ -165,7 +165,8 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
               )}
             </div>
 
-            {section.kind === 'text' ? (
+            {section.kind === 'text' && /style anchor/i.test(section.heading) ? (
+              // Style Anchor is a property block, not an item list — text is correct here.
               <textarea
                 value={section.text}
                 onFocus={snapshot}
@@ -181,6 +182,36 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
                   border: '1px solid var(--line, #2a3142)', borderRadius: 8, padding: 10, fontSize: 13, lineHeight: 1.5, marginTop: 8,
                 }}
               />
+            ) : section.kind === 'text' ? (
+              // ITEM SECTION with no items yet (prose like "None."): show the note
+              // and a + Add that converts it to a real item table.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+                {section.text && <span className="label">{section.text}</span>}
+                <button
+                  style={{ ...chip, borderStyle: 'dashed', color: 'var(--ink-2)' }}
+                  onClick={() => {
+                    snapshot()
+                    const d = structuredClone(doc!)
+                    const columns = /motion|camera/i.test(section.heading)
+                      ? ['Ref', 'Scope', 'Notes']
+                      : ['Ref', 'Kind', 'Scope', 'Beats']
+                    d.sections[si] = {
+                      heading: section.heading,
+                      kind: 'table',
+                      columns,
+                      rows: [
+                        columns.map((c) =>
+                          /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
+                        ),
+                      ],
+                    }
+                    apply(d)
+                    setExpanded(`${si}:0`)
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
             ) : (
               <>
                 {/* ITEMS: character-sheet cards for items with reference images,
