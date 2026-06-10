@@ -413,6 +413,22 @@ function SpoolcastApp() {
 
                     // 1. PERSIST USER INPUT: typed input must reach the engine before the
                     //    stage action runs — the engine only believes what's on disk.
+                    if (sourceId === 'format_setup') {
+                      // Step 1's target length feeds the AI structure drafter's runtime plan.
+                      const s1Now = useWorkflowStore.getState().s1
+                      if (s1Now.length > 0) {
+                        await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'set_session_fields',
+                            fields: { target_length_s: s1Now.length },
+                          }),
+                        }).catch(() => {})
+                      }
+                    }
                     if (sourceId === 'input_intake') {
                       // The idea brief is source material — write it to source/.
                       const ideaBrief = useWorkflowStore.getState().ideaBrief

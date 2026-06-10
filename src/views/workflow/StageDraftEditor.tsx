@@ -5,10 +5,12 @@ import { useWorkflowStore } from '../../store/workflow'
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
 // pricing tiers will hang off this list when the credit system lands.
 const DRAFT_MODELS = [
-  { id: 'qwen/qwen-2.5-72b-instruct', label: 'Qwen 2.5 72B (default)' },
-  { id: 'deepseek/deepseek-chat', label: 'DeepSeek' },
-  { id: 'anthropic/claude-3.5-haiku', label: 'Claude Haiku' },
-  { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini' },
+  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast · high (default)' },
+  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash' },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5' },
+  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini' },
 ]
 
 /**
