@@ -11,13 +11,12 @@ import {
 } from './StepPanels'
 import { ShotListPanel, VisualGallery, VisualPacingPanel } from './VisualPacing'
 import { StageDraftEditor } from './StageDraftEditor'
-import { WorldKitPanel } from './WorldKit'
 
 export function StepContent({
   step,
   setupMode,
   showName,
-  castData,
+  castData: _castData, // cast images now resolved inside WorldKitEditor
   blankProject,
   onOpenCast,
   onToast,
@@ -76,16 +75,11 @@ export function StepContent({
     return <StageDraftEditor stageId={stepId} />
   }
   if (step.id === 'worldkit') {
-    // The REAL kit first (AI suggests items from the approved structure,
-    // inheriting show-shared rows from the prior episode; rendered tables,
-    // click to edit raw markdown), then the inherited show context panel
-    // (cast imported from Project setup / the show template).
-    return (
-      <>
-        <StageDraftEditor stageId={stepId} />
-        <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
-      </>
-    )
+    // The kit panel, made real: auto-inherits the show's shared items from the
+    // prior episode (deterministic, free), every item is an expandable chip
+    // with editable prompt description, save-scope picker, add/remove with
+    // impact warnings. AI suggest sits on top for proposing new items.
+    return <StageDraftEditor stageId={stepId} />
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'pacing')
