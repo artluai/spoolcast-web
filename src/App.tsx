@@ -87,6 +87,10 @@ function SpoolcastApp() {
       }
     }
     fetchStatus()
+    // Light polling so the UI tracks engine changes (rewinds, drafts, external
+    // script runs) without a manual refresh.
+    const interval = setInterval(fetchStatus, 5000)
+    return () => clearInterval(interval)
   }, [initialStandalone])
 
   // AUTO-NAVIGATION RULE: Only run ONCE on initial load to set the starting point.
@@ -382,6 +386,30 @@ function SpoolcastApp() {
 
                     const currentNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === sourceId)
                     const needsApproval = currentNode?.requires_approval === true
+                    const wasAlreadyPassed = currentNode?.status === 'passed' || currentNode?.status === 'approved'
+
+                    // 0. INVALIDATION: re-saving an already-approved step revokes its
+                    //    approval and every downstream approval (the amber warning's
+                    //    promise), making this stage current again so the engine will
+                    //    accept the new input. Must happen BEFORE persisting, since the
+                    //    rewind clears this stage's regenerable outputs.
+                    if (wasAlreadyPassed) {
+                      const rw = await fetch('http://localhost:8000/api/action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          session: 'spoolcast-dev-log-12',
+                          tenant: 'local',
+                          action: 'rewind_stage',
+                          stage_id: sourceId,
+                        }),
+                      })
+                      const rwOut = await rw.json().catch(() => null)
+                      if (!rw.ok || rwOut?.ok === false) {
+                        setToast('Could not invalidate the earlier approval — nothing changed.')
+                        return false
+                      }
+                    }
 
                     // 1. PERSIST USER INPUT: typed input must reach the engine before the
                     //    stage action runs — the engine only believes what's on disk.

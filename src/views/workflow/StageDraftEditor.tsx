@@ -28,6 +28,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [confirming, setConfirming] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [needRewind, setNeedRewind] = useState(false)
 
   // Prefill once per mount from the engine's real file — but never clobber
   // text the user has already typed (dirty steps keep their draft).
@@ -78,6 +79,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       })
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {
+        if (out?.error === 'illegal_action') {
+          // Stage already approved and the engine has moved past it. Offer to
+          // invalidate (rewind) — the protocol-honest way to re-draft.
+          setNeedRewind(true)
+          return
+        }
         setDraftError(out?.message || out?.error || 'Drafting failed.')
         return
       }
@@ -99,8 +106,49 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     }
   }
 
+  const rewindAndDraft = async () => {
+    setNeedRewind(false)
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'rewind_stage',
+          stage_id: stageId,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setDraftError(out?.message || out?.error || 'Could not invalidate the stage.')
+        return
+      }
+      await runDraft()
+    } catch {
+      setDraftError('Could not reach the engine.')
+    }
+  }
+
   return (
     <div style={{ marginBottom: 24 }}>
+      {needRewind && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          <span style={{ color: 'var(--amber)', fontSize: 13 }}>
+            This step is already approved. Re-drafting will revoke its approval and every approval
+            after it — later steps go back to pending and need re-approval.
+          </span>
+          <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={rewindAndDraft}>
+            Invalidate & re-draft
+          </button>
+          <button
+            style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+            onClick={() => setNeedRewind(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {cfg.aiDraft ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           {!confirming ? (
