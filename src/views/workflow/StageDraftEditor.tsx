@@ -9,15 +9,22 @@ import { WorldKitEditor } from './WorldKitEditor'
 
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
 // pricing tiers will hang off this list when the credit system lands.
-const DRAFT_MODELS = [
-  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast — best value, the default' },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash — cheapest, quick drafts' },
-  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro — strong thinker, still cheap' },
-  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini — balanced all-rounder' },
-  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max — stronger Qwen, mid price' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5 — premium voice, mid price' },
-  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8 — best writing, costs the most' },
+// Three everyday choices up front; the rest live behind "More models".
+// `reasoning` overrides the engine default where it saves money (Opus bills
+// its thinking tokens at full output rate — medium is the sweet spot).
+type DraftModel = { id: string; label: string; desc: string; reasoning?: string }
+const PRIMARY_MODELS: DraftModel[] = [
+  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', desc: 'best value — the default' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash', desc: 'cheapest, quick drafts' },
+  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', desc: 'best writing, costs the most', reasoning: 'medium' },
 ]
+const MORE_MODELS: DraftModel[] = [
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro', desc: 'strong thinker, still cheap' },
+  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini', desc: 'balanced all-rounder' },
+  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max', desc: 'stronger Qwen, mid price' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', desc: 'high quality, mid price' },
+]
+const ALL_MODELS = [...PRIMARY_MODELS, ...MORE_MODELS]
 
 /**
  * Draft editor for stages whose contract output is a single drafted file.
@@ -33,7 +40,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const seededRef = useRef(false)
   const [open, setOpen] = useState(false)
   const sourceWords = useSourceWords()
-  const [model, setModel] = useState(DRAFT_MODELS[0].id)
+  const [model, setModel] = useState(PRIMARY_MODELS[0].id)
+  const [modelMenu, setModelMenu] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
@@ -86,6 +95,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           model,
           allow_cost: true,
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+          ...(ALL_MODELS.find((m) => m.id === model)?.reasoning
+            ? { reasoning: ALL_MODELS.find((m) => m.id === model)!.reasoning }
+            : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -170,23 +182,42 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             title="Runs the AI — uses model credits"
             onRun={(fb) => runDraft(fb)}
           />
-          <select
-            value={model}
-            disabled={drafting}
-            onChange={(e) => setModel(e.target.value)}
-            style={{
-              background: 'transparent',
-              color: 'var(--ink-2)',
-              border: '1px solid var(--line, #2a3142)',
-              borderRadius: 6,
-              padding: '8px 10px',
-              fontSize: 13,
-            }}
-          >
-            {DRAFT_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
+          <span style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="vp-menu-btn"
+              disabled={drafting}
+              onClick={() => { setModelMenu((v) => !v); setShowMore(false) }}
+              style={{ fontSize: 12, padding: '8px 12px' }}
+            >
+              {ALL_MODELS.find((m) => m.id === model)?.label ?? model} ▾
+            </button>
+            {modelMenu && (
+              <>
+                <span className="vp-menu-backdrop" onClick={() => setModelMenu(false)} />
+                <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, minWidth: 250 }}>
+                  <span className="vp-menu-h">MODEL</span>
+                  {(showMore ? ALL_MODELS : PRIMARY_MODELS).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => { setModel(m.id); setModelMenu(false) }}
+                      style={m.id === model ? { background: 'var(--bg-3)' } : undefined}
+                    >
+                      {m.label}
+                      <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>{m.desc}</span>
+                    </button>
+                  ))}
+                  {!showMore && (
+                    <>
+                      <span className="vp-menu-div" style={{ display: 'block' }} />
+                      <button type="button" onClick={() => setShowMore(true)}>More models ▸</button>
+                    </>
+                  )}
+                </span>
+              </>
+            )}
+          </span>
           <span className="label">
             drafts from your earlier steps · uses model credits{draft.trim() ? ' · replaces the text' : ''}
           </span>
