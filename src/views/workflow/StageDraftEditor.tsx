@@ -58,6 +58,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             seedStageDraft(stageId, out.data.content)
             setOpen(true) // real content exists on disk — show it
           }
+        } else if (out?.ok && !out.data?.exists && cfg.autoSuggest) {
+          // ONE-TIME SUGGESTION RULE: arriving at this step with no kit on disk
+          // pre-opens the suggest confirm — one click to generate, but never
+          // spends money without that click.
+          setConfirming(true)
         }
       })
       .catch(() => {

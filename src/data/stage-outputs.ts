@@ -6,7 +6,7 @@
 // gate-token audits and need their own flow.
 export const STAGE_DRAFT_OUTPUTS: Record<
   string,
-  { path: string; label: string; placeholder: string; aiDraft?: boolean }
+  { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean }
 > = {
   structure: {
     path: 'working/structure.md',
@@ -15,9 +15,14 @@ export const STAGE_DRAFT_OUTPUTS: Record<
     placeholder:
       '# Structure\n\nThe high-level arc of the video — the beats from hook to outro.\nWrite or paste the outline here (markdown).',
   },
-  // world_kit intentionally NOT here: its items are individually scoped
-  // (episode / show / template) and need per-section editing UI, not a
-  // freeform file editor. See WorldKitPanel design pass.
+  world_kit: {
+    path: 'working/world-kit.md',
+    label: 'World Kit',
+    aiDraft: true, // draft_world_kit: inherits show-shared items, proposes episode-only ones
+    autoSuggest: true, // arriving with no kit pre-opens the one-click suggest confirm
+    placeholder:
+      '# World Kit\n\nStyle anchor, cast, environments, props, beat refs — house table format.\nUse “Draft with AI” to suggest items from the approved structure.',
+  },
   // visual_pacing has no drafting script yet — manual editor only.
   visual_pacing: {
     path: 'working/visual-pacing-plan.md',
