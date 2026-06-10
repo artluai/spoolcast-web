@@ -11,15 +11,13 @@ import {
 } from './StepPanels'
 import { ShotListPanel, VisualGallery, VisualPacingPanel } from './VisualPacing'
 import { StageDraftEditor } from './StageDraftEditor'
+import { WorldKitPanel } from './WorldKit'
 
 export function StepContent({
   step,
   setupMode,
   showName,
-  // castData intentionally accepted but unused since the worldkit mock panel
-  // was replaced by the real kit editor; kept in the prop contract for the
-  // upcoming structured per-item editor.
-  castData: _castData,
+  castData,
   blankProject,
   onOpenCast,
   onToast,
@@ -78,11 +76,16 @@ export function StepContent({
     return <StageDraftEditor stageId={stepId} />
   }
   if (step.id === 'worldkit') {
-    // The REAL kit: AI suggests items from the approved structure (inheriting
-    // show-shared rows from the prior episode), rendered as the house tables
-    // with scope columns; click to edit raw markdown. A structured per-item
-    // editor with scope-change warnings is a later design pass.
-    return <StageDraftEditor stageId={stepId} />
+    // The REAL kit first (AI suggests items from the approved structure,
+    // inheriting show-shared rows from the prior episode; rendered tables,
+    // click to edit raw markdown), then the inherited show context panel
+    // (cast imported from Project setup / the show template).
+    return (
+      <>
+        <StageDraftEditor stageId={stepId} />
+        <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
+      </>
+    )
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'pacing')

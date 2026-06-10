@@ -742,77 +742,229 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
 
 export function CoreMessageContent({ stepId }: { stepId: string }) {
   const goal = useWorkflowStore((s) => s.goal)
-  const ideaBrief = useWorkflowStore((s) => s.ideaBrief)
   const storeSetGoal = useWorkflowStore((s) => s.setGoal)
-  const setGoal: React.Dispatch<React.SetStateAction<Goal>> = (updater) => storeSetGoal(stepId, updater)
+  const setGoal = (g: Goal) => storeSetGoal(stepId, g)
+  const [writeOpen, setWriteOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const genTimer = useRef(0)
-  useEffect(() => () => window.clearTimeout(genTimer.current), [])
+  const [candidates, setCandidates] = useState<string[] | null>(null)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [needRewind, setNeedRewind] = useState(false)
 
-  const createWithAI = () => {
+  // MULTI-MESSAGE: goal.text holds messages separated by blank lines (e.g. a
+  // UGC product video may carry 3 selling points). Default is one; "+ Add"
+  // appends. session.json:core_message stores the joined text.
+  const messages = goal.text === '' ? [''] : goal.text.split('\n\n')
+  const setMessages = (msgs: string[]) => setGoal({ text: msgs.join('\n\n'), mode: '' })
+
+  // Auto-expand "write your own" once when real content arrives (engine prefill).
+  const autoOpenedRef = useRef(false)
+  useEffect(() => {
+    if (!autoOpenedRef.current && goal.text.trim()) {
+      autoOpenedRef.current = true
+      setWriteOpen(true)
+    }
+  }, [goal.text])
+
+  // REAL AI SUGGESTION: runs the engine's metered propose_core_message draft
+  // (writes working/core-message-candidates.json), then loads the candidates.
+  const suggest = async () => {
     setGenerating(true)
-    setGoal({ text: '', mode: 'ai' })
-    genTimer.current = window.setTimeout(() => {
-      const suggestion = ideaBrief.trim()
-        ? 'The Spoolcast engine is finally stable enough that the product is now the UI wrapped around it — not the pipeline itself.'
-        : 'One clear, memorable idea your audience should walk away believing.'
-      setGoal({ text: suggestion, mode: '' })
+    setAiError(null)
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'draft_stage',
+          stage_id: stepId,
+          allow_cost: true,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        if (out?.error === 'illegal_action') {
+          setNeedRewind(true)
+          return
+        }
+        setAiError(out?.message || out?.error || 'Suggestion failed.')
+        return
+      }
+      const fr = await fetch(
+        'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=' +
+          encodeURIComponent('working/core-message-candidates.json'),
+      )
+      const fileOut = await fr.json().catch(() => null)
+      if (fileOut?.ok && fileOut.data?.exists) {
+        const parsed = JSON.parse(fileOut.data.content)
+        setCandidates(Array.isArray(parsed?.candidates) ? parsed.candidates : [])
+      }
+    } catch {
+      setAiError('Could not reach the engine.')
+    } finally {
       setGenerating(false)
-    }, 1600)
+    }
   }
+
+  const rewindAndSuggest = async () => {
+    setNeedRewind(false)
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'rewind_stage',
+          stage_id: stepId,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setAiError(out?.message || out?.error || 'Could not invalidate the stage.')
+        return
+      }
+      await suggest()
+    } catch {
+      setAiError('Could not reach the engine.')
+    }
+  }
+
+  const optStyle = (sel: boolean): React.CSSProperties => ({
+    width: '100%',
+    textAlign: 'left',
+    border: `1px solid ${sel ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+    borderRadius: 10,
+    background: 'transparent',
+    padding: '14px 16px',
+    marginBottom: 10,
+  })
 
   return (
     <div className="idea-v2">
-      <h3 className="idea-q">What's the one core message of this video?</h3>
+      <h3 className="idea-q">What should the viewer walk away believing?</h3>
 
-      <div className={`idea-textbox-wrap ${generating ? 'generating' : ''}`}>
-        <textarea
-          className="idea-textbox"
-          rows={4}
-          value={goal.text}
-          disabled={generating}
-          onChange={(event) => setGoal({ text: event.target.value, mode: '' })}
-          placeholder="The one thing a viewer should walk away believing."
-        />
-        {generating ? (
-          <span className="gen-overlay">
-            <span className="spin" /> Drafting a core message…
+      {needRewind && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          <span style={{ color: 'var(--amber)', fontSize: 13 }}>
+            This step is already approved. New suggestions will revoke its approval and every
+            approval after it.
           </span>
-        ) : null}
-      </div>
-
-      <div className="core-or">or</div>
-
-      <div className="core-opts">
-        <div className="core-ai">
-          <span className="ap-spark">✦</span>
-          <span className="core-ai-text">
-            <span className="nm">Let AI suggest one</span>
-            <span className="ds">drafted from your idea &amp; answers — you can edit it</span>
-          </span>
-          <button type="button" className="core-create" disabled={generating} onClick={createWithAI}>
-            {generating ? (
-              <>
-                <span className="spin" /> Generating…
-              </>
-            ) : (
-              'Create with AI'
-            )}
+          <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={rewindAndSuggest}>
+            Invalidate & suggest
+          </button>
+          <button
+            style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+            onClick={() => setNeedRewind(false)}
+          >
+            Cancel
           </button>
         </div>
+      )}
+
+      {/* OPTION 1 — AI suggests (the default path) */}
+      <div style={optStyle(candidates !== null)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="ap-spark">✦</span>
+          <span style={{ flex: 1 }}>
+            <span className="nm" style={{ display: 'block' }}>Let AI suggest</span>
+            <span className="ds">3 candidates drafted from your idea &amp; source material — pick one, then edit it</span>
+          </span>
+          <button type="button" className="core-create" disabled={generating} onClick={suggest}>
+            {generating ? (<><span className="spin" /> Generating…</>) : candidates ? 'Re-suggest' : 'Suggest'}
+          </button>
+        </div>
+        {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
+        {candidates && candidates.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {candidates.map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setGoal({ text: c, mode: '' })
+                  setWriteOpen(true)
+                }}
+                style={{
+                  textAlign: 'left',
+                  border: `1px solid ${goal.text === c ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+                  borderRadius: 8,
+                  background: goal.text === c ? 'rgba(255,255,255,.04)' : 'transparent',
+                  color: 'var(--ink-2)',
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  cursor: 'pointer',
+                }}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* OPTION 2 — write your own (collapsed until expanded) */}
+      <div style={optStyle(goal.mode !== 'skip' && goal.text.trim().length > 0)}>
         <button
           type="button"
-          className={`core-opt ${goal.mode === 'skip' ? 'sel' : ''}`}
-          onClick={() => {
-            window.clearTimeout(genTimer.current)
-            setGenerating(false)
-            setGoal({ text: '', mode: 'skip' })
-          }}
+          onClick={() => setWriteOpen((v) => !v)}
+          style={{ background: 'none', border: 'none', padding: 0, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
         >
-          <span className="nm">Skip — no core message needed</span>
-          <span className="ds">freeform / vibe-based</span>
+          <span style={{ fontSize: 10, color: 'var(--ink-2)' }}>{writeOpen ? '▾' : '▸'}</span>
+          <span style={{ flex: 1 }}>
+            <span className="nm" style={{ display: 'block' }}>Write your own</span>
+            <span className="ds">one by default — add more if the video carries several points</span>
+          </span>
         </button>
+        {writeOpen && (
+          <div style={{ marginTop: 10 }}>
+            {messages.map((m, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <textarea
+                  className="idea-textbox"
+                  rows={2}
+                  value={m}
+                  onChange={(e) => setMessages(messages.map((x, j) => (j === i ? e.target.value : x)))}
+                  placeholder={i === 0 ? 'The one thing a viewer should walk away believing.' : 'Another core point…'}
+                  style={{ flex: 1 }}
+                />
+                {messages.length > 1 && (
+                  <button
+                    type="button"
+                    title="Remove this message"
+                    onClick={() => setMessages(messages.filter((_, j) => j !== i))}
+                    style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-3)', padding: '0 10px', cursor: 'pointer' }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setMessages([...messages, ''])}
+              style={{ background: 'none', border: '1px dashed var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}
+            >
+              + Add another core message
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* OPTION 3 — skip */}
+      <button
+        type="button"
+        className={goal.mode === 'skip' ? 'sel' : ''}
+        onClick={() => setGoal({ text: '', mode: 'skip' })}
+        style={{ ...optStyle(goal.mode === 'skip'), cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
+      >
+        <span style={{ flex: 1 }}>
+          <span className="nm" style={{ display: 'block' }}>Skip — no core message needed</span>
+          <span className="ds">freeform / vibe-based</span>
+        </span>
+      </button>
     </div>
   )
 }

@@ -92,6 +92,44 @@ export function WorkflowView({
   const clearDirty = useWorkflowStore((s) => s.clearDirty)
   const dirty = useWorkflowStore((s) => s.isStepDirty(activeStep.sourceId ?? activeStep.id))
 
+  // ENGINE PREFILL: the engine is the source of truth — on load, pull the saved
+  // idea brief (source/idea-brief.md) and core message (session.json) back into
+  // the store so completed steps show their real content instead of blanks.
+  // Never clobbers text the user has typed (dirty steps keep their draft).
+  const prefilledRef = useRef(false)
+  useEffect(() => {
+    if (prefilledRef.current) return
+    prefilledRef.current = true
+    const base = 'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path='
+    fetch(base + encodeURIComponent('source/idea-brief.md'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
+          const store = useWorkflowStore.getState()
+          if (store.ideaBrief.trim() === '' && !store.dirtySteps['input_intake']) {
+            const text = out.data.content.replace(/^#\s*Video idea\s*\n+/, '').trim()
+            if (text) seedDrafts({ ideaBrief: text })
+          }
+        }
+      })
+      .catch(() => {})
+    fetch(base + encodeURIComponent('session.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
+          try {
+            const cfg = JSON.parse(out.data.content)
+            const cm = String(cfg?.core_message || '').trim()
+            const store = useWorkflowStore.getState()
+            if (cm && store.goal.text.trim() === '' && store.goal.mode === '' && !store.dirtySteps['story_lock']) {
+              seedDrafts({ goal: { text: cm, mode: '' } })
+            }
+          } catch { /* unparseable session.json: leave blank */ }
+        }
+      })
+      .catch(() => {})
+  }, [seedDrafts])
+
   // initialize drafts from the onboarding/template seed WITHOUT marking any step dirty
   useEffect(() => {
     seedDrafts(
