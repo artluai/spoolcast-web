@@ -20,7 +20,66 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
   const [raw, setRaw] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null) // `${sectionIdx}:${rowIdx}`
 
-  if (!draft.trim()) return null
+  // MANUAL-FIRST: no kit yet → offer a blank house-format scaffold so manual
+  // editing never depends on the AI. (AI suggest additionally inherits the
+  // show-shared items from the prior episode — the blank kit starts empty.)
+  if (!draft.trim()) {
+    const skeleton = [
+      '# World Kit — spoolcast-dev-log-12',
+      '',
+      '## Style Anchor',
+      '- **Style:** ',
+      '- **Anchor:** ',
+      '- **Scope:** shared to show',
+      '',
+      '## Cast',
+      '| Ref | Kind | Scope | Notes |',
+      '|---|---|---|---|',
+      '',
+      '## Environments',
+      '| Ref | Kind | Scope | Beats |',
+      '|---|---|---|---|',
+      '',
+      '## Props / Objects',
+      '| Ref | Kind | Scope | Beats |',
+      '|---|---|---|---|',
+      '',
+      '## Documents / Screens',
+      '| Ref | Kind | Scope | Beats |',
+      '|---|---|---|---|',
+      '',
+      '## Motion / Camera References',
+      '| Ref | Scope | Notes |',
+      '|---|---|---|',
+      '',
+      '## Beat-Specific Refs',
+      '| Ref | Kind | Scope | Beats |',
+      '|---|---|---|---|',
+      '',
+    ].join('\n')
+    return (
+      <button
+        type="button"
+        onClick={() => setStageDraft(stageId, skeleton)}
+        style={{
+          background: 'none',
+          border: '1px dashed var(--line, #2a3142)',
+          borderRadius: 8,
+          color: 'var(--ink-2)',
+          padding: '12px 16px',
+          cursor: 'pointer',
+          fontSize: 13,
+          width: '100%',
+          textAlign: 'left',
+        }}
+      >
+        ✎ Start a blank kit and add items manually
+        <span className="label" style={{ display: 'block', marginTop: 4 }}>
+          All sections, empty — or use “Draft with AI” above to inherit the show’s shared items and get suggestions.
+        </span>
+      </button>
+    )
+  }
 
   let doc: WKDoc | null = null
   try {
