@@ -57,6 +57,9 @@ export function WorkflowView({
   // Kit with what the new structure needs. On by default; the checkbox is the
   // user's spend consent.
   const [updateKitAfter, setUpdateKitAfter] = useState(true)
+  // While the engine records a save/approval (a couple of seconds), the button
+  // shows it's working instead of sitting silent.
+  const [advancing, setAdvancing] = useState(false)
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -844,28 +847,35 @@ export function WorkflowView({
                         className="save-continue"
                         disabled={!canProceed}
                         onClick={async () => {
-                          if (!canProceed) return
+                          if (!canProceed || advancing) return
                           // ENGINE-FIRST RULE: only advance and clear the dirty flag if the
                           // engine actually accepted the save/approval. If it refused, stay
                           // put — the step keeps its "in progress" state and the refreshed
                           // blockers explain what's missing.
-                          const ok = await onAdvance(activeStep.id, {
-                            aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit') && updateKitAfter,
-                          })
-                          if (ok === false) return
-                          clearDirty(activeStep.sourceId ?? activeStep.id)
-                          if (isLast) onToast('Approved and finished.')
-                          else {
-                            setSelected(orderedSteps[selectableIndex + 1].id)
-                            onToast(isAlreadyApproved ? 'Stage re-approved.' : (needsApproval ? 'Stage approved.' : 'Saved.'))
+                          setAdvancing(true)
+                          try {
+                            const ok = await onAdvance(activeStep.id, {
+                              aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit') && updateKitAfter,
+                            })
+                            if (ok === false) return
+                            clearDirty(activeStep.sourceId ?? activeStep.id)
+                            if (isLast) onToast('Approved and finished.')
+                            else {
+                              setSelected(orderedSteps[selectableIndex + 1].id)
+                              onToast(isAlreadyApproved ? 'Stage re-approved.' : (needsApproval ? 'Stage approved.' : 'Saved.'))
+                            }
+                          } finally {
+                            setAdvancing(false)
                           }
                         }}
                       >
-                        {isAlreadyApproved && !dirty 
-                          ? 'Completed' 
-                          : needsApproval 
-                            ? (isLast ? 'Approve & finish' : 'Approve & continue →') 
-                            : (isLast ? 'Save and finish' : 'Save and continue →')
+                        {advancing
+                          ? 'Working…'
+                          : isAlreadyApproved && !dirty
+                            ? 'Completed'
+                            : needsApproval
+                              ? (isLast ? 'Approve & finish' : 'Approve & continue →')
+                              : (isLast ? 'Save and finish' : 'Save and continue →')
                         }
                       </button>
                       <span className="foot-sub">
