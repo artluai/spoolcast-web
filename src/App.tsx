@@ -558,9 +558,10 @@ function SpoolcastApp() {
                     setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
 
                     // 3a. AI HAND-OFF (user-checked): after approving this stage, AI
-                    //     prepares the next one IN THE BACKGROUND. The UI advances
-                    //     immediately; the next step shows a locked "working" state
-                    //     (store.handoff) until the draft lands.
+                    //     prepares the next one IN THE BACKGROUND. Defined here, but
+                    //     STARTED only after the quick status refresh below, so the
+                    //     long model call can never queue ahead of it.
+                    const startHandoff = () => {
                     if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit')) {
                       const handoff =
                         sourceId === 'structure'
@@ -606,6 +607,7 @@ function SpoolcastApp() {
                         }
                       })()
                     }
+                    }
 
                     // 3. REFRESH: the UI reflects the engine's new state (green gate, statuses, no warning).
                     const res = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
@@ -615,6 +617,9 @@ function SpoolcastApp() {
                       setSteps(buildStepsFromContract(initialStandalone, apiData.data))
                       setGates(buildGates(initialStandalone, apiData.data))
                     }
+                    // Only now start the background AI hand-off — the quick refresh
+                    // above is already done, so the UI advances instantly.
+                    startHandoff()
                     return true
                   } catch (err) {
                     console.error('Failed to advance stage:', err)
