@@ -795,26 +795,6 @@ export function WorkflowView({
                         explains what's missing, so no extra hint that would
                         displace the button layout. */}
                     <div className="foot-choice">
-                      {activeStep.id === 'plan' && (
-                        <label
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
-                            color: 'var(--ink-2)', fontSize: 13, cursor: 'pointer',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={updateKitAfter}
-                            onChange={(e) => setUpdateKitAfter(e.target.checked)}
-                            style={{ accentColor: 'var(--ink-2)' }}
-                          />
-                          <span>
-                            <span className="ap-spark">✦</span> After approval, AI updates the World Kit — new
-                            characters, places and props this structure needs
-                            <span style={{ color: 'var(--ink-3)', fontSize: 12 }}> · uses model credits</span>
-                          </span>
-                        </label>
-                      )}
                       {/* Invalidation warning is a toast (fired on first edit of an
                           approved step) — nothing inline that shifts the buttons. */}
                       {/* Native button: relies entirely on .save-continue:disabled CSS for muted styling */}
@@ -859,6 +839,21 @@ export function WorkflowView({
                                   ? 'Click to grant approval and proceed'
                                   : 'You review each remaining step'}
                       </span>
+                      {activeStep.id === 'plan' && (
+                        <label
+                          className="foot-sub"
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginTop: 4 }}
+                          title="Runs the World Kit AI update right after your approval — uses model credits"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={updateKitAfter}
+                            onChange={(e) => setUpdateKitAfter(e.target.checked)}
+                            style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                          />
+                          ✦ then AI adds this structure’s new characters, places &amp; props to the World Kit
+                        </label>
+                      )}
                     </div>
                   </>
                 )
