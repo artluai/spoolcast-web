@@ -52,6 +52,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return { words, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` }
   }
 
+  // Rendered view shows only the narration — the document plumbing (title,
+  // voice-source path, section heading) stays in the file but not on screen.
+  const displayBody = (text: string) =>
+    text
+      .split('\n')
+      .filter((l) => !/^#\s/.test(l) && !/^##\s*Narration\s*$/i.test(l) && !l.startsWith('Voice source:'))
+      .join('\n')
+      .trim()
+
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
@@ -186,16 +195,14 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     const s = stats(draft)
     return (
       <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>{num} · {title}</h3>
-          <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{blurb}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 15, cursor: 'help' }} title={blurb}>{num} · {title}</h3>
           <span style={{ flex: 1 }} />
           {draft.trim() && (
-            <span style={{ color: 'var(--ink-2)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
               {s.words} words · ~{s.time}
             </span>
           )}
-          <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>uses model credits{draft.trim() ? ' · replaces the text' : ''}</span>
           {st === 'screenplay' && draftOf('listener').trim() && (
             <button
               style={ghost}
@@ -214,7 +221,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             className={b.className}
             style={b.style}
             disabled={!enabled}
-            title={disabledReason || 'Runs the AI — uses model credits'}
+            title={disabledReason || `Uses model credits${draft.trim() ? ' · replaces the current text' : ''}`}
             onClick={() => runDraft(st)}
           >
             ✦ {busy === st ? 'Writing…' : draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
@@ -238,8 +245,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             className="md-preview"
             title="Click to edit"
             onClick={() => setEditing(st)}
-            style={{ marginTop: 10, cursor: 'text' }}
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(draft, { async: false }) as string) }}
+            style={{ marginTop: 6, cursor: 'text' }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
           />
         ) : (
           <button
@@ -265,16 +272,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       {/* 3 · AUDIT — both deterministic rule checks */}
       <div style={section}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>3 · Audit</h3>
-          <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
-            two automatic rule checks (script + narration voice) — free · pass or skip to continue
-          </span>
+          <h3
+            style={{ margin: 0, fontSize: 15, cursor: 'help' }}
+            title="Two automatic rule checks (script + narration voice) — free · must pass (or be skipped) before you can continue"
+          >
+            3 · Audit
+          </h3>
           <span style={{ flex: 1 }} />
-          {draftOf('screenplay').trim() && (
-            <span style={{ color: 'var(--ink-2)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-              audits {stats(draftOf('screenplay')).words} words · ~{stats(draftOf('screenplay')).time}
-            </span>
-          )}
           {audit && (
             <span style={{ fontSize: 13, color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)' }}>
               {audit.skipped ? '△ SKIPPED' : audit.passed ? (audit.warnings.length ? `✓ PASSED · ${audit.warnings.length} warning(s)` : '✓ PASSED') : `✕ ${audit.blocking.length} blocking issue(s)`}
