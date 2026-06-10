@@ -228,7 +228,7 @@ export function WorkflowView({
     engineStatus === 'not_started' ? 'Not started' :
     engineStatus === 'ready' ? 'Ready' :
     'Pending'
-  const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing'].includes(activeStep.id)
+  const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'script'].includes(activeStep.id)
 
   const NODE_W = 172
   const NODE_H = 88

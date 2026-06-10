@@ -41,6 +41,17 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const key = (st: StationKey) => `${stageId}:${st}`
   const draftOf = (st: StationKey) => drafts[key(st)] ?? ''
 
+  // Word count + estimated speaking time (the engine plans at ~2.4 words/sec).
+  const stats = (text: string) => {
+    const body = text
+      .split('\n')
+      .filter((l) => !l.startsWith('#') && !l.startsWith('Voice source:'))
+      .join(' ')
+    const words = body.split(/\s+/).filter(Boolean).length
+    const secs = Math.round(words / 2.4)
+    return { words, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` }
+  }
+
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
@@ -172,13 +183,33 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     const draft = draftOf(st)
     const enabled = !disabledReason && !busy
     const b = aiBtn(enabled)
+    const s = stats(draft)
     return (
       <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0, fontSize: 15 }}>{num} · {title}</h3>
           <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{blurb}</span>
           <span style={{ flex: 1 }} />
+          {draft.trim() && (
+            <span style={{ color: 'var(--ink-2)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+              {s.words} words · ~{s.time}
+            </span>
+          )}
           <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>uses model credits{draft.trim() ? ' · replaces the text' : ''}</span>
+          {st === 'screenplay' && draftOf('listener').trim() && (
+            <button
+              style={ghost}
+              disabled={!!busy}
+              title="No AI, no cost — takes the draft script exactly as it is"
+              onClick={() => {
+                const copied = draftOf('listener').replace(/^#\s*Listener Draft/i, '# Screenplay v3')
+                setStageFileDraft(stageId, key('screenplay'), copied)
+                setAudit(null)
+              }}
+            >
+              Use draft as-is
+            </button>
+          )}
           <button
             className={b.className}
             style={b.style}
@@ -227,9 +258,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     <div>
       {err && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 10 }}>Engine: {err}</div>}
 
-      {station('listener', '1', 'Initial script', 'the first full draft — written to work by ear alone', 'Write it')}
-      {station('screenplay', '2', 'Final script', 'the polished version that gets recorded', 'Polish it',
-        draftOf('listener').trim() ? undefined : 'Write the initial script first')}
+      {station('listener', '1', 'Draft script', 'the first full draft — written to work by ear alone', 'Write it')}
+      {station('screenplay', '2', 'Polished script', 'the version that gets recorded — refine it, or take the draft as-is', 'Polish it',
+        draftOf('listener').trim() ? undefined : 'Write the draft script first')}
 
       {/* 3 · AUDIT — both deterministic rule checks */}
       <div style={section}>
@@ -239,6 +270,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             two automatic rule checks (script + narration voice) — free · pass or skip to continue
           </span>
           <span style={{ flex: 1 }} />
+          {draftOf('screenplay').trim() && (
+            <span style={{ color: 'var(--ink-2)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+              audits {stats(draftOf('screenplay')).words} words · ~{stats(draftOf('screenplay')).time}
+            </span>
+          )}
           {audit && (
             <span style={{ fontSize: 13, color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)' }}>
               {audit.skipped ? '△ SKIPPED' : audit.passed ? (audit.warnings.length ? `✓ PASSED · ${audit.warnings.length} warning(s)` : '✓ PASSED') : `✕ ${audit.blocking.length} blocking issue(s)`}
@@ -252,7 +288,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 className={b.className}
                 style={b.style}
                 disabled={!ready}
-                title={!draftOf('screenplay').trim() ? 'Produce the final script first' : 'Saves your edits, then runs both rule checks'}
+                title={!draftOf('screenplay').trim() ? 'Produce the polished script first' : 'Saves your edits, then runs both rule checks'}
                 onClick={runAudit}
               >
                 {busy === 'audit' ? 'Checking…' : 'Run audit'}
