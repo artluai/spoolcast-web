@@ -10,6 +10,7 @@ import {
   TemplateComponents,
 } from './StepPanels'
 import { ShotListPanel, VisualGallery, VisualPacingPanel } from './VisualPacing'
+import { ScreenplayStage } from './ScreenplayStage'
 import { StageDraftEditor } from './StageDraftEditor'
 
 export function StepContent({
@@ -80,6 +81,11 @@ export function StepContent({
     // with editable prompt description, save-scope picker, add/remove with
     // impact warnings. AI suggest sits on top for proposing new items.
     return <StageDraftEditor stageId={stepId} />
+  }
+  if (step.id === 'script') {
+    // Screenplay: three stations — listener draft (AI prose, by ear), final
+    // narration (AI tightening pass), and the deterministic rule-gated audit.
+    return <ScreenplayStage stageId={stepId} />
   }
   if (step.id === 'voice') return <NarrationContent />
   if (step.id === 'pacing')

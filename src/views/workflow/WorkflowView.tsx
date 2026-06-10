@@ -733,7 +733,7 @@ export function WorkflowView({
                   onChange={(e) => setUpdateKitAfter(e.target.checked)}
                   style={{ accentColor: 'var(--ink-2)', margin: 0 }}
                 />
-                ✦ after approval, AI adds this structure’s new characters, places &amp; props to the World Kit
+                after approval, AI adds this structure’s new characters, places &amp; props to the World Kit
               </label>
             )}
 
@@ -754,6 +754,12 @@ export function WorkflowView({
                   if (st.id === 'idea') return ideaBrief.trim().length > 0
                   if (st.id === 'goal') return goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                   if (isDraftStage(st)) return hasStageDraft(st)
+                  if (st.id === 'script') {
+                    // Screenplay completes only when the engine confirms it: all
+                    // three output files exist AND the rule-gated audit passed.
+                    const n = nodes.find((x: any) => x.id === st.sourceId)
+                    return n?.status === 'passed' || n?.status === 'approved'
+                  }
                   return false
                 }
 
@@ -766,7 +772,9 @@ export function WorkflowView({
                         ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                         : isDraftStage(activeStep)
                           ? hasStageDraft(activeStep)
-                          : true
+                          : activeStep.id === 'script'
+                            ? isComplete(activeStep)
+                            : true
                         
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete

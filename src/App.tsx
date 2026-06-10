@@ -515,18 +515,18 @@ function SpoolcastApp() {
                             approval_note: 'User approved via UI',
                           }),
                         })
-                      } else if (currentNode?.actions?.length > 0) {
-                        const legalRaw = apiStatus?.data?.legal_next_actions || []
-                        const legalIds = legalRaw.map((a: any) => (typeof a === 'string' ? a : a?.id))
-                        const actionToRun =
-                          currentNode.actions.find((a: string) => legalIds.includes(a)) ?? currentNode.actions[0]
+                      } else if (sourceId === 'input_intake') {
+                        // WHITELIST: only deterministic, free stage actions run
+                        // automatically on save. AI-drafting stages (screenplay,
+                        // etc.) have explicit buttons — saving must never
+                        // silently re-run a paid draft.
                         res = await fetch('http://localhost:8000/api/action', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
                             session: 'spoolcast-dev-log-12',
                             tenant: 'local',
-                            action: actionToRun,
+                            action: 'inventory_source',
                             approve: false,
                           }),
                         })

@@ -23,6 +23,10 @@ interface WorkflowStore extends Drafts {
   setS1: (stepId: string, v: React.SetStateAction<S1>) => void
   setStageDraft: (stageId: string, v: string) => void
   seedStageDraft: (stageId: string, v: string) => void // prefill from disk WITHOUT marking dirty
+  // Multi-file stages (screenplay): drafts stored under a composite key while
+  // dirty is still tracked under the real stage id.
+  setStageFileDraft: (stageId: string, key: string, v: string) => void
+  seedStageFileDraft: (key: string, v: string) => void
   seedDrafts: (d: Partial<Drafts>) => void // initialize from seed WITHOUT marking dirty
   clearDirty: (stepId: string) => void
   isStepDirty: (stepId: string) => boolean
@@ -52,6 +56,15 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   seedStageDraft: (stageId, v) =>
     set((state) => ({
       stageDrafts: { ...state.stageDrafts, [stageId]: v },
+    })),
+  setStageFileDraft: (stageId, key, v) =>
+    set((state) => ({
+      stageDrafts: { ...state.stageDrafts, [key]: v },
+      dirtySteps: { ...state.dirtySteps, [stageId]: true },
+    })),
+  seedStageFileDraft: (key, v) =>
+    set((state) => ({
+      stageDrafts: { ...state.stageDrafts, [key]: v },
     })),
   setIdeaBrief: (stepId, v) =>
     set((state) => ({
