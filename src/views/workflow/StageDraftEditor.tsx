@@ -2,17 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 
+// Selectable OpenRouter models for AI drafting. The id is sent to the engine;
+// pricing tiers will hang off this list when the credit system lands.
+const DRAFT_MODELS = [
+  { id: 'qwen/qwen-2.5-72b-instruct', label: 'Qwen 2.5 72B (default)' },
+  { id: 'deepseek/deepseek-chat', label: 'DeepSeek' },
+  { id: 'anthropic/claude-3.5-haiku', label: 'Claude Haiku' },
+  { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini' },
+]
+
 /**
- * Draft editor for stages whose contract output is a single drafted file
- * (structure, visual pacing). Prefills from the engine's real on-disk artifact
- * via GET /api/file — never fake data — and writes back via set_stage_output
- * when the user saves (handled in App.tsx onAdvance).
- *
- * UX rules (per Romy):
- * - No box-in-box: the textarea is the only box; the step panel is the frame.
- * - AI drafting will be the default path for these stages; writing it yourself
- *   is the secondary option, collapsed by default (auto-expanded when content
- *   already exists on disk or the user has typed).
+ * Draft editor for stages whose contract output is a single drafted file.
+ * Default path: AI drafts via the engine (draft_stage → OpenRouter, metered in
+ * working/usage-ledger.json). Secondary path: write it yourself (collapsed).
+ * Prefills from the engine's real on-disk artifact — never fake data.
  */
 export function StageDraftEditor({ stageId }: { stageId: string }) {
   const cfg = STAGE_DRAFT_OUTPUTS[stageId]
@@ -21,6 +24,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const seededRef = useRef(false)
   const [open, setOpen] = useState(false)
+  const [model, setModel] = useState(DRAFT_MODELS[0].id)
+  const [confirming, setConfirming] = useState(false)
+  const [drafting, setDrafting] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
 
   // Prefill once per mount from the engine's real file — but never clobber
   // text the user has already typed (dirty steps keep their draft).
@@ -52,14 +59,105 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
 
   if (!cfg) return null
 
+  const runDraft = async () => {
+    setConfirming(false)
+    setDrafting(true)
+    setDraftError(null)
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'draft_stage',
+          stage_id: stageId,
+          model,
+          allow_cost: true, // user clicked the explicit confirm
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setDraftError(out?.message || out?.error || 'Drafting failed.')
+        return
+      }
+      // Pull the freshly written file and show it for review/editing.
+      const fr = await fetch(
+        `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
+      )
+      const fileOut = await fr.json().catch(() => null)
+      if (fileOut?.ok && fileOut.data?.exists) {
+        // setStageDraft (not seed): an AI draft awaiting review counts as an
+        // un-approved change, so the step goes dirty until approved.
+        setStageDraft(stageId, fileOut.data.content)
+        setOpen(true)
+      }
+    } catch {
+      setDraftError('Could not reach the engine.')
+    } finally {
+      setDrafting(false)
+    }
+  }
+
   return (
     <div style={{ marginBottom: 24 }}>
-      {/* AI drafting is the intended default for this stage. Not wired up yet —
-          stated honestly rather than faked with a dead button. */}
-      <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: '0 0 10px' }}>
-        AI will draft the {cfg.label.toLowerCase()} from the earlier steps — that flow lands next.
-        Until then, write it yourself below.
-      </p>
+      {cfg.aiDraft ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          {!confirming ? (
+            <>
+              <button
+                className="save-continue"
+                style={{ width: 'auto', padding: '10px 18px' }}
+                disabled={drafting}
+                onClick={() => setConfirming(true)}
+              >
+                ✦ {drafting ? 'Drafting…' : draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
+              </button>
+              <select
+                value={model}
+                disabled={drafting}
+                onChange={(e) => setModel(e.target.value)}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--ink-2)',
+                  border: '1px solid var(--line, #2a3142)',
+                  borderRadius: 6,
+                  padding: '8px 10px',
+                  fontSize: 13,
+                }}
+              >
+                {DRAFT_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+              <span className="label">drafts from your earlier steps · uses model credits</span>
+            </>
+          ) : (
+            <>
+              <span style={{ color: 'var(--ink-2)', fontSize: 13 }}>
+                Run {DRAFT_MODELS.find((m) => m.id === model)?.label} on your source material?
+                {draft.trim() ? ' This replaces the current draft below.' : ''} Small model cost applies.
+              </span>
+              <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={runDraft}>
+                Generate
+              </button>
+              <button
+                style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {draftError && (
+            <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
+          )}
+        </div>
+      ) : (
+        <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: '0 0 10px' }}>
+          AI drafting for this step isn’t wired up yet — write it below for now.
+        </p>
+      )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -76,7 +174,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         }}
       >
         <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
-        Write it yourself
+        {cfg.aiDraft ? 'Review or write it yourself' : 'Write it yourself'}
         <span className="label" style={{ marginLeft: 8 }}>{cfg.path}</span>
       </button>
       {open && (

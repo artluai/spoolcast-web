@@ -451,34 +451,53 @@ function SpoolcastApp() {
                       }
                     }
 
-                    // 2. RUN THE STAGE'S ENGINE ACTION (not just for approval stages).
-                    //    Prefer an action the engine currently lists as legal.
-                    if (currentNode?.actions?.length > 0) {
-                      const legalRaw = apiStatus?.data?.legal_next_actions || []
-                      const legalIds = legalRaw.map((a: any) => (typeof a === 'string' ? a : a?.id))
-                      const actionToRun =
-                        currentNode.actions.find((a: string) => legalIds.includes(a)) ?? currentNode.actions[0]
-                      const res = await fetch('http://localhost:8000/api/action', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          session: 'spoolcast-dev-log-12',
-                          tenant: 'local',
-                          action: actionToRun,
-                          approve: needsApproval,
-                          approval_note: needsApproval ? 'User approved via UI' : '',
-                        }),
-                      })
+                    // 2. TELL THE ENGINE. Two distinct operations:
+                    //    - approval-gated stages: record the human approval (approve_stage).
+                    //      NEVER re-runs scripts — approving must not regenerate content
+                    //      the user just reviewed or edited.
+                    //    - non-approval stages: run the stage's legal contract action
+                    //      (e.g. inventory_source) so the engine produces its artifacts.
+                    {
+                      let res: Response
+                      if (needsApproval) {
+                        res = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'approve_stage',
+                            stage_id: sourceId,
+                            approval_note: 'User approved via UI',
+                          }),
+                        })
+                      } else if (currentNode?.actions?.length > 0) {
+                        const legalRaw = apiStatus?.data?.legal_next_actions || []
+                        const legalIds = legalRaw.map((a: any) => (typeof a === 'string' ? a : a?.id))
+                        const actionToRun =
+                          currentNode.actions.find((a: string) => legalIds.includes(a)) ?? currentNode.actions[0]
+                        res = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: actionToRun,
+                            approve: false,
+                          }),
+                        })
+                      } else {
+                        res = new Response(JSON.stringify({ ok: true }))
+                      }
                       const out = await res.json().catch(() => null)
                       const engineErr = out?.data?.error || out?.error
                       const alreadyPassed = currentNode?.status === 'passed' || currentNode?.status === 'approved'
                       if (engineErr === 'illegal_action' && alreadyPassed) {
                         // Re-saving an already-approved step: the engine has moved past this
-                        // stage, so its action is no longer legal. The input above WAS
-                        // persisted; keep the engine's approval as-is and move on.
+                        // stage. The input above WAS persisted; the engine keeps its approval.
                         setToast('Input saved. The engine keeps its earlier approval for this step.')
                       } else if (!res.ok || out?.ok === false || out?.data?.ok === false) {
-                        const msg = out?.data?.message || out?.data?.error || out?.error || 'Engine rejected this step.'
+                        const msg = out?.message || out?.data?.message || out?.data?.error || out?.error || 'Engine rejected this step.'
                         setToast(`Engine: ${msg}`)
                         // Still refresh so blockers/statuses shown are the engine's current truth.
                         const r = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
