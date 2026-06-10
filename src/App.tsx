@@ -108,7 +108,6 @@ function SpoolcastApp() {
       const stepMap: Record<string, string> = {
         'format_setup': 'setup',
         'input_intake': 'idea',
-        'story_lock': 'goal',
         'structure': 'plan',
         'world_kit': 'worldkit',
         'screenplay_plan': 'script',
@@ -430,8 +429,10 @@ function SpoolcastApp() {
                       }
                     }
                     if (sourceId === 'input_intake') {
-                      // The idea brief is source material — write it to source/.
-                      const ideaBrief = useWorkflowStore.getState().ideaBrief
+                      // MERGED VIDEO BRIEF: persist the idea text, record the core
+                      // message (or the explicit skip), and re-catalog the source —
+                      // all before the single approval below.
+                      const { ideaBrief, goal } = useWorkflowStore.getState()
                       if (ideaBrief.trim().length > 0) {
                         const toB64 = (s: string) => btoa(unescape(encodeURIComponent(s)))
                         const up = await fetch('http://localhost:8000/api/action', {
@@ -449,6 +450,42 @@ function SpoolcastApp() {
                           setToast('Could not save your input to the engine.')
                           return false
                         }
+                      }
+                      const coreMessage =
+                        goal.mode === 'skip' && !goal.text.trim()
+                          ? 'freeform — no locked core message'
+                          : goal.text.trim()
+                      if (coreMessage) {
+                        const cm = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'set_core_message',
+                            content: coreMessage,
+                          }),
+                        })
+                        if (!cm.ok) {
+                          setToast('Could not record the core message in the engine.')
+                          return false
+                        }
+                      }
+                      // Re-catalog the source so the inventory matches what's on disk.
+                      const inv = await fetch('http://localhost:8000/api/action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          session: 'spoolcast-dev-log-12',
+                          tenant: 'local',
+                          action: 'inventory_source',
+                          approve: false,
+                        }),
+                      })
+                      const invOut = await inv.json().catch(() => null)
+                      if (!inv.ok || invOut?.ok === false || invOut?.data?.ok === false) {
+                        setToast(`Engine: ${invOut?.data?.message || invOut?.data?.error || invOut?.error || 'could not catalog the source'}`)
+                        return false
                       }
                     }
                     if (sourceId in STAGE_DRAFT_OUTPUTS) {
@@ -474,27 +511,6 @@ function SpoolcastApp() {
                         }
                       }
                     }
-                    if (sourceId === 'story_lock') {
-                      // The core message is the stage's contract output — record it in session.json.
-                      const goal = useWorkflowStore.getState().goal
-                      if (goal.text.trim().length > 0) {
-                        const cm = await fetch('http://localhost:8000/api/action', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
-                            tenant: 'local',
-                            action: 'set_core_message',
-                            content: goal.text.trim(),
-                          }),
-                        })
-                        if (!cm.ok) {
-                          setToast('Could not record the core message in the engine.')
-                          return false
-                        }
-                      }
-                    }
-
                     // 2. TELL THE ENGINE. Two distinct operations:
                     //    - approval-gated stages: record the human approval (approve_stage).
                     //      NEVER re-runs scripts — approving must not regenerate content
@@ -513,21 +529,6 @@ function SpoolcastApp() {
                             action: 'approve_stage',
                             stage_id: sourceId,
                             approval_note: 'User approved via UI',
-                          }),
-                        })
-                      } else if (sourceId === 'input_intake') {
-                        // WHITELIST: only deterministic, free stage actions run
-                        // automatically on save. AI-drafting stages (screenplay,
-                        // etc.) have explicit buttons — saving must never
-                        // silently re-run a paid draft.
-                        res = await fetch('http://localhost:8000/api/action', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
-                            tenant: 'local',
-                            action: 'inventory_source',
-                            approve: false,
                           }),
                         })
                       } else {

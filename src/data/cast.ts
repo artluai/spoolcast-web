@@ -134,13 +134,8 @@ export const stepAlias: Record<string, { id: string; name: string; blurb: string
   },
   input_intake: {
     id: 'idea',
-    name: 'Video idea',
-    blurb: 'What the video is about, plus notes and references.',
-  },
-  story_lock: {
-    id: 'goal',
-    name: 'Core message',
-    blurb: 'Lock the single-sentence angle before scripting.',
+    name: 'Video brief',
+    blurb: 'What the video is about — source material plus the core message.',
   },
   structure: {
     id: 'plan',
