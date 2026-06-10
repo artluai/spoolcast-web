@@ -910,9 +910,6 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 multi-line feedback box with the button inside it. */}
             {!feedbackOpen ? (
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                <button type="button" className="core-create" disabled={generating} onClick={suggest}>
-                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
-                </button>
                 <button
                   type="button"
                   title="Add feedback for the next suggestions"
@@ -923,6 +920,9 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                   }}
                 >
                   ▾
+                </button>
+                <button type="button" className="core-create" disabled={generating} onClick={suggest}>
+                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
                 </button>
               </div>
             ) : (
