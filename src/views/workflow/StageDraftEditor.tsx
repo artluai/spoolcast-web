@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 
@@ -31,6 +33,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
+  // Markdown is RENDERED for reading; clicking the rendered view switches to
+  // the raw markdown editor; clicking away renders again.
+  const [editing, setEditing] = useState(false)
 
   // Prefill once per mount from the engine's real file — but never clobber
   // text the user has already typed (dirty steps keep their draft).
@@ -229,26 +234,49 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       </button>
       {open && (
         <>
-          <textarea
-            value={draft}
-            placeholder={cfg.placeholder}
-            onChange={(e) => setStageDraft(stageId, e.target.value)}
-            style={{
-              width: '100%',
-              minHeight: 240,
-              marginTop: 10,
-              resize: 'vertical',
-              background: 'transparent',
-              color: 'var(--ink-1, inherit)',
-              border: '1px solid var(--line, #2a3142)',
-              borderRadius: 8,
-              padding: 12,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              fontSize: 13,
-              lineHeight: 1.55,
-            }}
-          />
+          {draft.trim() && !editing ? (
+            // READ MODE: rendered markdown. Click anywhere to edit the raw .md.
+            <div
+              className="md-preview"
+              title="Click to edit"
+              onClick={() => setEditing(true)}
+              style={{
+                marginTop: 10,
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 8,
+                padding: '4px 16px',
+                cursor: 'text',
+              }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(marked.parse(draft, { async: false }) as string),
+              }}
+            />
+          ) : (
+            // EDIT MODE: raw markdown. Clicking away returns to the rendered view.
+            <textarea
+              autoFocus={editing}
+              value={draft}
+              placeholder={cfg.placeholder}
+              onChange={(e) => setStageDraft(stageId, e.target.value)}
+              onBlur={() => setEditing(false)}
+              style={{
+                width: '100%',
+                minHeight: 240,
+                marginTop: 10,
+                resize: 'vertical',
+                background: 'transparent',
+                color: 'var(--ink-1, inherit)',
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 8,
+                padding: 12,
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            />
+          )}
           <span className="label" style={{ display: 'block', marginTop: 6 }}>
+            {draft.trim() && !editing ? 'Click the text to edit the raw markdown · ' : ''}
             Saved to the engine on “Approve & continue” — this is the stage’s real contract output.
           </span>
         </>

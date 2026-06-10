@@ -1841,3 +1841,20 @@ body.chat-pinned { padding-right: 380px; }
 
 /* Autopilot description caption (sits above the Autopilot button in the nav stack) */
 .fog-ap-sub { font-size: 11px; color: var(--ink-3); line-height: 1.35; white-space: nowrap; }
+
+/* Rendered markdown view for stage draft editors (read mode; click to edit raw .md) */
+.md-preview { color: var(--ink-1); font-size: 14px; line-height: 1.65; }
+.md-preview:hover { border-color: var(--ink-3) !important; }
+.md-preview h1 { font-size: 19px; margin: 14px 0 8px; }
+.md-preview h2 { font-size: 16px; margin: 16px 0 6px; color: var(--ink-1); }
+.md-preview h3 { font-size: 14px; margin: 12px 0 4px; color: var(--ink-2); }
+.md-preview p { margin: 8px 0; color: var(--ink-2); }
+.md-preview ul, .md-preview ol { margin: 8px 0; padding-left: 22px; color: var(--ink-2); }
+.md-preview li { margin: 3px 0; }
+.md-preview code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; }
+.md-preview pre { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+.md-preview table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+.md-preview th, .md-preview td { border: 1px solid var(--line); padding: 6px 10px; font-size: 13px; text-align: left; color: var(--ink-2); }
+.md-preview th { color: var(--ink-1); background: rgba(255,255,255,.03); }
+.md-preview blockquote { border-left: 3px solid var(--line); margin: 8px 0; padding: 2px 12px; color: var(--ink-3); }
+.md-preview hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
