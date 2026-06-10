@@ -873,32 +873,13 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             <span className="nm" style={{ display: 'block' }}>Let AI suggest</span>
             <span className="ds">3 candidates drafted from your idea &amp; source material — pick one, then edit it</span>
           </span>
-          <button type="button" className="core-create" disabled={generating} onClick={suggest}>
-            {generating ? (<><span className="spin" /> Generating…</>) : candidates ? 'Re-suggest' : 'Suggest'}
-          </button>
+          {!candidates && (
+            <button type="button" className="core-create" disabled={generating} onClick={suggest}>
+              {generating ? (<><span className="spin" /> Generating…</>) : 'Suggest'}
+            </button>
+          )}
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
-        {candidates && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <input
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !generating) suggest()
-              }}
-              placeholder="Not right? Tell the AI what to change — e.g. “easier to understand” — then re-suggest"
-              style={{
-                flex: 1,
-                background: 'transparent',
-                color: 'var(--ink-1)',
-                border: '1px solid var(--line, #2a3142)',
-                borderRadius: 6,
-                padding: '8px 12px',
-                fontSize: 13,
-              }}
-            />
-          </div>
-        )}
         {candidates && candidates.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {candidates.map((c, i) => (
@@ -924,6 +905,38 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 {c}
               </button>
             ))}
+            {/* FEEDBACK + RE-SUGGEST: one connected control, visually distinct
+                from the candidate cards (dashed, joined to its button). */}
+            <div style={{ display: 'flex', marginTop: 4 }}>
+              <input
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !generating) suggest()
+                }}
+                placeholder="Not right? Tell the AI what to change — e.g. “easier to understand”…"
+                style={{
+                  flex: 1,
+                  background: 'rgba(255,255,255,.02)',
+                  color: 'var(--ink-1)',
+                  border: '1px dashed var(--line, #2a3142)',
+                  borderRight: 'none',
+                  borderRadius: '8px 0 0 8px',
+                  padding: '9px 12px',
+                  fontSize: 13,
+                  fontStyle: feedback ? 'normal' : 'italic',
+                }}
+              />
+              <button
+                type="button"
+                className="core-create"
+                disabled={generating}
+                onClick={suggest}
+                style={{ borderRadius: '0 8px 8px 0' }}
+              >
+                {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
+              </button>
+            </div>
           </div>
         )}
       </div>
