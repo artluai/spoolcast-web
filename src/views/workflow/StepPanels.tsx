@@ -909,21 +909,29 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             {/* RE-SUGGEST: plain button by default; the expand toggle opens a
                 multi-line feedback box with the button inside it. */}
             {!feedbackOpen ? (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                <button
-                  type="button"
-                  title="Add feedback for the next suggestions"
-                  onClick={() => setFeedbackOpen(true)}
-                  style={{
-                    background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
-                    color: 'var(--ink-2)', padding: '8px 10px', cursor: 'pointer', fontSize: 12,
-                  }}
-                >
-                  ▾
-                </button>
-                <button type="button" className="core-create" disabled={generating} onClick={suggest}>
-                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                {/* SPLIT BUTTON: one pill, two zones — ▾ opens the feedback box,
+                    the main zone re-suggests. */}
+                <span style={{ display: 'inline-flex' }}>
+                  <button
+                    type="button"
+                    className="core-create"
+                    title="Add feedback for the next suggestions"
+                    onClick={() => setFeedbackOpen(true)}
+                    style={{ borderRadius: '8px 0 0 8px', padding: '8px 11px', borderRight: '1px solid rgba(0,0,0,.3)' }}
+                  >
+                    ▾
+                  </button>
+                  <button
+                    type="button"
+                    className="core-create"
+                    disabled={generating}
+                    onClick={suggest}
+                    style={{ borderRadius: '0 8px 8px 0' }}
+                  >
+                    {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
+                  </button>
+                </span>
               </div>
             ) : (
               <div style={{ position: 'relative', marginTop: 4 }}>
