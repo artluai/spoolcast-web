@@ -749,6 +749,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
+  const [feedback, setFeedback] = useState('')
 
   // MULTI-MESSAGE: goal.text holds messages separated by blank lines (e.g. a
   // UGC product video may carry 3 selling points). Default is one; "+ Add"
@@ -780,6 +781,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           action: 'draft_stage',
           stage_id: stepId,
           allow_cost: true,
+          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -876,6 +878,27 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           </button>
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
+        {candidates && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <input
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !generating) suggest()
+              }}
+              placeholder="Not right? Tell the AI what to change — e.g. “easier to understand” — then re-suggest"
+              style={{
+                flex: 1,
+                background: 'transparent',
+                color: 'var(--ink-1)',
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 6,
+                padding: '8px 12px',
+                fontSize: 13,
+              }}
+            />
+          </div>
+        )}
         {candidates && candidates.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {candidates.map((c, i) => (
