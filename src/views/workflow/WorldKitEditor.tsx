@@ -183,13 +183,56 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
               />
             ) : (
               <>
-                {/* CHIPS: one per item + add */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                {/* ITEMS: character-sheet cards for items with reference images,
+                    chips for the rest, + add */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, alignItems: 'flex-start' }}>
                   {section.rows.map((row, ri) => {
                     const refIdx = Math.max(0, section.columns.findIndex((c) => /ref/i.test(c)))
                     const scopeIdx = section.columns.findIndex((c) => /scope/i.test(c))
+                    const descIdx = section.columns.length - 1
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
+                    const img = castImages[row[refIdx]]
+                    if (img) {
+                      // CHARACTER SHEET CARD: reference image + name + prompt excerpt
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setExpanded(expanded === key ? null : key)}
+                          title={shared ? 'Shared with the show/template' : 'This episode only'}
+                          style={{
+                            width: 170,
+                            textAlign: 'left',
+                            background: 'rgba(255,255,255,.03)',
+                            border: `1px solid ${expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+                            borderRadius: 10,
+                            padding: 0,
+                            cursor: 'pointer',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <img src={img} alt="" style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
+                          <span style={{ display: 'block', padding: '8px 10px 2px', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
+                            {row[refIdx]}
+                            {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
+                          </span>
+                          <span
+                            style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              padding: '0 10px 10px',
+                              color: 'var(--ink-3)',
+                              fontSize: 12,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            {row[descIdx]}
+                          </span>
+                        </button>
+                      )
+                    }
                     return (
                       <button
                         key={key}
