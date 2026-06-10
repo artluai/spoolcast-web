@@ -15,9 +15,14 @@ type Drafts = { ideaBrief: string; goal: Goal; s1: S1 }
 
 interface WorkflowStore extends Drafts {
   dirtySteps: Record<string, boolean>
+  // Drafted stage-output content (structure, world kit, visual pacing, ...),
+  // keyed by engine stage id. Persisted to the engine via set_stage_output.
+  stageDrafts: Record<string, string>
   setIdeaBrief: (stepId: string, v: React.SetStateAction<string>) => void
   setGoal: (stepId: string, v: React.SetStateAction<Goal>) => void
   setS1: (stepId: string, v: React.SetStateAction<S1>) => void
+  setStageDraft: (stageId: string, v: string) => void
+  seedStageDraft: (stageId: string, v: string) => void // prefill from disk WITHOUT marking dirty
   seedDrafts: (d: Partial<Drafts>) => void // initialize from seed WITHOUT marking dirty
   clearDirty: (stepId: string) => void
   isStepDirty: (stepId: string) => boolean
@@ -38,6 +43,16 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     editing: '',
   },
   dirtySteps: {},
+  stageDrafts: {},
+  setStageDraft: (stageId, v) =>
+    set((state) => ({
+      stageDrafts: { ...state.stageDrafts, [stageId]: v },
+      dirtySteps: { ...state.dirtySteps, [stageId]: true },
+    })),
+  seedStageDraft: (stageId, v) =>
+    set((state) => ({
+      stageDrafts: { ...state.stageDrafts, [stageId]: v },
+    })),
   setIdeaBrief: (stepId, v) =>
     set((state) => ({
       ideaBrief: resolve(v, state.ideaBrief),

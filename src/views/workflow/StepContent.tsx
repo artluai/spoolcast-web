@@ -10,6 +10,7 @@ import {
   TemplateComponents,
 } from './StepPanels'
 import { ShotListPanel, VisualGallery, VisualPacingPanel } from './VisualPacing'
+import { StageDraftEditor } from './StageDraftEditor'
 import { WorldKitPanel } from './WorldKit'
 
 export function StepContent({
@@ -70,8 +71,11 @@ export function StepContent({
   if (step.id === 'goal')
     return <CoreMessageContent stepId={stepId} />
   if (step.id === 'plan') {
+    // Real contract output editor first; the beat-list mock stays below as a
+    // design reference until the structured outline UI is built.
     return (
       <>
+        <StageDraftEditor stageId={stepId} />
         <div className="struct-head">
           <span className="sub">12-beat outline</span>
           <button onClick={() => onToast('Outline editor is not wired up in this mock app.')}>
@@ -91,10 +95,21 @@ export function StepContent({
     )
   }
   if (step.id === 'worldkit') {
-    return <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
+    return (
+      <>
+        <StageDraftEditor stageId={stepId} />
+        <WorldKitPanel castData={castData} showName={showName} onManage={onOpenCast} compact />
+      </>
+    )
   }
   if (step.id === 'voice') return <NarrationContent />
-  if (step.id === 'pacing') return <VisualPacingPanel blankProject={blankProject} />
+  if (step.id === 'pacing')
+    return (
+      <>
+        <StageDraftEditor stageId={stepId} />
+        <VisualPacingPanel blankProject={blankProject} />
+      </>
+    )
   if (step.id === 'shots') return <ShotListPanel />
   if (step.id === 'pics') return <VisualGallery />
   if (step.id === 'post')

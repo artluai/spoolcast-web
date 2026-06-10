@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import explainerContract from '../../contracts/explainer.json'
 import newsContract from '../../contracts/news-anime-bot.json'
 import { castByShow } from '../../data/cast'
+import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
 import { StepContent } from './StepContent'
@@ -87,6 +88,7 @@ export function WorkflowView({
   const ideaBrief = useWorkflowStore((s) => s.ideaBrief)
   const goal = useWorkflowStore((s) => s.goal)
   const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
+  const stageDrafts = useWorkflowStore((s) => s.stageDrafts)
   const clearDirty = useWorkflowStore((s) => s.clearDirty)
   const dirty = useWorkflowStore((s) => s.isStepDirty(activeStep.sourceId ?? activeStep.id))
 
@@ -668,14 +670,20 @@ export function WorkflowView({
                 const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
                 
                 // 1. STATE CALCULATOR: Pure logic, isolated from UI rendering
+                const hasStageDraft = (st: Step) =>
+                  (stageDrafts[st.sourceId ?? st.id] ?? '').trim().length > 0
+                const isDraftStage = (st: Step) =>
+                  st.sourceId != null && st.sourceId in STAGE_DRAFT_OUTPUTS
+
                 const isComplete = (st: Step) => {
                   if (st.status === 'done') return true
                   if (st.id === 'setup') return blankProject ? Boolean(s1.narrator && s1.style && s1.output) : true
                   if (st.id === 'idea') return ideaBrief.trim().length > 0
                   if (st.id === 'goal') return goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
+                  if (isDraftStage(st)) return hasStageDraft(st)
                   return false
                 }
-                
+
                 const currentInputComplete =
                   activeStep.id === 'setup' && blankProject
                     ? Boolean(s1.narrator && s1.style && s1.output)
@@ -683,7 +691,9 @@ export function WorkflowView({
                       ? ideaBrief.trim().length > 0
                       : activeStep.id === 'goal'
                         ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
-                        : true
+                        : isDraftStage(activeStep)
+                          ? hasStageDraft(activeStep)
+                          : true
                         
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete

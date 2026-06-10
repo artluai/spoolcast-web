@@ -10,6 +10,7 @@ import {
 import type { ChatState, ChatTab, OnboardSeed, SetupMode } from './types'
 import { castByShow } from './data/cast'
 import { buildGates, buildStepsFromContract } from './lib/workflow-graph'
+import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
 import { ChatWidget } from './components/ChatWidget'
@@ -402,6 +403,29 @@ function SpoolcastApp() {
                         })
                         if (!up.ok) {
                           setToast('Could not save your input to the engine.')
+                          return false
+                        }
+                      }
+                    }
+                    if (sourceId in STAGE_DRAFT_OUTPUTS) {
+                      // Drafted stage output (structure / world kit / visual pacing):
+                      // write the contract-declared file via set_stage_output.
+                      const draft = useWorkflowStore.getState().stageDrafts[sourceId] ?? ''
+                      if (draft.trim().length > 0) {
+                        const so = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'set_stage_output',
+                            stage_id: sourceId,
+                            path: STAGE_DRAFT_OUTPUTS[sourceId].path,
+                            content: draft,
+                          }),
+                        })
+                        if (!so.ok) {
+                          setToast('Could not save the draft to the engine.')
                           return false
                         }
                       }
