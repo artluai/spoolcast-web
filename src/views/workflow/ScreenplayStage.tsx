@@ -38,6 +38,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [audit, setAudit] = useState<AuditView | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
+  const [needRewind, setNeedRewind] = useState<StationKey | null>(null)
   const seededRef = useRef(false)
   const sourceWords = useSourceWords()
 
@@ -109,6 +110,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       })
       const out = await r.json().catch(() => null)
       if (!r.ok || out?.ok === false) {
+        if (out?.error === 'illegal_action') {
+          // The engine has moved past this step (stale files / earlier approval).
+          setNeedRewind(st)
+          return
+        }
         setErr(out?.message || out?.error || 'Drafting failed.')
         return
       }
@@ -270,6 +276,39 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   return (
     <div>
       {err && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 10 }}>Engine: {err}</div>}
+      {needRewind && (
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
+            The engine has already moved past this step. Making a new draft will <b>set this step and
+            every step after it back to pending</b> — you’ll review and approve them again as you go.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="save-continue"
+              style={{ width: 'auto', padding: '8px 14px' }}
+              onClick={async () => {
+                const st = needRewind
+                setNeedRewind(null)
+                try {
+                  const r = await post({ action: 'rewind_stage', stage_id: stageId })
+                  const out = await r.json().catch(() => null)
+                  if (!r.ok || out?.ok === false) {
+                    setErr(out?.message || out?.error || 'Could not set the step back to pending.')
+                    return
+                  }
+                  setAudit(null)
+                  await runDraft(st)
+                } catch {
+                  setErr('Could not reach the engine.')
+                }
+              }}
+            >
+              Set back to pending & make a new draft
+            </button>
+            <button style={ghost} onClick={() => setNeedRewind(null)}>Never mind, keep it</button>
+          </div>
+        </div>
+      )}
       <div style={{ marginBottom: 4 }}>
         <ThinSourceNote words={sourceWords} />
       </div>
