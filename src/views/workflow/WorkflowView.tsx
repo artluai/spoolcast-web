@@ -717,6 +717,26 @@ export function WorkflowView({
               )
             })()}
 
+            {/* STEP 4 → 5 HAND-OFF option: lives in the content area so the
+                standard Autopilot/Approve button block stays untouched. */}
+            {activeStep.id === 'plan' && (
+              <label
+                title="Runs the World Kit AI update right after your approval — uses model credits"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
+                  marginTop: 16, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={updateKitAfter}
+                  onChange={(e) => setUpdateKitAfter(e.target.checked)}
+                  style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                />
+                ✦ after approval, AI adds this structure’s new characters, places &amp; props to the World Kit
+              </label>
+            )}
+
             <div className="detail-foot">
               {(() => {
                 const nodes = apiStatus?.data?.workflow_graph?.nodes || []
@@ -839,21 +859,6 @@ export function WorkflowView({
                                   ? 'Click to grant approval and proceed'
                                   : 'You review each remaining step'}
                       </span>
-                      {activeStep.id === 'plan' && (
-                        <label
-                          className="foot-sub"
-                          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginTop: 4 }}
-                          title="Runs the World Kit AI update right after your approval — uses model credits"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={updateKitAfter}
-                            onChange={(e) => setUpdateKitAfter(e.target.checked)}
-                            style={{ accentColor: 'var(--ink-2)', margin: 0 }}
-                          />
-                          ✦ then AI adds this structure’s new characters, places &amp; props to the World Kit
-                        </label>
-                      )}
                     </div>
                   </>
                 )
