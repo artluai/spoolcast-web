@@ -90,7 +90,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     })
 
   const saveDraft = async (st: StationKey) => {
-    const content = draftOf(st)
+    // Read straight from the store: callers may have just set the draft and the
+    // component closure can be one render behind.
+    const content = useWorkflowStore.getState().stageDrafts[key(st)] ?? ''
     if (!content.trim()) return true
     const r = await post({ action: 'set_stage_output', stage_id: stageId, path: FILES[st], content })
     return r.ok
@@ -121,7 +123,25 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(FILES[st])}`)
       const fileOut = await fr.json().catch(() => null)
       if (fileOut?.ok && fileOut.data?.exists) setStageFileDraft(stageId, key(st), fileOut.data.content)
-      setAudit(null)
+      // MERGED POLISH+CHECK: the engine audits the polished script in the same
+      // operation — results arrive with the draft.
+      if (st === 'screenplay' && out?.data?.audits) {
+        const view: AuditView = { passed: true, blocking: [], warnings: [] }
+        for (const [k, label] of [['screenplay', 'script'], ['narration', 'voice']] as const) {
+          const d = out.data.audits[k]
+          if (!d?.ok) {
+            setErr(d?.message || `${label} check could not run.`)
+            setAudit(null)
+            return
+          }
+          if (!d.passed) view.passed = false
+          for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
+          for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
+        }
+        setAudit(view)
+      } else {
+        setAudit(null)
+      }
     } catch {
       setErr('Could not reach the engine.')
     } finally {
@@ -196,14 +216,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
     color: 'var(--ink-2)', padding: '6px 12px', cursor: 'pointer', fontSize: 12,
   }
-  const aiBtn = (enabled: boolean): { className?: string; style: React.CSSProperties } =>
-    enabled
-      ? { className: 'save-continue', style: { width: 'auto', padding: '8px 16px' } }
-      : { style: { ...ghost, opacity: 0.45, cursor: 'default' } }
-
   const section: React.CSSProperties = { padding: '16px 0', borderTop: '1px solid var(--line, #2a3142)' }
 
-  const station = (st: StationKey, num: string, title: string, blurb: string, actionLabel: string, disabledReason?: string) => {
+  const station = (st: StationKey, num: string, title: string, blurb: string, actionLabel: string, disabledReason?: string, footer?: React.ReactNode) => {
     const draft = draftOf(st)
     const enabled = !disabledReason && !busy
     const s = stats(draft)
@@ -217,15 +232,31 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               {s.words} words · ~{s.time}
             </span>
           )}
+          {st === 'screenplay' && audit && (
+            <span style={{ fontSize: 13, color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)' }}>
+              {audit.skipped ? '△ checks skipped' : audit.passed ? (audit.warnings.length ? `✓ checks passed · ${audit.warnings.length} warning(s)` : '✓ checks passed') : `✕ ${audit.blocking.length} blocking issue(s)`}
+            </span>
+          )}
+          {st === 'screenplay' && draft.trim() && (
+            <button
+              style={ghost}
+              disabled={!!busy}
+              title="Free — saves your edits and re-runs both rule checks"
+              onClick={runAudit}
+            >
+              {busy === 'audit' ? 'Checking…' : 'Re-check'}
+            </button>
+          )}
           {st === 'screenplay' && draftOf('listener').trim() && (
             <button
               style={ghost}
               disabled={!!busy}
-              title="No AI, no cost — takes the draft script exactly as it is"
-              onClick={() => {
+              title="No AI, no cost — takes the draft script exactly as it is, then runs the checks"
+              onClick={async () => {
                 const copied = draftOf('listener').replace(/^#\s*Listener Draft/i, '# Screenplay v3')
                 setStageFileDraft(stageId, key('screenplay'), copied)
                 setAudit(null)
+                await runAudit()
               }}
             >
               Use draft as-is
@@ -269,6 +300,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             ▸ or write it yourself
           </button>
         )}
+        {footer}
       </div>
     )
   }
@@ -314,81 +346,56 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       </div>
 
       {station('listener', '1', 'Draft script', 'the first full draft — written to work by ear alone', 'Write it')}
-      {station('screenplay', '2', 'Polished script', 'the version that gets recorded — refine it, or take the draft as-is', 'Polish it',
-        draftOf('listener').trim() ? undefined : 'Write the draft script first')}
-
-      {/* 3 · AUDIT — both deterministic rule checks */}
-      <div style={section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <h3
-            style={{ margin: 0, fontSize: 15, cursor: 'help' }}
-            title="Two automatic rule checks (script + narration voice) — free · must pass (or be skipped) before you can continue"
-          >
-            3 · Audit
-          </h3>
-          <span style={{ flex: 1 }} />
-          {audit && (
-            <span style={{ fontSize: 13, color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)' }}>
-              {audit.skipped ? '△ SKIPPED' : audit.passed ? (audit.warnings.length ? `✓ PASSED · ${audit.warnings.length} warning(s)` : '✓ PASSED') : `✕ ${audit.blocking.length} blocking issue(s)`}
-            </span>
+      {station(
+        'screenplay',
+        '2',
+        'Final script',
+        'polished and rule-checked — the version that gets recorded',
+        'Polish it',
+        draftOf('listener').trim() ? undefined : 'Write the draft script first',
+        // MERGED CHECKS FOOTER: findings, the skip escape hatch, and the pass note
+        // all live inside this station — polishing and checking are one thing.
+        <>
+          {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {audit.blocking.map((f, i) => (
+                <div key={`b${i}`} style={{ borderLeft: '2px solid var(--red)', padding: '2px 10px', fontSize: 13 }}>
+                  <span style={{ color: 'var(--red)' }}>✕ {f.label}</span>
+                  <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
+                </div>
+              ))}
+              {audit.warnings.map((f, i) => (
+                <div key={`w${i}`} style={{ borderLeft: '2px solid var(--amber)', padding: '2px 10px', fontSize: 13 }}>
+                  <span style={{ color: 'var(--amber)' }}>△ {f.label}</span>
+                  <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
+                </div>
+              ))}
+            </div>
           )}
-          {(() => {
-            const ready = !!draftOf('screenplay').trim() && !busy
-            const b = aiBtn(ready)
-            return (
-              <button
-                className={b.className}
-                style={b.style}
-                disabled={!ready}
-                title={!draftOf('screenplay').trim() ? 'Produce the polished script first' : 'Saves your edits, then runs both rule checks'}
-                onClick={runAudit}
-              >
-                {busy === 'audit' ? 'Checking…' : 'Run audit'}
-              </button>
-            )
-          })()}
-          <button
-            style={{ ...ghost, opacity: draftOf('screenplay').trim() && !busy ? 1 : 0.45 }}
-            disabled={!draftOf('screenplay').trim() || !!busy}
-            onClick={() => setConfirmSkip(true)}
-          >
-            Skip
-          </button>
-        </div>
-        {confirmSkip && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-            <span style={{ color: 'var(--amber)', fontSize: 13 }}>
-              ⚠ Skipping means rule violations reach production unchecked — the storyboard and narration
-              are built from this script. The skip is recorded in the audit files.
-            </span>
-            <button style={{ ...ghost, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={skipAudit}>
-              Skip anyway
+          {audit && audit.passed && !audit.skipped && (
+            <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
+              Checks pass — the step completes on the next status refresh.
+            </p>
+          )}
+          {draftOf('screenplay').trim() && !confirmSkip && audit && !audit.passed && (
+            <button style={{ ...ghost, marginTop: 10 }} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
+              Skip the checks
             </button>
-            <button style={ghost} onClick={() => setConfirmSkip(false)}>Cancel</button>
-          </div>
-        )}
-        {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {audit.blocking.map((f, i) => (
-              <div key={`b${i}`} style={{ borderLeft: '2px solid var(--red)', padding: '2px 10px', fontSize: 13 }}>
-                <span style={{ color: 'var(--red)' }}>✕ {f.label}</span>
-                <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
-              </div>
-            ))}
-            {audit.warnings.map((f, i) => (
-              <div key={`w${i}`} style={{ borderLeft: '2px solid var(--amber)', padding: '2px 10px', fontSize: 13 }}>
-                <span style={{ color: 'var(--amber)' }}>△ {f.label}</span>
-                <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {audit && audit.passed && !audit.skipped && (
-          <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
-            Both checks pass — the step completes on the next status refresh.
-          </p>
-        )}
-      </div>
+          )}
+          {confirmSkip && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+              <span style={{ color: 'var(--amber)', fontSize: 13 }}>
+                ⚠ Skipping means rule violations reach production unchecked — the storyboard and
+                narration are built from this script. The skip is recorded in the audit files.
+              </span>
+              <button style={{ ...ghost, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={skipAudit}>
+                Skip anyway
+              </button>
+              <button style={ghost} onClick={() => setConfirmSkip(false)}>Cancel</button>
+            </div>
+          )}
+        </>,
+      )}
     </div>
   )
 }
