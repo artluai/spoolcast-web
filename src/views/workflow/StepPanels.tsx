@@ -905,9 +905,9 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 {c}
               </button>
             ))}
-            {/* FEEDBACK + RE-SUGGEST: one connected control, visually distinct
-                from the candidate cards (dashed, joined to its button). */}
-            <div style={{ display: 'flex', marginTop: 4 }}>
+            {/* FEEDBACK + RE-SUGGEST: the button lives inside the textbox,
+                chat-input style — one control, distinct from the cards. */}
+            <div style={{ position: 'relative', marginTop: 4 }}>
               <input
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
@@ -916,13 +916,13 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 }}
                 placeholder="Not right? Tell the AI what to change — e.g. “easier to understand”…"
                 style={{
-                  flex: 1,
+                  width: '100%',
+                  boxSizing: 'border-box',
                   background: 'rgba(255,255,255,.02)',
                   color: 'var(--ink-1)',
                   border: '1px dashed var(--line, #2a3142)',
-                  borderRight: 'none',
-                  borderRadius: '8px 0 0 8px',
-                  padding: '9px 12px',
+                  borderRadius: 8,
+                  padding: '11px 118px 11px 12px',
                   fontSize: 13,
                   fontStyle: feedback ? 'normal' : 'italic',
                 }}
@@ -932,9 +932,16 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 className="core-create"
                 disabled={generating}
                 onClick={suggest}
-                style={{ borderRadius: '0 8px 8px 0' }}
+                style={{
+                  position: 'absolute',
+                  right: 5,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  padding: '6px 14px',
+                  fontSize: 12,
+                }}
               >
-                {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
+                {generating ? (<><span className="spin" /> …</>) : 'Re-suggest'}
               </button>
             </div>
           </div>
