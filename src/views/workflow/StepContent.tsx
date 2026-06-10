@@ -67,13 +67,9 @@ export function StepContent({
     )
   }
   if (step.id === 'idea')
-    // MERGED VIDEO BRIEF: idea + source material + core message, one approval.
-    return (
-      <>
-        <IdeaBriefContent blankProject={blankProject} stepId={stepId} />
-        <CoreMessageContent stepId={stepId} />
-      </>
-    )
+    return <IdeaBriefContent blankProject={blankProject} stepId={stepId} />
+  if (step.id === 'goal')
+    return <CoreMessageContent stepId={stepId} />
   if (step.id === 'plan') {
     // Real contract output only — no mock outline UI until the structured
     // act/beat editor is designed (AI drafts, user edits per beat).

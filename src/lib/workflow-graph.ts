@@ -11,19 +11,20 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
   // stage folded out of the visual map (its audit runs inside Storyboard).
   const positions = [
     [30, 110], // 01 Project setup
-    [288, 110], // 02 Video brief (idea + source + core message, merged)
-    [546, 110], // 03 Structure outline
-    [804, 110], // 04 World Kit
-    [1062, 110], // 05 Screenplay
-    [1320, 110], // 06 Visual pacing
-    [1578, 110], // 07 Storyboard
-    [1836, 60], // 08 Narration audio
-    [1836, 160], // 09 Visual generation
-    [2094, 160], // 10 Visual review
-    [2304, 110], // 11 Final render
-    [2562, 110], // 12 Captions and cover
-    [2562, 210], // 13 Vertical cut (optional branch off Captions)
-    [2820, 110], // 14 Video output
+    [288, 110], // 02 Video idea
+    [498, 110], // 03 Core message
+    [756, 110], // 04 Structure outline
+    [1014, 110], // 05 World Kit
+    [1272, 110], // 06 Screenplay
+    [1530, 110], // 07 Visual pacing
+    [1788, 110], // 08 Storyboard
+    [2046, 60], // 09 Narration audio
+    [2046, 160], // 10 Visual generation
+    [2304, 160], // 11 Visual review
+    [2514, 110], // 12 Final render
+    [2772, 110], // 13 Captions and cover
+    [2772, 210], // 14 Vertical cut (optional branch off Captions)
+    [3030, 110], // 15 Video output
   ]
   
   return stages
@@ -103,13 +104,13 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
       source: 'session.json',
     },
     {
-      id: 'g-brief',
+      id: 'g-angle',
       type: 'human',
-      step: 'idea',
+      step: 'goal',
       pos: 'after',
-      label: 'Approve the video brief (source + core message)',
-      state: humanGateState('input_intake'),
-      source: 'working/approvals.json',
+      label: 'Approve the core message / angle',
+      state: humanGateState('story_lock'),
+      source: 'session.json:core_message',
     },
     {
       id: 'g-voice',

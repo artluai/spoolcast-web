@@ -131,7 +131,7 @@ export function WorkflowView({
             const cfg = JSON.parse(out.data.content)
             const cm = String(cfg?.core_message || '').trim()
             const store = useWorkflowStore.getState()
-            if (cm && store.goal.text.trim() === '' && store.goal.mode === '' && !store.dirtySteps['input_intake']) {
+            if (cm && store.goal.text.trim() === '' && store.goal.mode === '' && !store.dirtySteps['story_lock']) {
               seedDrafts({ goal: { text: cm, mode: '' } })
             }
           } catch { /* unparseable session.json: leave blank */ }
@@ -177,7 +177,8 @@ export function WorkflowView({
   const edges = useMemo(() => {
     return [
       ['setup', 'idea'],
-      ['idea', 'plan'],
+      ['idea', 'goal'],
+      ['goal', 'plan'],
       ['plan', 'worldkit'],
       ['worldkit', 'script'],
       ['script', 'pacing'],
@@ -766,10 +767,8 @@ export function WorkflowView({
                 const isComplete = (st: Step) => {
                   if (st.status === 'done') return true
                   if (st.id === 'setup') return blankProject ? Boolean(s1.narrator && s1.style && s1.output) : true
-                  // Merged Video Brief: needs the idea text AND a core message
-                  // decision (typed, AI-picked, or explicitly skipped).
-                  if (st.id === 'idea')
-                    return ideaBrief.trim().length > 0 && (goal.text.trim().length > 0 || goal.mode === 'skip')
+                  if (st.id === 'idea') return ideaBrief.trim().length > 0
+                  if (st.id === 'goal') return goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                   if (isDraftStage(st)) return hasStageDraft(st)
                   if (st.id === 'script') {
                     // Screenplay completes only when the engine confirms it: all
@@ -784,12 +783,14 @@ export function WorkflowView({
                   activeStep.id === 'setup' && blankProject
                     ? Boolean(s1.narrator && s1.style && s1.output)
                     : activeStep.id === 'idea'
-                      ? ideaBrief.trim().length > 0 && (goal.text.trim().length > 0 || goal.mode === 'skip')
-                      : isDraftStage(activeStep)
-                        ? hasStageDraft(activeStep)
-                        : activeStep.id === 'script'
-                          ? isComplete(activeStep)
-                          : true
+                      ? ideaBrief.trim().length > 0
+                      : activeStep.id === 'goal'
+                        ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
+                        : isDraftStage(activeStep)
+                          ? hasStageDraft(activeStep)
+                          : activeStep.id === 'script'
+                            ? isComplete(activeStep)
+                            : true
                         
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete
@@ -806,7 +807,7 @@ export function WorkflowView({
                 // already approved (unless dirty), and not while an AI hand-off prepares this step.
                 const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !dirty) && !handoffHere
                 
-                const goalIndex = orderedSteps.findIndex((s) => s.id === 'idea')
+                const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
                 // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
                 const canAutopilot = !autopilot && goalIndex >= 0 && selectableIndex >= goalIndex && activeStep.id !== 'post'
                 const isLast = selectableIndex >= orderedSteps.length - 1
