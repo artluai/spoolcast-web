@@ -10,12 +10,13 @@ import { WorldKitEditor } from './WorldKitEditor'
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
 // pricing tiers will hang off this list when the credit system lands.
 const DRAFT_MODELS = [
-  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast · high (default)' },
-  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max' },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash' },
-  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini' },
+  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast — best value, the default' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash — cheapest, quick drafts' },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro — strong thinker, still cheap' },
+  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini — balanced all-rounder' },
+  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max — stronger Qwen, mid price' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5 — premium voice, mid price' },
+  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8 — best writing, costs the most' },
 ]
 
 /**
