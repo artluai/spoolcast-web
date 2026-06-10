@@ -141,23 +141,25 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   return (
     <div style={{ marginBottom: 24 }}>
       {needRewind && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <span style={{ color: 'var(--amber)', fontSize: 13 }}>
-            This step is already approved. Re-drafting will revoke its approval and every approval
-            after it — later steps go back to pending and need re-approval.
-          </span>
-          <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={rewindAndDraft}>
-            Invalidate & re-draft
-          </button>
-          <button
-            style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
-            onClick={() => setNeedRewind(false)}
-          >
-            Cancel
-          </button>
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
+            This step is already approved. Making a new draft will <b>un-approve it and every step
+            after it</b> — you’ll review and approve them again as you go.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={rewindAndDraft}>
+              Un-approve & make a new draft
+            </button>
+            <button
+              style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+              onClick={() => setNeedRewind(false)}
+            >
+              Never mind, keep it
+            </button>
+          </div>
         </div>
       )}
-      {cfg.aiDraft ? (
+      {!needRewind && cfg.aiDraft ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <button
             className="save-continue"
@@ -193,12 +195,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
           )}
         </div>
-      ) : (
+      ) : !needRewind ? (
         <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: '0 0 10px' }}>
           AI drafting for this step isn’t wired up yet — write it below for now.
         </p>
-      )}
-      {cfg.structured ? (
+      ) : null}
+      {needRewind ? null : cfg.structured ? (
         // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
         // warnings, undo, and reset-to-default — always visible when content exists.
         <WorldKitEditor stageId={stageId} path={cfg.path} />

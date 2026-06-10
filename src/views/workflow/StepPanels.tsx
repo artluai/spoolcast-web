@@ -851,17 +851,17 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
       {needRewind && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <span style={{ color: 'var(--amber)', fontSize: 13 }}>
-            This step is already approved. New suggestions will revoke its approval and every
-            approval after it.
+            This step is already approved. New suggestions will <b>un-approve it and every step
+            after it</b> — you’ll review and approve them again as you go.
           </span>
           <button className="save-continue" style={{ width: 'auto', padding: '8px 14px' }} onClick={rewindAndSuggest}>
-            Invalidate & suggest
+            Un-approve & suggest
           </button>
           <button
             style={{ background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6, color: 'var(--ink-2)', padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
             onClick={() => setNeedRewind(false)}
           >
-            Cancel
+            Never mind, keep it
           </button>
         </div>
       )}

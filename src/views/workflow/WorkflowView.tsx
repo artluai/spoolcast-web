@@ -212,7 +212,7 @@ export function WorkflowView({
   useEffect(() => {
     if (activeApproved && dirty && !warnedRef.current[activeEngineId]) {
       warnedRef.current[activeEngineId] = true
-      onToast('Changes here will invalidate downstream approvals — re-approve to continue.')
+      onToast('Editing this step un-approves it and every step after it — they’ll need approval again.')
     }
     if (!dirty) warnedRef.current[activeEngineId] = false
   }, [activeApproved, dirty, activeEngineId, onToast])
