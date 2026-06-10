@@ -558,36 +558,53 @@ function SpoolcastApp() {
                     setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
 
                     // 3a. AI HAND-OFF (user-checked): after approving this stage, AI
-                    //     prepares the next one. structure → world kit update;
-                    //     world kit → initial script. Checkbox = spend consent.
+                    //     prepares the next one IN THE BACKGROUND. The UI advances
+                    //     immediately; the next step shows a locked "working" state
+                    //     (store.handoff) until the draft lands.
                     if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit')) {
                       const handoff =
                         sourceId === 'structure'
-                          ? { stage_id: 'world_kit', variant: undefined, busy: 'AI is updating the World Kit from the new structure…', done: 'World Kit updated — review it on step 5.', fail: 'World Kit update failed' }
-                          : { stage_id: 'screenplay_plan', variant: 'listener', busy: 'AI is writing the initial script from the kit…', done: 'Initial script ready — review it on the Screenplay step.', fail: 'Script drafting failed' }
-                      setToast(`Approved. ${handoff.busy}`)
-                      try {
-                        const r = await fetch('http://localhost:8000/api/action', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
-                            tenant: 'local',
-                            action: 'draft_stage',
-                            stage_id: handoff.stage_id,
-                            ...(handoff.variant ? { variant: handoff.variant } : {}),
-                            allow_cost: true,
-                          }),
-                        })
-                        const out = await r.json().catch(() => null)
-                        setToast(
-                          r.ok && out?.ok !== false
-                            ? handoff.done
-                            : `${handoff.fail}: ${out?.message || out?.error || 'engine error'} — you can draft it manually on the next step.`,
-                        )
-                      } catch {
-                        setToast(`${handoff.fail} — you can draft it manually on the next step.`)
-                      }
+                          ? { stage_id: 'world_kit', variant: undefined, busy: 'AI is updating the World Kit from the new structure…', done: 'World Kit updated.', fail: 'World Kit update failed' }
+                          : { stage_id: 'screenplay_plan', variant: 'listener', busy: 'AI is writing the draft script from the kit…', done: 'Draft script ready.', fail: 'Script drafting failed' }
+                      useWorkflowStore.getState().setHandoff({ stageId: handoff.stage_id, label: handoff.busy })
+                      ;(async () => {
+                        try {
+                          const r = await fetch('http://localhost:8000/api/action', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              session: 'spoolcast-dev-log-12',
+                              tenant: 'local',
+                              action: 'draft_stage',
+                              stage_id: handoff.stage_id,
+                              ...(handoff.variant ? { variant: handoff.variant } : {}),
+                              allow_cost: true,
+                            }),
+                          })
+                          const out = await r.json().catch(() => null)
+                          if (r.ok && out?.ok !== false) {
+                            // Drop cached drafts so the step loads the fresh file.
+                            useWorkflowStore.getState().clearStageDrafts(handoff.stage_id)
+                            setToast(handoff.done)
+                          } else {
+                            setToast(`${handoff.fail}: ${out?.message || out?.error || 'engine error'} — you can draft it manually.`)
+                          }
+                        } catch {
+                          setToast(`${handoff.fail} — you can draft it manually.`)
+                        } finally {
+                          useWorkflowStore.getState().setHandoff(null)
+                          // Refresh so statuses/gates reflect the new artifacts.
+                          try {
+                            const res2 = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                            if (res2.ok) {
+                              const apiData = await res2.json()
+                              setApiStatus(apiData)
+                              setSteps(buildStepsFromContract(initialStandalone, apiData.data))
+                              setGates(buildGates(initialStandalone, apiData.data))
+                            }
+                          } catch { /* polling will catch up */ }
+                        }
+                      })()
                     }
 
                     // 3. REFRESH: the UI reflects the engine's new state (green gate, statuses, no warning).

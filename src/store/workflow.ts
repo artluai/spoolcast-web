@@ -30,6 +30,12 @@ interface WorkflowStore extends Drafts {
   seedDrafts: (d: Partial<Drafts>) => void // initialize from seed WITHOUT marking dirty
   clearDirty: (stepId: string) => void
   isStepDirty: (stepId: string) => boolean
+  // AI HAND-OFF in flight: the step it's preparing shows a waiting state and
+  // is locked until the draft lands.
+  handoff: { stageId: string; label: string } | null
+  setHandoff: (h: { stageId: string; label: string } | null) => void
+  // Drop cached drafts for a stage so the editor reloads fresh engine content.
+  clearStageDrafts: (stageId: string) => void
 }
 
 const resolve = <T,>(action: React.SetStateAction<T>, prev: T): T =>
@@ -85,4 +91,15 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   clearDirty: (stepId) =>
     set((state) => ({ dirtySteps: { ...state.dirtySteps, [stepId]: false } })),
   isStepDirty: (stepId) => Boolean(get().dirtySteps[stepId]),
+  handoff: null,
+  setHandoff: (h) => set(() => ({ handoff: h })),
+  clearStageDrafts: (stageId) =>
+    set((state) => {
+      const stageDrafts = Object.fromEntries(
+        Object.entries(state.stageDrafts).filter(
+          ([k]) => k !== stageId && !k.startsWith(`${stageId}:`),
+        ),
+      )
+      return { stageDrafts, dirtySteps: { ...state.dirtySteps, [stageId]: false } }
+    }),
 }))

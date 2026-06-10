@@ -94,6 +94,9 @@ export function WorkflowView({
   const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
   const stageDrafts = useWorkflowStore((s) => s.stageDrafts)
   const clearDirty = useWorkflowStore((s) => s.clearDirty)
+  const handoff = useWorkflowStore((s) => s.handoff)
+  // The step an AI hand-off is currently preparing: locked, shows a waiting state.
+  const handoffHere = !!handoff && (activeStep.sourceId ?? activeStep.id) === handoff.stageId
   const dirty = useWorkflowStore((s) => s.isStepDirty(activeStep.sourceId ?? activeStep.id))
 
   // ENGINE PREFILL: the engine is the source of truth — on load, pull the saved
@@ -658,7 +661,14 @@ export function WorkflowView({
             </button>
           </div>
           <div className="detail-body">
-            {/* 1. Always show the normal step content first */}
+            {handoffHere ? (
+              // AI HAND-OFF IN FLIGHT: this step is being prepared — show a
+              // waiting state and lock interaction until the draft lands.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '48px 0', justifyContent: 'center' }}>
+                <span className="spin" />
+                <span style={{ color: 'var(--ink-2)', fontSize: 14 }}>{handoff!.label}</span>
+              </div>
+            ) : (
             <StepContent
               step={activeStep}
               setupMode={setupMode}
@@ -670,6 +680,7 @@ export function WorkflowView({
               origin={origin}
               formatDirty={formatDirty}
             />
+            )}
             
             {/* SCOPED BLOCKER RULE: The single blocker card. It NEVER shows on the step the user is
                 supposed to be working on (the first incomplete step) — there, the disabled
@@ -789,8 +800,9 @@ export function WorkflowView({
                 const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
                 const isBeyondBlocked = firstIncomplete ? currentStepIndex > blockedStepIndex : false
                 
-                // PROGRESSION RULE: Can proceed only if complete, not beyond a blocker, and not already approved (unless dirty)
-                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !dirty)
+                // PROGRESSION RULE: Can proceed only if complete, not beyond a blocker, not
+                // already approved (unless dirty), and not while an AI hand-off prepares this step.
+                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !dirty) && !handoffHere
                 
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
                 // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
