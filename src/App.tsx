@@ -374,7 +374,7 @@ function SpoolcastApp() {
                 autopilot={autopilot}
                 onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
                 onToast={setToast}
-                onAdvance={async (id: string): Promise<boolean> => {
+                onAdvance={async (id: string, opts?: { updateWorldKit?: boolean }): Promise<boolean> => {
                   // SAVE-TO-ENGINE PROTOCOL: Save/Approve must actually move the engine, for EVERY stage:
                   //   1. Persist the user's typed input into the session's source/ folder.
                   //   2. Run the stage's contract action (the engine produces the stage's artifacts).
@@ -556,6 +556,33 @@ function SpoolcastApp() {
                     }
 
                     setToast(needsApproval ? 'Stage approved by engine.' : 'Saved.')
+
+                    // 3a. STEP 4 → 5 HAND-OFF (user-checked): the approved structure
+                    //     feeds the World Kit AI update before we land on step 5.
+                    if (opts?.updateWorldKit && sourceId === 'structure') {
+                      setToast('Approved. AI is updating the World Kit from the new structure…')
+                      try {
+                        const wk = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'draft_stage',
+                            stage_id: 'world_kit',
+                            allow_cost: true, // the checkbox is the spend consent
+                          }),
+                        })
+                        const wkOut = await wk.json().catch(() => null)
+                        setToast(
+                          wk.ok && wkOut?.ok !== false
+                            ? 'World Kit updated — review it on step 5.'
+                            : `World Kit update failed: ${wkOut?.message || wkOut?.error || 'engine error'} — step 5 still has the inherited kit.`,
+                        )
+                      } catch {
+                        setToast('World Kit update failed — step 5 still has the inherited kit.')
+                      }
+                    }
 
                     // 3. REFRESH: the UI reflects the engine's new state (green gate, statuses, no warning).
                     const res = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')

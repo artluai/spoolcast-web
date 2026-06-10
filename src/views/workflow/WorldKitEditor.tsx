@@ -156,16 +156,56 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
           }}
         />
       ) : (
-        doc!.sections.map((section, si) => (
-          <div key={si} className="card" style={{ marginBottom: 14, padding: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+        doc!.sections.map((section, si) => {
+          const isStyleAnchor = /style anchor/i.test(section.heading)
+          const addItem = () => {
+            snapshot()
+            const d = structuredClone(doc!)
+            const sec = d.sections[si]
+            if (sec.kind === 'table') {
+              sec.rows.push(
+                sec.columns.map((c) =>
+                  /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
+                ),
+              )
+              apply(d)
+              setExpanded(`${si}:${sec.rows.length - 1}`)
+            } else {
+              // prose item section → convert to a real item table with one new row
+              const columns = /motion|camera/i.test(section.heading)
+                ? ['Ref', 'Scope', 'Notes']
+                : ['Ref', 'Kind', 'Scope', 'Beats']
+              d.sections[si] = {
+                heading: section.heading,
+                kind: 'table',
+                columns,
+                rows: [
+                  columns.map((c) =>
+                    /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
+                  ),
+                ],
+              }
+              apply(d)
+              setExpanded(`${si}:0`)
+            }
+          }
+          return (
+          <div key={si} className="card" style={{ marginBottom: 12, padding: '14px 16px' }}>
+            {/* CONSISTENT HEADER: title · blurb · + Add pinned right */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>{section.heading}</h3>
               {SECTION_BLURBS[section.heading] && (
-                <span className="label">{SECTION_BLURBS[section.heading]}</span>
+                <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{SECTION_BLURBS[section.heading]}</span>
+              )}
+              <span style={{ flex: 1 }} />
+              {!isStyleAnchor && (
+                <button style={{ ...btn, padding: '5px 12px' }} onClick={addItem}>
+                  + Add
+                </button>
               )}
             </div>
 
-            {section.kind === 'text' && /style anchor/i.test(section.heading) ? (
+            {section.kind === 'text' && isStyleAnchor ? (
               // Style Anchor is a property block, not an item list — text is correct here.
               <textarea
                 value={section.text}
@@ -183,35 +223,13 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
                 }}
               />
             ) : section.kind === 'text' ? (
-              // ITEM SECTION with no items yet (prose like "None."): show the note
-              // and a + Add that converts it to a real item table.
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                {section.text && <span className="label">{section.text}</span>}
-                <button
-                  style={{ ...chip, borderStyle: 'dashed', color: 'var(--ink-2)' }}
-                  onClick={() => {
-                    snapshot()
-                    const d = structuredClone(doc!)
-                    const columns = /motion|camera/i.test(section.heading)
-                      ? ['Ref', 'Scope', 'Notes']
-                      : ['Ref', 'Kind', 'Scope', 'Beats']
-                    d.sections[si] = {
-                      heading: section.heading,
-                      kind: 'table',
-                      columns,
-                      rows: [
-                        columns.map((c) =>
-                          /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
-                        ),
-                      ],
-                    }
-                    apply(d)
-                    setExpanded(`${si}:0`)
-                  }}
-                >
-                  + Add
-                </button>
-              </div>
+              // ITEM SECTION with no items yet: the note reads quietly; + Add
+              // lives in the header like everywhere else.
+              section.text ? (
+                <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0', lineHeight: 1.5 }}>
+                  {section.text}
+                </p>
+              ) : null
             ) : (
               <>
                 {/* ITEMS: character-sheet cards for items with reference images,
@@ -279,24 +297,6 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
                       </button>
                     )
                   })}
-                  <button
-                    style={{ ...chip, borderStyle: 'dashed', color: 'var(--ink-2)' }}
-                    onClick={() => {
-                      snapshot()
-                      const d = structuredClone(doc!)
-                      const sec = d.sections[si]
-                      if (sec.kind !== 'table') return
-                      sec.rows.push(
-                        sec.columns.map((c) =>
-                          /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
-                        ),
-                      )
-                      apply(d)
-                      setExpanded(`${si}:${sec.rows.length - 1}`)
-                    }}
-                  >
-                    + Add
-                  </button>
                 </div>
 
                 {/* EXPANDED ITEM: full view/edit of the selected chip */}
@@ -429,10 +429,11 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
               </>
             )}
           </div>
-        ))
+          )
+        })
       )}
-      <span className="label" style={{ display: 'block', marginTop: 4 }}>
-        ⬡ = shared with the show/template. Saved to the engine on “Approve & continue”.
+      <span style={{ display: 'block', marginTop: 4, color: 'var(--ink-3)', fontSize: 12 }}>
+        ⬡ = shared with the show/template · saved to the engine on “Approve &amp; continue”
       </span>
     </div>
   )

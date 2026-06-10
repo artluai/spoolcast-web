@@ -46,13 +46,17 @@ export function WorkflowView({
   autopilot: boolean
   onOpenCast: () => void
   onToast: (message: string) => void
-  onAdvance: (id: string) => void | boolean | Promise<boolean | void>
+  onAdvance: (id: string, opts?: { updateWorldKit?: boolean }) => void | boolean | Promise<boolean | void>
   onScrolledChange: (scrolled: boolean) => void
   onAutopilot: () => void
   runningId: string | null
   origin: 'blank' | 'template' | 'series'
 }) {
   const [full, setFull] = useState(false)
+  // Step 4 → 5 hand-off: after approving the structure, AI refreshes the World
+  // Kit with what the new structure needs. On by default; the checkbox is the
+  // user's spend consent.
+  const [updateKitAfter, setUpdateKitAfter] = useState(true)
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -791,6 +795,26 @@ export function WorkflowView({
                         explains what's missing, so no extra hint that would
                         displace the button layout. */}
                     <div className="foot-choice">
+                      {activeStep.id === 'plan' && (
+                        <label
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                            color: 'var(--ink-2)', fontSize: 13, cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={updateKitAfter}
+                            onChange={(e) => setUpdateKitAfter(e.target.checked)}
+                            style={{ accentColor: 'var(--ink-2)' }}
+                          />
+                          <span>
+                            <span className="ap-spark">✦</span> After approval, AI updates the World Kit — new
+                            characters, places and props this structure needs
+                            <span style={{ color: 'var(--ink-3)', fontSize: 12 }}> · uses model credits</span>
+                          </span>
+                        </label>
+                      )}
                       {/* Invalidation warning is a toast (fired on first edit of an
                           approved step) — nothing inline that shifts the buttons. */}
                       {/* Native button: relies entirely on .save-continue:disabled CSS for muted styling */}
@@ -803,7 +827,9 @@ export function WorkflowView({
                           // engine actually accepted the save/approval. If it refused, stay
                           // put — the step keeps its "in progress" state and the refreshed
                           // blockers explain what's missing.
-                          const ok = await onAdvance(activeStep.id)
+                          const ok = await onAdvance(activeStep.id, {
+                            updateWorldKit: activeStep.id === 'plan' && updateKitAfter,
+                          })
                           if (ok === false) return
                           clearDirty(activeStep.sourceId ?? activeStep.id)
                           if (isLast) onToast('Approved and finished.')
