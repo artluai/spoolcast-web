@@ -190,7 +190,7 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
             }
           }
           return (
-          <div key={si} className="card" style={{ marginBottom: 12, padding: '14px 16px' }}>
+          <div key={si} style={{ padding: '14px 0', borderTop: si > 0 ? '1px solid var(--line, #2a3142)' : undefined }}>
             {/* CONSISTENT HEADER: title · blurb · + Add pinned right */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>{section.heading}</h3>
