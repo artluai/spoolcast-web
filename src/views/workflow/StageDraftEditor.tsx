@@ -5,6 +5,7 @@ import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
+import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
@@ -231,7 +232,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           AI drafting for this step isn’t wired up yet — write it below for now.
         </p>
       ) : null}
-      {needRewind ? null : cfg.structured ? (
+      {needRewind ? null : cfg.structured === 'pacing' ? (
+        // STRUCTURED MODE (visual pacing): timeline/table/script views over the
+        // plan markdown — parse → edit → serialize, same draft the engine reads.
+        <VisualPacingEditor stageId={stageId} />
+      ) : cfg.structured === 'worldkit' ? (
         // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
         // warnings, undo, and reset-to-default — always visible when content exists.
         <WorldKitEditor stageId={stageId} path={cfg.path} />

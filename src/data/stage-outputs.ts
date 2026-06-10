@@ -6,7 +6,7 @@
 // gate-token audits and need their own flow.
 export const STAGE_DRAFT_OUTPUTS: Record<
   string,
-  { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean; structured?: boolean }
+  { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean; structured?: 'worldkit' | 'pacing' }
 > = {
   structure: {
     path: 'working/structure.md',
@@ -20,15 +20,16 @@ export const STAGE_DRAFT_OUTPUTS: Record<
     label: 'World Kit',
     aiDraft: true, // draft_world_kit: inherits show-shared items, proposes episode-only ones
     autoSuggest: true, // arriving with no kit pre-opens the one-click suggest confirm
-    structured: true, // per-item editor (WorldKitEditor) instead of the md preview/textarea
+    structured: 'worldkit', // per-item editor (WorldKitEditor) instead of the md preview/textarea
     placeholder:
       '# World Kit\n\nStyle anchor, cast, environments, props, beat refs — house table format.\nUse “Draft with AI” to suggest items from the approved structure.',
   },
-  // visual_pacing has no drafting script yet — manual editor only.
   visual_pacing: {
     path: 'working/visual-pacing-plan.md',
     label: 'Visual pacing plan',
+    aiDraft: true, // draft_visual_pacing: plans every visual moment from the final script + World Kit
+    structured: 'pacing', // timeline/table/script editor (VisualPacingEditor) over the plan markdown
     placeholder:
-      '# Visual pacing\n\nPer-chunk visual moments, image counts, b-roll/meme/reaction candidates.\nWrite or paste the plan here (markdown).',
+      '# Visual Pacing Plan — spoolcast-dev-log-12\n\n## Meta\n\n| Field | Value |\n|---|---|\n| Style | wojak-gpt2 |\n\n## C001 — Cold Open\n\nSummary: What this chunk does for the viewer.\n\n**Beat 001A**: "First narration line…"\n\n| Img | Hold | Refs | What | Why now |\n|---|---|---|---|---|\n| I01 | 4.0s | builder | What the viewer sees. | Why the image changes here. |\n\n## Overlays\n\n| ID | Anchor | Trigger phrase | Overlay | Hold | Placement |\n|---|---|---|---|---|---|',
   },
 }

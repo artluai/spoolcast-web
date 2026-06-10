@@ -9,7 +9,7 @@ import {
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
-import { ShotListPanel, VisualGallery, VisualPacingPanel } from './VisualPacing'
+import { ShotListPanel, VisualGallery } from './VisualPacing'
 import { ScreenplayStage } from './ScreenplayStage'
 import { StageDraftEditor } from './StageDraftEditor'
 
@@ -88,13 +88,11 @@ export function StepContent({
     return <ScreenplayStage stageId={stepId} />
   }
   if (step.id === 'voice') return <NarrationContent />
-  if (step.id === 'pacing')
-    return (
-      <>
-        <StageDraftEditor stageId={stepId} />
-        <VisualPacingPanel blankProject={blankProject} />
-      </>
-    )
+  if (step.id === 'pacing') {
+    // Visual pacing, made real: AI draft (draft_visual_pacing, metered) +
+    // the timeline/table/script editor bound to working/visual-pacing-plan.md.
+    return <StageDraftEditor stageId={stepId} />
+  }
   if (step.id === 'shots') return <ShotListPanel />
   if (step.id === 'pics') return <VisualGallery />
   if (step.id === 'post')

@@ -733,7 +733,7 @@ export function WorkflowView({
 
             {/* AI HAND-OFF option (content area — the standard button block below
                 stays untouched): after approving this step, AI prepares the next. */}
-            {(activeStep.id === 'plan' || activeStep.id === 'worldkit') && (
+            {(activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script') && (
               <label
                 title="Runs right after your approval — uses model credits"
                 style={{
@@ -749,7 +749,9 @@ export function WorkflowView({
                 />
                 {activeStep.id === 'plan'
                   ? 'after approval, AI adds this structure’s new characters, places & props to the World Kit'
-                  : 'after approval, AI writes the initial script from this kit on the next step'}
+                  : activeStep.id === 'worldkit'
+                    ? 'after approval, AI writes the initial script from this kit on the next step'
+                    : 'after approval, AI plans the visuals — what appears on screen, when, and why'}
               </label>
             )}
 
@@ -855,7 +857,7 @@ export function WorkflowView({
                           setAdvancing(true)
                           try {
                             const ok = await onAdvance(activeStep.id, {
-                              aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit') && updateKitAfter,
+                              aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script') && updateKitAfter,
                             })
                             if (ok === false) return
                             clearDirty(activeStep.sourceId ?? activeStep.id)

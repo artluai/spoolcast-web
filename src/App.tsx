@@ -562,11 +562,13 @@ function SpoolcastApp() {
                     //     STARTED only after the quick status refresh below, so the
                     //     long model call can never queue ahead of it.
                     const startHandoff = () => {
-                    if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit')) {
+                    if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit' || sourceId === 'screenplay_plan')) {
                       const handoff =
                         sourceId === 'structure'
                           ? { stage_id: 'world_kit', variant: undefined, busy: 'AI is updating the World Kit from the new structure…', done: 'World Kit updated.', fail: 'World Kit update failed' }
-                          : { stage_id: 'screenplay_plan', variant: 'listener', busy: 'AI is writing the draft script from the kit…', done: 'Draft script ready.', fail: 'Script drafting failed' }
+                          : sourceId === 'world_kit'
+                            ? { stage_id: 'screenplay_plan', variant: 'listener' as string | undefined, busy: 'AI is writing the draft script from the kit…', done: 'Draft script ready.', fail: 'Script drafting failed' }
+                            : { stage_id: 'visual_pacing', variant: undefined, busy: 'AI is planning the visuals from the final script…', done: 'Visual pacing plan ready.', fail: 'Visual pacing draft failed' }
                       useWorkflowStore.getState().setHandoff({ stageId: handoff.stage_id, label: handoff.busy })
                       ;(async () => {
                         try {
