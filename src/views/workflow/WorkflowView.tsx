@@ -771,8 +771,13 @@ export function WorkflowView({
               Next ›
             </button>
             <span style={{ position: 'relative' }}>
-              <button className="icon-btn" title="Start over options" onClick={() => setResetMenu((v) => !v)}>
-                ↺
+              <button
+                className="icon-btn"
+                title="Start over — deletes work (asks first)"
+                style={{ color: 'var(--amber)' }}
+                onClick={() => setResetMenu((v) => !v)}
+              >
+                ⚠
               </button>
               {resetMenu ? (
                 <>
