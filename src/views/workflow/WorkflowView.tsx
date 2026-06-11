@@ -636,6 +636,30 @@ export function WorkflowView({
                   : undefined
           }
         >
+          {/* RESIZE HANDLES (right edge · bottom edge · corner): drag to set
+              the card's size, double-click to go back to automatic. */}
+          {!fullView ? (
+            <>
+              <div
+                title="Drag to resize · double-click for automatic width"
+                onPointerDown={(e) => startCardResize(e, 'e')}
+                onDoubleClick={() => setUserSize((s) => ({ ...s, w: null }))}
+                style={{ position: 'absolute', top: 0, bottom: 0, right: -3, width: 7, cursor: 'ew-resize', zIndex: 12, touchAction: 'none' }}
+              />
+              <div
+                title="Drag to resize · double-click for automatic height"
+                onPointerDown={(e) => startCardResize(e, 's')}
+                onDoubleClick={() => setUserSize((s) => ({ ...s, h: null }))}
+                style={{ position: 'absolute', left: 0, right: 0, bottom: -3, height: 7, cursor: 'ns-resize', zIndex: 12, touchAction: 'none' }}
+              />
+              <div
+                title="Drag to resize · double-click for automatic size"
+                onPointerDown={(e) => startCardResize(e, 'se')}
+                onDoubleClick={() => setUserSize({ w: null, h: null })}
+                style={{ position: 'absolute', right: -3, bottom: -3, width: 16, height: 16, cursor: 'nwse-resize', zIndex: 13, touchAction: 'none' }}
+              />
+            </>
+          ) : null}
           <div
             className="detail-head"
             onMouseDown={(event) => {
