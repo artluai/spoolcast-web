@@ -85,6 +85,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     collapseOverride[st] ?? (st === 'listener' && draftOf('screenplay').trim() !== '')
   // Diff highlight: show where the Final script changed from the Draft.
   const [showDiff, setShowDiff] = useState(true)
+  // When the findings were produced — so the user knows they're post-draft.
+  const [auditAt, setAuditAt] = useState<string | null>(null)
   // PER-ISSUE IGNORE: ignored findings are excluded from what Re-polish asks
   // the AI to fix (and listed as "leave alone"). The CHECKS still see them —
   // waiving the gate itself stays the explicit "Skip the checks" act.
@@ -171,7 +173,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return r.ok
   }
 
-  const runDraft = async (st: StationKey, feedback = '') => {
+  const runDraft = async (st: StationKey, feedback = ''): Promise<boolean> => {
     setBusy(st)
     setErr(null)
     try {
@@ -188,10 +190,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         if (out?.error === 'illegal_action') {
           // The engine has moved past this step (stale files / earlier approval).
           setNeedRewind({ st, feedback })
-          return
+          return false
         }
         setErr(out?.message || out?.error || 'Drafting failed.')
-        return
+        return false
       }
       const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(FILES[st])}`)
       const fileOut = await fr.json().catch(() => null)
@@ -205,18 +207,21 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           if (!d?.ok) {
             setErr(d?.message || `${label} check could not run.`)
             setAudit(null)
-            return
+            return false
           }
           if (!d.passed) view.passed = false
           for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
           for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
         }
         setAudit(view)
-      } else {
+        setAuditAt(new Date().toLocaleTimeString())
+      } else if (st === 'screenplay') {
         setAudit(null)
       }
+      return true
     } catch {
       setErr('Could not reach the engine.')
+      return false
     } finally {
       setBusy(null)
     }
@@ -252,6 +257,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
       }
       setAudit(view)
+      setAuditAt(new Date().toLocaleTimeString())
     } catch {
       setErr('Could not reach the engine.')
     } finally {
@@ -317,6 +323,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               {num} · {title}
             </h3>
             <span style={{ flex: 1 }} />
+            {busy === st ? <span className="spin" /> : null}
             {draft.trim() && (
               <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
                 {s.words} words · ~{s.time}
@@ -565,7 +572,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         // all live inside this station — polishing and checking are one thing.
         <>
           {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
-            <div id={`audit-findings-${stageId}`} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '10px 0 0' }}>
+              Checks re-ran automatically after the last draft{auditAt ? ` (${auditAt})` : ''} — these findings are current.
+              Voice findings grade the Draft script; script findings grade the Final.
+            </p>
+          )}
+          {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
+            <div id={`audit-findings-${stageId}`} style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {audit.blocking.map((f, i) => {
                 const k = fkey(f)
                 const isIgnored = ignored.has(k)
@@ -615,12 +628,30 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           {draftOf('screenplay').trim() && !confirmSkip && audit && !audit.passed && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
               <FeedbackButton
-                label={ignoredBlocking.length ? 'Re-polish (fix the rest)' : 'Re-polish to fix these'}
-                busy={busy === 'screenplay'}
-                disabled={!!busy && busy !== 'screenplay'}
-                title="Re-polishes the script to address the findings above (minus any you ignored) — uses model credits"
+                label={ignoredBlocking.length ? 'Fix the rest' : 'Fix these'}
+                busy={busy === 'screenplay' || busy === 'listener'}
+                busyLabel={busy === 'listener' ? 'Rewriting draft…' : 'Polishing…'}
+                disabled={!!busy}
+                title="Routes each finding to the document it grades: voice findings rewrite the Draft script, then the polish runs, then the checks re-run automatically. Uses model credits."
                 rulesFocus="story"
-                onRun={(fb) => runDraft('screenplay', composeAuditFeedback(fb))}
+                onRun={async (fb) => {
+                  // VOICE findings grade the DRAFT script — fixing only the
+                  // final can never clear them. Fix the draft first, then
+                  // polish; the checks re-run automatically at the end.
+                  const voice = remainingBlocking.filter((f) => f.label === 'voice')
+                  if (voice.length) {
+                    const voiceFb = [
+                      'Fix these voice-check findings:',
+                      ...voice.map((f) => `- ${f.detail}`),
+                      fb.trim(),
+                    ]
+                      .filter(Boolean)
+                      .join('\n')
+                    const ok = await runDraft('listener', voiceFb)
+                    if (!ok) return
+                  }
+                  await runDraft('screenplay', composeAuditFeedback(fb))
+                }}
               />
               <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
                 Skip the checks
