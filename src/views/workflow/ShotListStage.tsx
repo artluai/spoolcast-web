@@ -48,6 +48,18 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState('')
   const [edited, setEdited] = useState(false)
+  // Engine truth: is this stage actually buildable yet? A paid button must
+  // never look ready on a blocked step.
+  const [stageCurrent, setStageCurrent] = useState<boolean | null>(null)
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/status?session=${SESSION}&tenant=local`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        const cur = out?.data?.current_contract_stage?.id
+        if (typeof cur === 'string') setStageCurrent(cur === 'shot_list_json')
+      })
+      .catch(() => {})
+  }, [])
 
   // Prefill from the engine's real file — never clobber an edit in progress.
   useEffect(() => {
@@ -175,25 +187,27 @@ export function ShotListStage({ stageId }: { stageId: string }) {
 
   return (
     <div className="vp panel-flat">
-      {/* Build / re-build (paid, validated in the same operation) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-        <FeedbackButton
-          label={chunks.length ? 'Re-build storyboard' : 'Build storyboard'}
-          busyLabel="Building…"
-          busy={building}
-          title="Compiles the approved pacing plan — structure copied by code, AI writes the picture directions, validator certifies it. Uses model credits."
-          onRun={(fb) => build(fb)}
-        />
-        <span className="label">
-          from the approved pacing plan · validated + Excel in the same run · uses model credits
-        </span>
-        {chunks.length > 0 ? (
-          <button type="button" className="vp-undo" disabled={checking} onClick={recheck} title="Free — saves your edits and reruns the validator">
-            {checking ? 'Checking…' : edited ? 'Save & re-check' : 'Re-check'}
-          </button>
-        ) : null}
-        {error ? <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {error}</span> : null}
-      </div>
+      {/* Build / re-build (paid, validated in the same operation). The button
+          only appears when the engine says this stage is actually buildable —
+          a paid action must never look ready on a blocked step. */}
+      {stageCurrent || chunks.length > 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <FeedbackButton
+            label={chunks.length ? 'Re-build storyboard' : 'Build storyboard'}
+            busyLabel="Building…"
+            busy={building}
+            title="Compiles the approved pacing plan — structure copied by code, AI writes the picture directions, the validator certifies it before you see it. Uses model credits."
+            onRun={(fb) => build(fb)}
+          />
+          {chunks.length > 0 ? (
+            <button type="button" className="vp-undo" disabled={checking} onClick={recheck} title="Free — saves your edits and reruns the validator">
+              {checking ? 'Checking…' : edited ? 'Save & re-check' : 'Re-check'}
+            </button>
+          ) : null}
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>uses model credits</span>
+          {error ? <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {error}</span> : null}
+        </div>
+      ) : null}
 
       {/* Validation status — what the code certified, in plain sight. */}
       {audit ? (
@@ -219,16 +233,14 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       ) : null}
 
       {!chunks.length ? (
-        <div className="stub vp-empty">
-          <span>SB</span>
-          <h3>No storyboard yet</h3>
-          <p>
-            The storyboard is the machine-precise work order compiled from your approved pacing
-            plan: every image's generation prompt, references, timing, and on-screen text —
-            validated before you ever see it. Build it with the button above, or tick the
-            hand-off checkbox when approving Visual Pacing.
-          </p>
-        </div>
+        <p style={{ maxWidth: 560, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
+          No storyboard yet. This step turns your approved pacing plan into the precise work
+          order for the image generator — every picture's instructions, references, and timing,
+          checked by the validator before you see it.
+          {stageCurrent === false
+            ? ' It unlocks once Visual Pacing is approved — tick the hand-off checkbox there and the AI builds it for you.'
+            : ''}
+        </p>
       ) : (
         <>
           {/* One line of facts. */}

@@ -774,7 +774,15 @@ export function WorkflowView({
                 return null // On or before the step being worked on — never show the blocker here.
               }
 
-              const stepNumber = String(blockedStepIndex + 1).padStart(2, '0')
+              // Number and name come from the USER-VISIBLE step list, not the
+              // engine node index (the graph has internal nodes the UI folds
+              // away — counting them said "Step 08 (Visual Pacing)" while the
+              // header called the same screen Step 07).
+              const blockedUiIndex = orderedSteps.findIndex(
+                (s) => (s.sourceId ?? s.id) === firstIncomplete.id,
+              )
+              const stepNumber = String((blockedUiIndex >= 0 ? blockedUiIndex : blockedStepIndex) + 1).padStart(2, '0')
+              const stepName = blockedUiIndex >= 0 ? orderedSteps[blockedUiIndex].name : firstIncomplete.label
               // Detail lines only when the engine explicitly marks the stage blocked (missing artifacts etc.)
               const missingArtifacts = firstIncomplete.status === 'blocked'
                 ? (firstIncomplete.artifacts?.filter((a: any) => a.required && !a.exists) || [])
@@ -788,7 +796,7 @@ export function WorkflowView({
               return (
                 <div className="card" style={{ marginTop: 24, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
                   <div className="ch" style={{ marginBottom: blockersToShow.length > 0 ? 12 : 0 }}>
-                    <h3 style={{ color: 'var(--red)' }}>Step {stepNumber} ({firstIncomplete.label}) must be completed first</h3>
+                    <h3 style={{ color: 'var(--red)' }}>Step {stepNumber} ({stepName}) must be completed first</h3>
                     <span className="label">Finish that step before this one unlocks</span>
                   </div>
                   {blockersToShow.length > 0 && (
