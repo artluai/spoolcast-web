@@ -233,13 +233,12 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       ) : null}
 
       {!chunks.length ? (
-        <p style={{ maxWidth: 560, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
-          No storyboard yet. This step turns your approved pacing plan into the precise work
-          order for the image generator — every picture's instructions, references, and timing,
-          checked by the validator before you see it.
-          {stageCurrent === false
-            ? ' It unlocks once Visual Pacing is approved — tick the hand-off checkbox there and the AI builds it for you.'
-            : ''}
+        // One line — the red blocker card below already explains the unlock,
+        // so don't say it twice in a second width.
+        <p style={{ color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
+          No storyboard yet — this step compiles your approved pacing plan into the image
+          generator’s work order, validated before you see it.
+          {stageCurrent ? ' Build it above, with optional feedback for the AI.' : ''}
         </p>
       ) : (
         <>
