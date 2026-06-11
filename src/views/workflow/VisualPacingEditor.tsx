@@ -234,7 +234,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           value={draft}
           onChange={(e) => setStageDraft(stageId, e.target.value)}
           style={{
-            width: '100%', minHeight: 320, resize: 'vertical', background: 'transparent',
+            width: '100%', minHeight: 320, minWidth: 360, maxWidth: '100%', resize: 'both', background: 'transparent',
             color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)',
             borderRadius: 8, padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             fontSize: 13, lineHeight: 1.55,
@@ -820,7 +820,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {editing ? (
-        <div className="vp-edit" ref={editBoxRef}>
+        <div
+          className="vp-edit"
+          ref={editBoxRef}
+          style={{ resize: 'both', overflow: 'auto', minWidth: 380, minHeight: 150, maxWidth: '100%' }}
+        >
           <div className="vp-edit-head">
             <span className="id">
               {editing.scope === 'image'

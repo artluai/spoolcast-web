@@ -226,7 +226,7 @@ export function RulesView() {
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       style={{
-                        width: '100%', minHeight: '70vh', resize: 'vertical', boxSizing: 'border-box',
+                        width: '100%', minHeight: '70vh', minWidth: 360, maxWidth: '100%', resize: 'both', boxSizing: 'border-box',
                         background: 'transparent', color: 'var(--ink-1, inherit)',
                         border: '1px solid var(--line, #2a3142)', borderRadius: 8, padding: 12,
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',

@@ -1263,7 +1263,16 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
             <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.jump ? '→' : open === r.id ? '▾' : '▸'}</span>
           </div>
           {open === r.id && r.detail ? (
-            <div style={{ padding: '4px 2px 18px 164px', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+            // Reading width, not page width — and resizable from the corner
+            // grip (min 320×60) for whoever wants it bigger.
+            <div
+              style={{
+                margin: '4px 2px 18px 164px', padding: '2px 14px 10px 0',
+                maxWidth: 560, minWidth: 320, minHeight: 60,
+                resize: 'both', overflow: 'auto',
+                color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6,
+              }}
+            >
               {r.detail}
             </div>
           ) : null}

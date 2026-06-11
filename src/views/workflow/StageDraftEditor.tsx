@@ -356,8 +356,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
               style={{
                 width: '100%',
                 minHeight: 240,
+                minWidth: 360,
+                maxWidth: '100%',
                 marginTop: 10,
-                resize: 'vertical',
+                resize: 'both',
                 background: 'transparent',
                 color: 'var(--ink-1, inherit)',
                 border: '1px solid var(--line, #2a3142)',
