@@ -495,6 +495,46 @@ function SpoolcastApp() {
                         }
                       }
                     }
+                    if (sourceId === 'screenplay_plan') {
+                      // MULTI-FILE STAGE: the auto-rewind above DELETED the
+                      // screenplay's files. Persist both station drafts back
+                      // from the store, then re-run the free checks so the
+                      // stage's required audit artifacts exist again —
+                      // otherwise approval fails on missing files.
+                      const sd = useWorkflowStore.getState().stageDrafts
+                      const files: [string, string][] = [
+                        ['working/listener-draft.md', sd[`${sourceId}:listener`] ?? ''],
+                        ['working/screenplay-v3.md', sd[`${sourceId}:screenplay`] ?? ''],
+                      ]
+                      for (const [path, content] of files) {
+                        if (!content.trim()) continue
+                        const so = await fetch('http://localhost:8000/api/action', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: 'spoolcast-dev-log-12',
+                            tenant: 'local',
+                            action: 'set_stage_output',
+                            stage_id: sourceId,
+                            path,
+                            content,
+                          }),
+                        })
+                        if (!so.ok) {
+                          setToast(`Could not save ${path} to the engine.`)
+                          return false
+                        }
+                      }
+                      if (wasAlreadyPassed) {
+                        for (const stage of ['screenplay', 'narration']) {
+                          await fetch('http://localhost:8000/api/action', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'run_audit', stage }),
+                          }).catch(() => {})
+                        }
+                      }
+                    }
                     if (sourceId === 'story_lock') {
                       // The core message is the stage's contract output — record it in session.json.
                       const goal = useWorkflowStore.getState().goal
