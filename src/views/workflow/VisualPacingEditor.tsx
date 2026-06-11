@@ -15,6 +15,7 @@ import {
   resolvedSections,
   serializePacingPlan,
   timelineOf,
+  type PacingChunk,
   type PacingOverlay,
   type PacingPlan,
   type PacingSection,
@@ -43,14 +44,23 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; chunkId: string; beatCode?: string; imageId?: string } | null>(null)
   const [editing, setEditing] = useState<EditDraft | null>(null)
-  const [view, setView] = useState<'table' | 'script'>('table')
+  const [view, setView] = useState<'table' | 'script'>('script')
   const [activeId, setActiveId] = useState('')
+  // Step-level undo lives in the step header (Undo · Previous · Next) — the
+  // editor registers its undo there instead of drawing its own button.
+  const setStepUndo = useWorkflowStore((s) => s.setStepUndo)
+  const undoRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    setStepUndo({ count: history.length, run: () => undoRef.current() })
+    return () => setStepUndo(null)
+  }, [history.length, setStepUndo])
   // TIMELINE EDGE DRAG: live hold overrides while dragging the boundary
   // between two images of the same beat (zero-sum — the words own the total).
   const [dragHolds, setDragHolds] = useState<Record<string, number> | null>(null)
   const dragHoldsRef = useRef<Record<string, number> | null>(null)
-  // SCRIPT TAG DRAG: which image tag is being dragged to a new start word.
-  const [scriptDrag, setScriptDrag] = useState<{ chunkId: string; beatCode: string; imageId: string; candidate: number | null } | null>(null)
+  // SCRIPT TAG DRAG: which image tag is being dragged to a new start word
+  // (anywhere within its audio chunk).
+  const [scriptDrag, setScriptDrag] = useState<{ chunkId: string; imageId: string; candidate: number | null } | null>(null)
   const scriptDragRef = useRef<typeof scriptDrag>(null)
   // SECTION BOUNDARY DRAG: live override of one boundary (dimension-line tick).
   const [secDrag, setSecDrag] = useState<{ index: number; toS: number } | null>(null)
@@ -144,6 +154,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setEditing(null)
     setMenu(null)
   }
+  undoRef.current = undo
   const apply = (p: PacingPlan) => {
     snapshot()
     setStageDraft(stageId, serializePacingPlan(p))
@@ -403,18 +414,24 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     else saveEdit()
   }
 
-  // Script view: distribute each beat's words across its images proportionally
-  // to hold time (estimated timing — real word alignment arrives with TTS).
-  const beatSpans = (narration: string, imgs: { id: string; holdS: number }[]) => {
-    const words = narration.split(/\s+/).filter(Boolean)
+  // Script view: chunk-level word stream — the chunk's images distribute
+  // across ALL its words proportionally to hold time, so a tag can be dragged
+  // anywhere within its audio chunk (across beat boundaries too). Estimated
+  // timing — real word alignment arrives with TTS at step 09.
+  const chunkWordData = (chunk: PacingChunk) => {
+    const words: { w: string; beatCode: string }[] = []
+    for (const b of chunk.beats)
+      for (const w of b.narration.split(/\s+/).filter(Boolean)) words.push({ w, beatCode: b.code })
+    const imgs = chunk.beats.flatMap((b) => b.images)
     const total = imgs.reduce((n, i) => n + i.holdS, 0) || 1
     let acc = 0
-    return imgs.map((img) => {
+    const spans = imgs.map((img) => {
       const from = Math.round((acc / total) * words.length)
       acc += img.holdS
       const to = Math.max(from, Math.round((acc / total) * words.length) - 1)
       return { id: img.id, from, to }
     })
+    return { words, imgs, spans }
   }
 
   const setDraftField = (patch: Record<string, string>) => setEditing((d) => (d ? ({ ...d, ...patch } as EditDraft) : d))
@@ -533,11 +550,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     window.addEventListener('pointerup', onUp)
   }
 
-  // --- script tag drag (move an image's start to a different word) ---
-  const startTagDrag = (e: React.PointerEvent, chunkId: string, beatCode: string, imageId: string) => {
+  // --- script tag drag (move an image's start to a different word, anywhere
+  // within its audio chunk — the chunk's total time is preserved) ---
+  const startTagDrag = (e: React.PointerEvent, chunkId: string, imageId: string) => {
     e.preventDefault()
     e.stopPropagation()
-    const d = { chunkId, beatCode, imageId, candidate: null as number | null }
+    const d = { chunkId, imageId, candidate: null as number | null }
     scriptDragRef.current = d
     setScriptDrag(d)
     const onMove = (ev: PointerEvent) => {
@@ -545,7 +563,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       const wordEl = el instanceof Element ? el.closest('[data-widx]') : null
       const cur = scriptDragRef.current
       if (!cur) return
-      if (wordEl && wordEl.getAttribute('data-beat') === `${cur.chunkId}:${cur.beatCode}`) {
+      if (wordEl && wordEl.getAttribute('data-chunk') === cur.chunkId) {
         const idx = Number(wordEl.getAttribute('data-widx'))
         if (Number.isFinite(idx) && idx !== cur.candidate) {
           const next = { ...cur, candidate: idx }
@@ -562,19 +580,19 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       setScriptDrag(null)
       if (!cur || cur.candidate == null) return
       const next = clone()
-      const beat = next.chunks.find((c) => c.id === cur.chunkId)?.beats.find((b) => b.code === cur.beatCode)
-      if (!beat) return
-      const words = beat.narration.split(/\s+/).filter(Boolean)
-      const total = beat.images.reduce((n, i) => n + i.holdS, 0)
-      const k = beat.images.findIndex((i) => i.id === cur.imageId)
-      if (k <= 0 || words.length < 2) return // first image always starts the beat
-      const starts = beatSpans(beat.narration, beat.images).map((s) => s.from)
+      const chunk = next.chunks.find((c) => c.id === cur.chunkId)
+      if (!chunk) return
+      const { words, imgs, spans } = chunkWordData(chunk)
+      const total = imgs.reduce((n, i) => n + i.holdS, 0)
+      const k = imgs.findIndex((i) => i.id === cur.imageId)
+      if (k <= 0 || words.length < 2) return // the chunk's first image starts the chunk
+      const starts = spans.map((s) => s.from)
       const minStart = (starts[k - 1] ?? 0) + 1
       const maxStart = k + 1 < starts.length ? starts[k + 1] - 1 : words.length - 1
       if (minStart > maxStart) return
       starts[k] = Math.min(Math.max(cur.candidate, minStart), maxStart)
       const bounds = [...starts, words.length]
-      beat.images.forEach((img, i2) => {
+      imgs.forEach((img, i2) => {
         img.holdS = Math.max(0.5, round1(((bounds[i2 + 1] - bounds[i2]) / words.length) * total))
       })
       apply(next)
@@ -587,8 +605,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   return (
     <div className="vp panel-flat">
       {/* One line of facts — per-section counts live on the dimension lines
-          below the timeline. No separate stats row (clean UI). */}
-      <div className="ch">
+          below the timeline. No separate stats row, no divider (clean UI). */}
+      <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
         <h3>Visual pacing — {stats.chunks} audio chunks · {stats.images} images · ~{fmtClock(stats.runtimeS)}</h3>
         <span>working/visual-pacing-plan.md</span>
       </div>
@@ -631,12 +649,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <span>{img.id}</span>
               </button>
             ))}
-            {/* Drag handles on boundaries between images of the SAME beat —
-                zero-sum: one grows, the other shrinks. Beat/chunk edges are
-                owned by the narration words, so they don't get handles. */}
+            {/* Drag handles on EVERY boundary between adjacent images —
+                zero-sum: one grows, the other shrinks (total runtime fixed).
+                Real timing supersedes these estimates when audio lands. */}
             {images.map((img, idx) => {
               const nxt = images[idx + 1]
-              if (!nxt || nxt.chunkId !== img.chunkId || nxt.beatCode !== img.beatCode) return null
+              if (!nxt) return null
               return (
                 <div
                   key={`h-${img.id}`}
@@ -745,17 +763,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <button type="button" className="vp-undo" title="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>−</button>
           <button type="button" className="vp-undo" title="Zoom in (timeline scrolls sideways)" onClick={() => setZoom((z) => Math.min(8, z * 1.5))}>+</button>
           <button type="button" className="vp-undo" title="Fit the whole video in view" disabled={zoom <= 1} onClick={() => setZoom(1)}>Fit</button>
-          <button
-            type="button"
-            className="vp-undo"
-            title="See or edit the exact text file the engine reads"
-            onClick={() => setRaw(true)}
-          >
-            Edit as text
-          </button>
-          <button type="button" className="vp-undo" onClick={undo} disabled={history.length === 0}>
-            ↶ Undo{history.length ? ` (${history.length})` : ''}
-          </button>
         </span>
       </div>
 
@@ -871,9 +878,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       <div className="vp-viewbar">
         <h4 className="vp-sub-h">Pacing</h4>
         <div className="vp-viewtoggle">
-          <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
           <button type="button" className={view === 'script' ? 'on' : ''} onClick={() => setView('script')}>Script</button>
+          <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
         </div>
+        <button
+          type="button"
+          className="vp-undo"
+          title="See or edit the exact text file the engine reads"
+          style={{ marginLeft: 8 }}
+          onClick={() => setRaw(true)}
+        >
+          Edit as text
+        </button>
       </div>
 
       {view === 'table' ? (
@@ -907,31 +923,36 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           ref={listRef}
           style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh', ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
         >
-          {dp.chunks.map((chunk) => (
-            <p className="vp-script-chunk" key={chunk.id}>
-              <span className="vp-script-cid">{chunk.id}</span>
-              {chunk.beats.map((beat) => {
-                const words = beat.narration.split(/\s+/).filter(Boolean)
-                const spans = beatSpans(beat.narration, beat.images)
-                const beatKey = `${chunk.id}:${beat.code}`
-                const dragHere = scriptDrag && scriptDrag.chunkId === chunk.id && scriptDrag.beatCode === beat.code
-                return words.map((w, i) => {
-                  const owner = spans.find((s) => i >= s.from && i <= s.to)
+          {dp.chunks.map((chunk) => {
+            const { words, imgs, spans } = chunkWordData(chunk)
+            const beatOf: Record<string, string> = {}
+            for (const b of chunk.beats) for (const im of b.images) beatOf[im.id] = b.code
+            const dragHere = scriptDrag && scriptDrag.chunkId === chunk.id
+            return (
+              <p className="vp-script-chunk" key={chunk.id}>
+                <span className="vp-script-cid">{chunk.id}</span>
+                {words.map((cw, i) => {
+                  const ownerIdx = spans.findIndex((s) => i >= s.from && i <= s.to)
+                  const owner = ownerIdx >= 0 ? spans[ownerIdx] : undefined
                   const cls = ['vp-w']
                   if (owner) cls.push('img')
                   if (owner && owner.id === activeId) cls.push('on')
-                  const ownerImg = owner ? beat.images.find((im) => im.id === owner.id) : undefined
-                  const isDropTarget = dragHere && scriptDrag!.candidate === i
+                  const ownerImg = ownerIdx >= 0 ? imgs[ownerIdx] : undefined
+                  const isDropTarget = !!dragHere && scriptDrag!.candidate === i
                   return (
-                    <span key={`${beat.code}:${i}`}>
+                    <span key={`${chunk.id}:${i}`}>
                       {owner && i === owner.from ? (
                         <span
                           className="vp-w-tag"
                           data-img={owner.id}
-                          title={`${ownerImg?.what ?? ''} — drag to the word where this image should start`}
-                          onPointerDown={(e) => startTagDrag(e, chunk.id, beat.code, owner.id)}
+                          title={
+                            ownerIdx === 0
+                              ? `${ownerImg?.what ?? ''} — starts the chunk (drag the tags after it)`
+                              : `${ownerImg?.what ?? ''} — drag between words to change when this image appears`
+                          }
+                          onPointerDown={ownerIdx > 0 ? (e) => startTagDrag(e, chunk.id, owner.id) : undefined}
                           style={{
-                            cursor: scriptDrag?.imageId === owner.id ? 'grabbing' : 'grab',
+                            cursor: ownerIdx > 0 ? (scriptDrag?.imageId === owner.id ? 'grabbing' : 'grab') : 'default',
                             touchAction: 'none',
                             opacity: scriptDrag && scriptDrag.imageId !== owner.id ? 0.5 : undefined,
                           }}
@@ -941,18 +962,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       ) : null}
                       <span
                         className={cls.join(' ')}
-                        data-beat={beatKey}
+                        data-chunk={chunk.id}
                         data-widx={i}
                         onMouseEnter={owner && !scriptDrag ? () => setActiveId(owner.id) : undefined}
-                        onClick={owner && !scriptDrag ? (e) => openMenu(e, { chunkId: chunk.id, beatCode: beat.code, imageId: owner.id }) : undefined}
+                        onClick={owner && !scriptDrag ? (e) => openMenu(e, { chunkId: chunk.id, beatCode: beatOf[owner.id], imageId: owner.id }) : undefined}
                         style={isDropTarget ? { outline: '1px dashed var(--ink-2)', borderRadius: 3 } : undefined}
-                      >{w}</span>{' '}
+                      >{cw.w}</span>{' '}
                     </span>
                   )
-                })
-              })}
-            </p>
-          ))}
+                })}
+              </p>
+            )
+          })}
         </div>
       )}
 

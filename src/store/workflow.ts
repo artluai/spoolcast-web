@@ -36,6 +36,10 @@ interface WorkflowStore extends Drafts {
   setHandoff: (h: { stageId: string; label: string } | null) => void
   // Drop cached drafts for a stage so the editor reloads fresh engine content.
   clearStageDrafts: (stageId: string) => void
+  // A step editor can expose its undo to the step header (Undo · Previous ·
+  // Next). null = no undo available on the active step.
+  stepUndo: { count: number; run: () => void } | null
+  setStepUndo: (u: { count: number; run: () => void } | null) => void
 }
 
 const resolve = <T,>(action: React.SetStateAction<T>, prev: T): T =>
@@ -93,6 +97,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   isStepDirty: (stepId) => Boolean(get().dirtySteps[stepId]),
   handoff: null,
   setHandoff: (h) => set(() => ({ handoff: h })),
+  stepUndo: null,
+  setStepUndo: (u) => set(() => ({ stepUndo: u })),
   clearStageDrafts: (stageId) =>
     set((state) => {
       const stageDrafts = Object.fromEntries(

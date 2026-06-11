@@ -92,6 +92,7 @@ export function WorkflowView({
   // DIRTY STATE TRACKING: per-step dirty flags live in the zustand workflow store,
   // keyed by the engine node id (activeStep.sourceId) the approval logic compares against.
   const s1 = useWorkflowStore((s) => s.s1)
+  const stepUndo = useWorkflowStore((s) => s.stepUndo)
   const ideaBrief = useWorkflowStore((s) => s.ideaBrief)
   const goal = useWorkflowStore((s) => s.goal)
   const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
@@ -650,6 +651,12 @@ export function WorkflowView({
               </>
             ) : null}
             <span className="spacer" />
+            {/* Step-level undo, when the active step's editor offers one. */}
+            {stepUndo ? (
+              <button disabled={stepUndo.count === 0} onClick={() => stepUndo.run()} title="Undo the last edit on this step">
+                ↶ Undo{stepUndo.count ? ` (${stepUndo.count})` : ''}
+              </button>
+            ) : null}
             <button disabled={selectableIndex <= 0} onClick={() => setSelected(orderedSteps[selectableIndex - 1].id)}>
               ‹ Previous
             </button>
