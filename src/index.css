@@ -1858,3 +1858,21 @@ body.chat-pinned { padding-right: 380px; }
 .md-preview th { color: var(--ink-1); background: rgba(255,255,255,.03); }
 .md-preview blockquote { border-left: 3px solid var(--line); margin: 8px 0; padding: 2px 12px; color: var(--ink-3); }
 .md-preview hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+
+/* Sleek minimal range slider (house style): hairline track, small round
+   thumb, filled-portion tint via --fill set inline from the value. */
+.sleek-range { -webkit-appearance: none; appearance: none; height: 16px; background: transparent; cursor: pointer; }
+.sleek-range::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 1px;
+  background: linear-gradient(to right, var(--ink-2) var(--fill, 50%), var(--line) var(--fill, 50%));
+}
+.sleek-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px;
+  border-radius: 50%; background: var(--ink); border: none;
+  transition: transform .12s ease;
+}
+.sleek-range:hover::-webkit-slider-thumb { transform: scale(1.25); }
+.sleek-range::-moz-range-track { height: 2px; border-radius: 1px; background: var(--line); }
+.sleek-range::-moz-range-progress { height: 2px; border-radius: 1px; background: var(--ink-2); }
+.sleek-range::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: none; }
+.sleek-range:disabled { opacity: .35; cursor: default; }

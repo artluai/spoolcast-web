@@ -1109,47 +1109,29 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
       })
   }, [stepId, seedDrafts])
 
-  // One flat row — preset chips instead of a slider, the ✦ AI button at the
-  // end. The "not inherited" explanation lives in the tooltip.
-  const PRESETS: [number, string][] = [
-    [60, '1 min'], [120, '2 min'], [180, '3 min'], [300, '5 min'], [480, '8 min'],
-  ]
-  const chipStyle = (sel: boolean): React.CSSProperties => ({
-    border: `1px solid ${sel ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
-    background: sel ? 'var(--bg-3, rgba(255,255,255,.05))' : 'none',
-    color: sel ? 'var(--ink)' : 'var(--ink-2)',
-    borderRadius: 99, padding: '5px 13px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
-  })
+  // One quiet row: label · sleek hairline slider · value · ✦ AI button.
+  // The "not inherited" explanation lives in the tooltip.
+  const fill = `${Math.round((((s1.length || 300) - 30) / (600 - 30)) * 100)}%`
   return (
     <div
       title="Not inherited from the show — structure, script, and visuals are planned to this length"
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', flexWrap: 'wrap' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}
     >
-      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap', marginRight: 6 }}>Length</span>
-      {PRESETS.map(([sec, label]) => (
-        <button key={sec} type="button" style={chipStyle(s1.length === sec)} onClick={() => setS1((c) => ({ ...c, length: sec }))}>
-          {label}
-        </button>
-      ))}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ink-3)', fontSize: 12 }}>
-        <input
-          type="number"
-          min={1}
-          max={60}
-          value={s1.length > 0 ? Math.round(s1.length / 60 * 10) / 10 : ''}
-          placeholder="…"
-          onChange={(e) => {
-            const m = parseFloat(e.target.value)
-            if (Number.isFinite(m) && m > 0) setS1((c) => ({ ...c, length: Math.round(m * 60) }))
-          }}
-          style={{
-            width: 52, background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
-            border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '5px 8px', fontSize: 12,
-          }}
-        />
-        min
-      </span>
-      <span style={{ flex: 1 }} />
+      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Length</span>
+      <input
+        type="range"
+        className="sleek-range"
+        min={30}
+        max={600}
+        step={15}
+        value={s1.length || 300}
+        disabled={s1.length === 0}
+        onChange={(event) => setS1((c) => ({ ...c, length: Number(event.target.value) }))}
+        style={{ flex: 1, ['--fill' as string]: fill } as React.CSSProperties}
+      />
+      <b style={{ fontSize: 13, color: s1.length === 0 ? 'var(--ink-3)' : 'var(--ink)', whiteSpace: 'nowrap', minWidth: 92, textAlign: 'right' }}>
+        {s1.length === 0 ? 'Auto' : `~${Math.round((s1.length / 60) * 10) / 10} min · ${s1.length}s`}
+      </b>
       <button
         className={`ai-btn ${s1.length === 0 ? 'sel' : ''}`}
         title="The AI picks a length from the source material at the structure step"
@@ -1207,7 +1189,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       value: `Wojak comic${styleId ? ` · ${styleId}` : ''}`,
       detail: (
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-          <img src={asset('styles/wojak-comic/references/chad.png')} alt="" style={{ width: 96, borderRadius: 6 }} />
+          <img src={asset('styles/wojak-comic/references/chad.png')} alt="" style={{ width: 240, maxWidth: '45%', borderRadius: 8 }} />
           <p style={{ margin: 0 }}>
             Locked by the show — every episode renders in this style so the channel looks
             consistent. The style anchor, character references, and prompt rules live in the
@@ -1253,11 +1235,11 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
     { id: 'worldkit', label: 'World Kit', value: 'cast, places, props & references', jump: onOpenCast },
   ]
 
+  // No divider lines — quiet rows separated by whitespace only.
   const rowBtn: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-    padding: '13px 2px', background: 'none', border: 'none',
-    borderBottom: '1px solid var(--line, #2a3142)',
-    cursor: 'pointer', fontSize: 13, textAlign: 'left',
+    padding: '11px 2px', background: 'none', border: 'none',
+    cursor: 'pointer', fontSize: 13, textAlign: 'left', borderRadius: 6,
   }
 
   return (
@@ -1271,7 +1253,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
             <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.jump ? '→' : open === r.id ? '▾' : '▸'}</span>
           </button>
           {open === r.id && r.detail ? (
-            <div style={{ padding: '12px 2px 16px 164px', borderBottom: '1px solid var(--line, #2a3142)', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+            <div style={{ padding: '4px 2px 18px 164px', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
               {r.detail}
             </div>
           ) : null}
