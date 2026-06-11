@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  fmtBudget,
   fmtClock,
+  isOverBudget,
+  isUnderBudget,
   nextChunkId,
   nextImageId,
   OPENING_WINDOW_S,
   pacingStats,
   parseHold,
+  parseBudget,
   parsePacingPlan,
   planDurationS,
   planIsWellFormed,
@@ -293,10 +297,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       const s = updated[d.index]
       if (s) {
         s.name = d.name.trim() || s.name
-        const ib = parseInt(d.imageBudget, 10)
-        s.imageBudget = Number.isFinite(ib) && ib >= 0 ? ib : null
-        const ob = parseInt(d.overlayBudget, 10)
-        s.overlayBudget = Number.isFinite(ob) && ob >= 0 ? ob : null
+        s.imageBudget = parseBudget(d.imageBudget)
+        s.overlayBudget = parseBudget(d.overlayBudget)
         if (d.index < updated.length - 1 && d.to.trim()) {
           const toS = parseHold(d.to)
           if (toS > s.fromS + 1 && toS < updated[d.index + 1].toS - 1) {
@@ -463,8 +465,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setEditing({
       scope: 'section', index, isNew: false, name: s.name,
       to: `${Math.round(s.toS)}s`,
-      imageBudget: s.imageBudget != null ? String(s.imageBudget) : '',
-      overlayBudget: s.overlayBudget != null ? String(s.overlayBudget) : '',
+      imageBudget: s.imageBudget ? fmtBudget(s.imageBudget) : '',
+      overlayBudget: s.overlayBudget ? fmtBudget(s.overlayBudget) : '',
     })
   }
 
@@ -644,16 +646,15 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <span className="vp-tl-label">Sections</span>
           <div className="vp-tl-track" style={{ position: 'relative', height: 20 }}>
             {secs.map((s, k) => {
-              const over =
-                (s.imageBudget != null && s.imageCount > s.imageBudget) ||
-                (s.overlayBudget != null && s.overlayCount > s.overlayBudget)
-              const color = over ? 'var(--amber)' : 'var(--ink-3)'
+              const over = isOverBudget(s.imageBudget, s.imageCount) || isOverBudget(s.overlayBudget, s.overlayCount)
+              const under = isUnderBudget(s.imageBudget, s.imageCount) || isUnderBudget(s.overlayBudget, s.overlayCount)
+              const color = over || under ? 'var(--amber)' : 'var(--ink-3)'
               return (
                 <button
                   type="button"
                   key={`${s.name}-${k}`}
                   onClick={() => openSectionEdit(k)}
-                  title={`${s.name}: ${fmtClock(s.fromS)}–${fmtClock(s.toS)} · ${s.imageCount}${s.imageBudget != null ? `/${s.imageBudget}` : ''} images${s.overlayBudget != null ? ` · ${s.overlayCount}/${s.overlayBudget} overlays` : ''} — click to set targets`}
+                  title={`${s.name}: ${fmtClock(s.fromS)}–${fmtClock(s.toS)} · ${s.imageCount}${s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} images${s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} overlays` : ''} — click to set targets`}
                   style={{
                     position: 'absolute', left: `${pct(s.fromS)}%`, width: `${pct(s.toS - s.fromS)}%`,
                     top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 6,
@@ -664,9 +665,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 >
                   <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
                   <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s.name} · {s.imageCount}{s.imageBudget != null ? `/${s.imageBudget}` : ''} img
-                    {s.overlayBudget != null ? ` · ${s.overlayCount}/${s.overlayBudget} ovl` : ''}
-                    {over ? ' · over budget' : ''}
+                    {s.name} · {s.imageCount}{s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} img
+                    {s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} ovl` : ''}
+                    {over ? ' · over budget' : under ? ' · under range' : ''}
                   </span>
                   <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
                 </button>
@@ -771,8 +772,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 {editing.index < secs.length - 1 ? (
                   <label>Ends at<input value={editing.to} onChange={(e) => setDraftField({ to: e.target.value })} placeholder="45s" /></label>
                 ) : null}
-                <label>Image target<input value={editing.imageBudget} onChange={(e) => setDraftField({ imageBudget: e.target.value })} placeholder="no target" /></label>
-                <label>Overlay target<input value={editing.overlayBudget} onChange={(e) => setDraftField({ overlayBudget: e.target.value })} placeholder="no target" /></label>
+                <label>Image target<input value={editing.imageBudget} onChange={(e) => setDraftField({ imageBudget: e.target.value })} placeholder="e.g. 10 or 8–12 or 10±2" /></label>
+                <label>Overlay target<input value={editing.overlayBudget} onChange={(e) => setDraftField({ overlayBudget: e.target.value })} placeholder="e.g. 2 or 1–3" /></label>
               </div>
               <p className="vp-hint" style={{ margin: '8px 0 0' }}>
                 Targets are read by “Re-draft with AI” above — the AI must stay at or under them

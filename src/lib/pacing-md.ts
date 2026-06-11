@@ -28,15 +28,46 @@ export type PacingOverlay = {
   holdS: number
   placement: string
 }
+// A BUDGET is a density target: "10" (aim 10, never more) or a range
+// "8–12" / "10±2" (aim the middle, BOTH edges enforced in code — the user
+// explicitly chose the floor, so falling under it is a rejection too).
+export type Budget = { min: number | null; max: number }
+
+export function parseBudget(s: string): Budget | null {
+  const t = String(s).trim()
+  if (!t || t === '—' || t === '-') return null
+  let m = t.match(/^(\d+)\s*(?:±|\+\/-|\+-)\s*(\d+)$/)
+  if (m) {
+    const aim = parseInt(m[1], 10)
+    const tol = parseInt(m[2], 10)
+    return { min: Math.max(0, aim - tol), max: aim + tol }
+  }
+  m = t.match(/^(\d+)\s*[–-]\s*(\d+)$/)
+  if (m) {
+    const a = parseInt(m[1], 10)
+    const b = parseInt(m[2], 10)
+    return { min: Math.min(a, b), max: Math.max(a, b) }
+  }
+  m = t.match(/^(\d+)$/)
+  if (m) return { min: null, max: parseInt(m[1], 10) }
+  return null
+}
+
+export const fmtBudget = (b: Budget | null): string =>
+  b == null ? '—' : b.min != null && b.min !== b.max ? `${b.min}–${b.max}` : `${b.max}`
+
+export const budgetAim = (b: Budget): number =>
+  b.min != null ? Math.round((b.min + b.max) / 2) : b.max
+
 // A SECTION is a named time window with density targets ("opening: 9 images").
 // Sections are directives the human sets and the AI drafter must honor —
-// budgets are enforced as caps in code on redraft. toS 'end' = video end.
+// budgets are enforced in code on redraft. toS 'end' = video end.
 export type PacingSection = {
   name: string
   fromS: number
   toS: number | 'end'
-  imageBudget: number | null
-  overlayBudget: number | null
+  imageBudget: Budget | null
+  overlayBudget: Budget | null
 }
 
 export type PacingPlan = {
@@ -152,16 +183,12 @@ export function parsePacingPlan(md: string): PacingPlan {
         if (key) plan.meta[key] = val
       } else if (section.kind === 'sections') {
         const toRaw = col(cols, cells, 'To').trim().toLowerCase()
-        const budget = (s: string): number | null => {
-          const n = parseInt(s, 10)
-          return Number.isFinite(n) && n >= 0 ? n : null
-        }
         plan.sections.push({
           name: col(cols, cells, 'Name') || cells[0] || 'section',
           fromS: parseHold(col(cols, cells, 'From')),
           toS: toRaw === 'end' || toRaw === '' ? 'end' : parseHold(toRaw),
-          imageBudget: budget(col(cols, cells, 'Image budget')),
-          overlayBudget: budget(col(cols, cells, 'Overlay budget')),
+          imageBudget: parseBudget(col(cols, cells, 'Image budget')),
+          overlayBudget: parseBudget(col(cols, cells, 'Overlay budget')),
         })
       } else if (section.kind === 'overlays') {
         plan.overlays.push({
@@ -255,11 +282,17 @@ export type ResolvedSection = {
   name: string
   fromS: number
   toS: number
-  imageBudget: number | null
-  overlayBudget: number | null
+  imageBudget: Budget | null
+  overlayBudget: Budget | null
   imageCount: number
   overlayCount: number
 }
+
+// Outside-the-target tests for display: over the max is always flagged; under
+// is only flagged when the user set an explicit floor (a range).
+export const isOverBudget = (b: Budget | null, count: number): boolean => b != null && count > b.max
+export const isUnderBudget = (b: Budget | null, count: number): boolean =>
+  b != null && b.min != null && count < b.min
 
 export function resolvedSections(plan: PacingPlan): ResolvedSection[] {
   const runtime = planDurationS(plan)
@@ -304,7 +337,7 @@ export function serializePacingPlan(plan: PacingPlan): string {
     for (const s of plan.sections)
       parts.push(
         `| ${cell(s.name)} | ${Math.round(s.fromS)}s | ${s.toS === 'end' ? 'end' : `${Math.round(s.toS)}s`} ` +
-          `| ${s.imageBudget ?? '—'} | ${s.overlayBudget ?? '—'} |`,
+          `| ${fmtBudget(s.imageBudget)} | ${fmtBudget(s.overlayBudget)} |`,
       )
   }
 
