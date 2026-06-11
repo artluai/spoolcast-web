@@ -1235,11 +1235,13 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
     { id: 'worldkit', label: 'World Kit', value: 'cast, places, props & references', jump: onOpenCast },
   ]
 
-  // No divider lines — quiet rows separated by whitespace only.
+  // No divider lines — quiet rows separated by whitespace only. Plain divs,
+  // not <button>s: dark-mode browsers paint buttons with their own dark
+  // background, which read as a "black bar" here.
   const rowBtn: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-    padding: '11px 2px', background: 'none', border: 'none',
-    cursor: 'pointer', fontSize: 13, textAlign: 'left', borderRadius: 6,
+    padding: '11px 2px', backgroundColor: 'transparent',
+    cursor: 'pointer', fontSize: 13, textAlign: 'left',
   }
 
   return (
@@ -1247,11 +1249,19 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       <div className="eyebrow" style={{ marginBottom: 2 }}>Inherited from {showName}</div>
       {rows.map((r) => (
         <div key={r.id}>
-          <button type="button" style={rowBtn} onClick={() => (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))}>
+          <div
+            role="button"
+            tabIndex={0}
+            style={rowBtn}
+            onClick={() => (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))
+            }}
+          >
             <span style={{ width: 150, flexShrink: 0, color: 'var(--ink-2)' }}>{r.label}</span>
             <span style={{ flex: 1, color: 'var(--ink)' }}>{r.value}</span>
             <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.jump ? '→' : open === r.id ? '▾' : '▸'}</span>
-          </button>
+          </div>
           {open === r.id && r.detail ? (
             <div style={{ padding: '4px 2px 18px 164px', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
               {r.detail}
