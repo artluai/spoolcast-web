@@ -14,6 +14,38 @@ const FILES: Record<StationKey, string> = {
   screenplay: 'working/screenplay-v3.md',
 }
 
+// Word-level diff (longest-common-subsequence): marks which words of `after`
+// are new/changed relative to `before`. Whitespace (incl. paragraph breaks)
+// is preserved for rendering; only words are compared.
+function diffTokens(before: string, after: string): { tokens: string[]; isWord: boolean[]; marks: boolean[] } | null {
+  const A = before.split(/\s+/).filter(Boolean)
+  const tokens = after.split(/(\s+)/).filter((t) => t.length > 0)
+  const isWord = tokens.map((t) => !/^\s+$/.test(t))
+  const B = tokens.filter((_, i) => isWord[i])
+  const n = A.length
+  const m = B.length
+  if (n === 0 || m === 0 || n * m > 4_000_000) return null
+  const w = m + 1
+  const dp = new Uint16Array((n + 1) * w)
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * w + j] = A[i] === B[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1])
+  const wordMarks: boolean[] = new Array(m).fill(true)
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (A[i] === B[j]) {
+      wordMarks[j] = false
+      i += 1
+      j += 1
+    } else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) i += 1
+    else j += 1
+  }
+  let wi = 0
+  const marks = tokens.map((_, k) => (isWord[k] ? wordMarks[wi++] : false))
+  return { tokens, isWord, marks }
+}
+
 type AuditView = {
   passed: boolean
   skipped?: boolean
@@ -38,7 +70,21 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [audit, setAudit] = useState<AuditView | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
-  const [needRewind, setNeedRewind] = useState<StationKey | null>(null)
+  // The rewind prompt carries the feedback that triggered it — after "set back
+  // to pending", the SAME instructions run (losing them silently re-polished
+  // generically and reproduced the very findings the user asked to fix).
+  const [needRewind, setNeedRewind] = useState<{ st: StationKey; feedback: string } | null>(null)
+  const rewindRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (needRewind) rewindRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [needRewind])
+  // Station collapse: while the Final script exists, the Draft station folds
+  // to one line (expandable) — the user works on one thing at a time.
+  const [collapseOverride, setCollapseOverride] = useState<Partial<Record<StationKey, boolean>>>({})
+  const isCollapsed = (st: StationKey) =>
+    collapseOverride[st] ?? (st === 'listener' && draftOf('screenplay').trim() !== '')
+  // Diff highlight: show where the Final script changed from the Draft.
+  const [showDiff, setShowDiff] = useState(true)
   // PER-ISSUE IGNORE: ignored findings are excluded from what Re-polish asks
   // the AI to fix (and listed as "leave alone"). The CHECKS still see them —
   // waiving the gate itself stays the explicit "Skip the checks" act.
@@ -141,7 +187,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       if (!r.ok || out?.ok === false) {
         if (out?.error === 'illegal_action') {
           // The engine has moved past this step (stale files / earlier approval).
-          setNeedRewind(st)
+          setNeedRewind({ st, feedback })
           return
         }
         setErr(out?.message || out?.error || 'Drafting failed.')
@@ -249,9 +295,41 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     const draft = draftOf(st)
     const enabled = !disabledReason && !busy
     const s = stats(draft)
+    const collapsed = isCollapsed(st)
+    const chevron = (
+      <button
+        type="button"
+        title={collapsed ? 'Expand' : 'Collapse'}
+        onClick={() => setCollapseOverride((o) => ({ ...o, [st]: !collapsed }))}
+        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink-3)', display: 'flex' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .15s ease' }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+    )
+    if (collapsed) {
+      return (
+        <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {chevron}
+            <h3 style={{ margin: 0, fontSize: 15, color: 'var(--ink-2)', cursor: 'pointer' }} onClick={() => setCollapseOverride((o) => ({ ...o, [st]: false }))}>
+              {num} · {title}
+            </h3>
+            <span style={{ flex: 1 }} />
+            {draft.trim() && (
+              <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                {s.words} words · ~{s.time}
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    }
     return (
       <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {chevron}
           <h3 style={{ margin: 0, fontSize: 15, cursor: 'help' }} title={blurb}>{num} · {title}</h3>
           <span style={{ flex: 1 }} />
           {draft.trim() && (
@@ -278,6 +356,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     ? `✓ checks passed · ${audit.warnings.length} warning(s)`
                     : '✓ checks passed'
                   : `✕ ${remainingBlocking.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
+            </button>
+          )}
+          {st === 'screenplay' && draft.trim() && draftOf('listener').trim() && (
+            <button
+              style={{ ...ghost, color: showDiff ? 'var(--ink)' : 'var(--ink-2)' }}
+              title="Highlight what the polish changed from the draft script"
+              onClick={() => setShowDiff((v) => !v)}
+            >
+              Changes {showDiff ? 'on' : 'off'}
             </button>
           )}
           {st === 'screenplay' && draft.trim() && (
@@ -346,13 +433,37 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 }}
               />
             ) : draft.trim() ? (
-              <div
-                className="md-preview"
-                title="Click to edit"
-                onClick={() => setEditing(st)}
-                style={{ marginTop: 6, cursor: 'text' }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
-              />
+              (() => {
+                const diff =
+                  st === 'screenplay' && showDiff && draftOf('listener').trim()
+                    ? diffTokens(displayBody(draftOf('listener')), displayBody(draft))
+                    : null
+                return diff ? (
+                  // CHANGES VIEW: the final script with everything that differs
+                  // from the draft tinted. Click to edit, as usual.
+                  <div
+                    title="Click to edit · tinted = changed from the draft script"
+                    onClick={() => setEditing(st)}
+                    style={{ marginTop: 6, cursor: 'text', fontSize: 14, lineHeight: 1.75, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}
+                  >
+                    {diff.tokens.map((t, k) =>
+                      diff.marks[k] ? (
+                        <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
+                      ) : (
+                        <span key={k}>{t}</span>
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    className="md-preview"
+                    title="Click to edit"
+                    onClick={() => setEditing(st)}
+                    style={{ marginTop: 6, cursor: 'text' }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
+                  />
+                )
+              })()
             ) : (
               <button
                 type="button"
@@ -373,17 +484,28 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     <div>
       {err && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 10 }}>Engine: {err}</div>}
       {needRewind && (
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
-            The engine has already moved past this step. Making a new draft will <b>set this step and
-            every step after it back to pending</b> — you’ll review and approve them again as you go.
+        <div
+          ref={rewindRef}
+          style={{
+            margin: '4px 0 18px',
+            borderLeft: '2px solid var(--amber)',
+            padding: '10px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <b style={{ fontSize: 13, color: 'var(--amber)' }}>This step is already approved</b>
+          <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: 0, lineHeight: 1.5, maxWidth: 560 }}>
+            Making a new draft sets this step and everything after it back to pending — you review
+            and approve them again as you go.{needRewind.feedback ? ' Your feedback carries over to the new draft.' : ''}
           </p>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="save-continue"
               style={{ width: 'auto', padding: '8px 14px' }}
               onClick={async () => {
-                const st = needRewind
+                const { st, feedback } = needRewind
                 setNeedRewind(null)
                 try {
                   const r = await post({ action: 'rewind_stage', stage_id: stageId })
@@ -393,13 +515,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     return
                   }
                   setAudit(null)
-                  await runDraft(st)
+                  await runDraft(st, feedback) // SAME instructions, not a generic re-run
                 } catch {
                   setErr('Could not reach the engine.')
                 }
               }}
             >
-              Set back to pending & make a new draft
+              Set back to pending & make the new draft
             </button>
             <button style={ghost} onClick={() => setNeedRewind(null)}>Never mind, keep it</button>
           </div>
