@@ -163,6 +163,31 @@ export function WorkflowView({
   
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [cardBox, setCardBox] = useState<{ left: number; top: number; width: number } | null>(null)
+  // USER-SIZED CARD: edge/corner handles set an explicit size the layout
+  // respects (null = automatic). Double-click a handle to reset.
+  const [userSize, setUserSize] = useState<{ w: number | null; h: number | null }>({ w: null, h: null })
+  const startCardResize = (e: React.PointerEvent, dir: 'e' | 's' | 'se') => {
+    e.preventDefault()
+    e.stopPropagation()
+    const card = cardRef.current
+    if (!card) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const w0 = card.offsetWidth
+    const h0 = card.offsetHeight
+    const onMove = (ev: PointerEvent) => {
+      setUserSize((s) => ({
+        w: dir !== 's' ? Math.max(420, w0 + (ev.clientX - startX)) : s.w,
+        h: dir !== 'e' ? Math.max(320, h0 + (ev.clientY - startY)) : s.h,
+      }))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
   const [restLeft, setRestLeft] = useState<number | null>(null)
   const [tetherAnim, setTetherAnim] = useState(false)
   // did the format diverge from the template it started from?
@@ -309,10 +334,23 @@ export function WorkflowView({
       if (view && !fullView) {
         const pinned = document.body.classList.contains('chat-pinned')
         const maxW = showWide ? (pinned ? 1120 : 1280) : 760
-        const targetW = Math.min(maxW, Math.max(280, view.clientWidth - 48))
+        // A user-set size wins over the automatic width (clamped to the view).
+        const targetW =
+          userSize.w != null
+            ? Math.min(Math.max(420, userSize.w), Math.max(420, view.clientWidth - 32))
+            : Math.min(maxW, Math.max(280, view.clientWidth - 48))
         card.style.width = `${targetW}px`
+        if (userSize.h != null) {
+          card.style.height = `${Math.max(320, userSize.h)}px`
+          card.style.overflowY = 'auto'
+        } else {
+          card.style.height = ''
+          card.style.overflowY = ''
+        }
       } else if (fullView) {
         card.style.width = ''
+        card.style.height = ''
+        card.style.overflowY = ''
       }
       const cw = card.offsetWidth
       // center the card horizontally in the visible viewport so it never runs
@@ -366,7 +404,7 @@ export function WorkflowView({
       window.removeEventListener('resize', measure)
       ro.disconnect()
     }
-  }, [activeStep.id, activeStep.x, showWide, fullView, dragPos, s1, runningId])
+  }, [activeStep.id, activeStep.x, showWide, fullView, dragPos, s1, runningId, userSize])
 
   // reset the header-float state when the workflow mounts (always starts at top)
   useEffect(() => {
