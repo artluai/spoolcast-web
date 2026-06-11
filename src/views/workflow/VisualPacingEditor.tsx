@@ -877,7 +877,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'table' ? (
-        <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto' }}>
+        {/* paddingBottom = ~half the panel: lets the LAST rows scroll up to
+            the panel's center too (otherwise they pin to the bottom edge,
+            which can sit below the fold). */}
+        <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh' }}>
           <table className="shots vp-pacing">
             <thead>
               <tr><th>Start</th><th>Img</th><th>Audio chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
@@ -902,7 +905,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div
           className="vp-script"
           ref={listRef}
-          style={{ maxHeight: '48vh', overflowY: 'auto', ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
+          style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh', ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
         >
           {dp.chunks.map((chunk) => (
             <p className="vp-script-chunk" key={chunk.id}>
