@@ -55,6 +55,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // SECTION BOUNDARY DRAG: live override of one boundary (dimension-line tick).
   const [secDrag, setSecDrag] = useState<{ index: number; toS: number } | null>(null)
   const secDragRef = useRef<typeof secDrag>(null)
+  // TIMELINE ZOOM: 1 = fit to width; >1 widens the tracks inside a horizontal
+  // scroll (busy openings, long videos). All drag math is %-based, so it
+  // works unchanged at any zoom.
+  const [zoom, setZoom] = useState(1)
 
   const editKey = editing
     ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : 'index' in editing ? editing.index : editing.chunkId}`
@@ -206,11 +210,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       return host ? { ...o, center: host.startS + host.holdS / 2 } : null
     })
     .filter(Boolean) as (PacingOverlay & { center: number })[]
-  // Minute ticks, but skip any that would crowd the end label (a 2:01 video
-  // otherwise prints "2:00" and "2:01" on top of each other).
+  // Clock ticks: finer intervals when zoomed in; skip any tick that would
+  // crowd the end label (a 2:01 video otherwise prints 2:00 on top of 2:01).
+  const tickStep = zoom >= 4 ? 15 : zoom >= 2 ? 30 : 60
   const ticks: number[] = []
-  const tickGuard = Math.max(8, totalSec * 0.05)
-  for (let s = 0; s <= totalSec; s += 60) if (totalSec - s >= tickGuard) ticks.push(s)
+  const tickGuard = Math.max(8, (totalSec * 0.05) / zoom)
+  for (let s = 0; s <= totalSec; s += tickStep) if (totalSec - s >= tickGuard) ticks.push(s)
 
   // --- mutations (every one snapshots for undo, then serializes back) ---
   const openMenu = (e: React.MouseEvent, m: { chunkId: string; beatCode?: string; imageId?: string }) => {
@@ -565,7 +570,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <span>working/visual-pacing-plan.md</span>
       </div>
 
-      <div className="vp-timeline">
+      <div className="vp-timeline" style={zoom > 1 ? { overflowX: 'auto', paddingBottom: 4 } : undefined}>
+       <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
         {/* "Audio chunks": the narration owns these units — per-template
             naming can come from the contract once multi-template lands. */}
         <div className="vp-tl-row">
@@ -646,16 +652,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
 
-        <div className="vp-tl-row axis">
-          <span className="vp-tl-label" />
-          <div className="vp-tl-track">
-            {ticks.map((t) => (
-              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
-            ))}
-            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
-          </div>
-        </div>
-
         {/* SECTIONS at the bottom: dimension lines (|— opening · 5/9 img —|).
             Click a label to edit name/targets; drag the shared tick to move
             the boundary. Amber = outside a user-set target. */}
@@ -703,6 +699,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             ))}
           </div>
         </div>
+
+        {/* The clock — the very bottom row. */}
+        <div className="vp-tl-row axis">
+          <span className="vp-tl-label" />
+          <div className="vp-tl-track">
+            {ticks.map((t) => (
+              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
+            ))}
+            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
+          </div>
+        </div>
+       </div>
       </div>
 
       <div className="vp-hintbar">
@@ -711,6 +719,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           blocks to rebalance their time · timings are estimates until narration audio exists
         </p>
         <span style={{ display: 'inline-flex', gap: 8 }}>
+          <button type="button" className="vp-undo" title="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>−</button>
+          <button type="button" className="vp-undo" title="Zoom in (timeline scrolls sideways)" onClick={() => setZoom((z) => Math.min(8, z * 1.5))}>+</button>
+          <button type="button" className="vp-undo" title="Fit the whole video in view" disabled={zoom <= 1} onClick={() => setZoom(1)}>Fit</button>
           <button
             type="button"
             className="vp-undo"
