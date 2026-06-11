@@ -27,6 +27,7 @@ export type PacingOverlay = {
   what: string
   holdS: number
   placement: string
+  asset: string // session-relative path of the fetched file ('' = idea only)
 }
 // A BUDGET is a density target: "10" (aim 10, never more) or a range "8–12"
 // (aim the middle, BOTH edges enforced in code — the user explicitly chose
@@ -185,6 +186,7 @@ export function parsePacingPlan(md: string): PacingPlan {
           overlayBudget: parseBudget(col(cols, cells, 'Overlay budget')),
         })
       } else if (section.kind === 'overlays') {
+        const assetRaw = col(cols, cells, 'Asset')
         plan.overlays.push({
           id: col(cols, cells, 'ID') || cells[0] || '',
           anchor: col(cols, cells, 'Anchor'),
@@ -192,6 +194,7 @@ export function parsePacingPlan(md: string): PacingPlan {
           what: col(cols, cells, 'Overlay'),
           holdS: parseHold(col(cols, cells, 'Hold')),
           placement: col(cols, cells, 'Placement') || 'centered',
+          asset: assetRaw === '—' ? '' : assetRaw,
         })
       } else if (section.kind === 'chunk' && beat) {
         beat.images.push({
@@ -352,10 +355,14 @@ export function serializePacingPlan(plan: PacingPlan): string {
   }
 
   parts.push('## Overlays', '')
-  parts.push('| ID | Anchor | Trigger phrase | Overlay | Hold | Placement |', '|---|---|---|---|---|---|')
+  parts.push(
+    '| ID | Anchor | Trigger phrase | Overlay | Hold | Placement | Asset |',
+    '|---|---|---|---|---|---|---|',
+  )
   for (const o of plan.overlays)
     parts.push(
-      `| ${cell(o.id)} | ${cell(o.anchor)} | "${o.trigger.replace(/"/g, '”')}" | ${cell(o.what)} | ${fmtHold(o.holdS)} | ${cell(o.placement)} |`,
+      `| ${cell(o.id)} | ${cell(o.anchor)} | "${o.trigger.replace(/"/g, '”')}" | ${cell(o.what)} ` +
+        `| ${fmtHold(o.holdS)} | ${cell(o.placement)} | ${cell(o.asset) || '—'} |`,
     )
 
   return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'

@@ -34,7 +34,7 @@ import { useWorkflowStore } from '../../store/workflow'
 type EditDraft =
   | { scope: 'image'; chunkId: string; beatCode: string; imageId: string; isNew: boolean; nearImageId?: string; insertPos?: 'before' | 'after'; what: string; why: string; hold: string; refs: string }
   | { scope: 'chunk'; chunkId: string; isNew: boolean; refChunkId?: string; insertPos?: 'before' | 'after'; title: string; summary: string; narration: string }
-  | { scope: 'overlay'; overlayId: string; isNew: boolean; anchor: string; trigger: string; what: string; hold: string; placement: string }
+  | { scope: 'overlay'; overlayId: string; isNew: boolean; anchor: string; trigger: string; what: string; hold: string; placement: string; asset: string }
   | { scope: 'section'; index: number; isNew: boolean; name: string; to: string; imageBudget: string; overlayBudget: string }
 
 export function VisualPacingEditor({ stageId }: { stageId: string }) {
@@ -62,6 +62,46 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // (anywhere within its audio chunk).
   const [scriptDrag, setScriptDrag] = useState<{ chunkId: string; imageId: string; candidate: number | null } | null>(null)
   const scriptDragRef = useRef<typeof scriptDrag>(null)
+  // OVERLAY ASSET FETCH: paste a direct GIF URL (Tenor/Giphy), the engine
+  // downloads + converts it into the session. Search-by-text needs an API key.
+  const [assetUrl, setAssetUrl] = useState('')
+  const [fetchingAsset, setFetchingAsset] = useState(false)
+  const [assetErr, setAssetErr] = useState<string | null>(null)
+  // Dev-server path for previewing session media (vite fs.allow covers
+  // spoolcast-content). Session id hardcode = known debt.
+  const assetSrc = (rel: string) =>
+    `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/sessions/spoolcast-dev-log-12/${rel}`
+  const fetchOverlayAsset = async () => {
+    setEditing((d) => d) // keep editor open
+    const cur = editing
+    if (!cur || cur.scope !== 'overlay' || !assetUrl.trim()) return
+    setFetchingAsset(true)
+    setAssetErr(null)
+    try {
+      const r = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'fetch_overlay_asset',
+          url: assetUrl.trim(),
+          name: `overlay-${cur.overlayId.toLowerCase()}`,
+        }),
+      })
+      const out = await r.json().catch(() => null)
+      if (r.ok && out?.ok !== false && out?.data?.asset) {
+        setEditing((d) => (d && d.scope === 'overlay' ? { ...d, asset: out.data.asset } : d))
+        setAssetUrl('')
+      } else {
+        setAssetErr(out?.message || out?.error || 'Could not fetch the GIF.')
+      }
+    } catch {
+      setAssetErr('Could not reach the engine.')
+    } finally {
+      setFetchingAsset(false)
+    }
+  }
   // SECTION BOUNDARY DRAG: live override of one boundary (dimension-line tick).
   const [secDrag, setSecDrag] = useState<{ index: number; toS: number } | null>(null)
   const secDragRef = useRef<typeof secDrag>(null)
@@ -402,7 +442,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       }
     } else {
       const d = editing
-      const ov = { id: d.overlayId, anchor: d.anchor.trim(), trigger: d.trigger.trim(), what: d.what.trim(), holdS: parseHold(d.hold) || 2, placement: d.placement.trim() || 'centered' }
+      const ov = { id: d.overlayId, anchor: d.anchor.trim(), trigger: d.trigger.trim(), what: d.what.trim(), holdS: parseHold(d.hold) || 2, placement: d.placement.trim() || 'centered', asset: d.asset.trim() }
       if (d.isNew) next.overlays.push(ov)
       else next.overlays = next.overlays.map((o) => (o.id === d.overlayId ? ov : o))
     }
@@ -842,6 +882,34 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <label>Hold<input value={editing.hold} onChange={(e) => setDraftField({ hold: e.target.value })} placeholder="2s" /></label>
                 <label>Placement<input value={editing.placement} onChange={(e) => setDraftField({ placement: e.target.value })} placeholder="centered" /></label>
               </div>
+              {/* THE REAL FILE: paste a direct GIF link and the engine fetches
+                  it into the session — the overlay stops being just an idea. */}
+              <label className="vp-edit-field">Attach the actual GIF (paste a Tenor/Giphy direct link)
+                <span style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={assetUrl}
+                    onChange={(e) => setAssetUrl(e.target.value)}
+                    placeholder="https://media.tenor.com/….gif"
+                    style={{ flex: 1 }}
+                  />
+                  <button type="button" className="vp-undo" disabled={fetchingAsset || !assetUrl.trim()} onClick={fetchOverlayAsset}>
+                    {fetchingAsset ? 'Fetching…' : 'Fetch & attach'}
+                  </button>
+                </span>
+              </label>
+              {assetErr ? <p className="vp-hint" style={{ color: 'var(--red)', margin: '4px 0 0' }}>{assetErr}</p> : null}
+              {editing.asset ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                  <video src={assetSrc(editing.asset)} muted loop autoPlay playsInline style={{ maxHeight: 110, borderRadius: 6 }} />
+                  <span className="label" style={{ flex: 1 }}>{editing.asset}</span>
+                  <button type="button" className="vp-undo" onClick={() => setDraftField({ asset: '' })}>Detach</button>
+                </div>
+              ) : (
+                <p className="vp-hint" style={{ margin: '6px 0 0' }}>
+                  No file attached yet — the storyboard step requires every overlay to have a file
+                  or an explicit skip.
+                </p>
+              )}
             </>
           ) : (
             <>
@@ -995,7 +1063,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div className="table-wrap">
           <table className="shots vp-table">
             <thead>
-              <tr><th>ID</th><th>Trigger</th><th>Overlay</th><th>On image</th><th>Hold</th><th>Placement</th><th></th></tr>
+              <tr><th>ID</th><th>Trigger</th><th>Overlay</th><th>File</th><th>On image</th><th>Hold</th><th>Placement</th><th></th></tr>
             </thead>
             <tbody>
               {p.overlays.map((o) => (
@@ -1003,6 +1071,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                   <td><span className="id">{o.id}</span></td>
                   <td className="narr">"{o.trigger}"</td>
                   <td>{o.what}</td>
+                  <td>
+                    {o.asset ? (
+                      <video src={assetSrc(o.asset)} muted loop autoPlay playsInline title={o.asset} style={{ height: 36, borderRadius: 4, display: 'block' }} />
+                    ) : (
+                      <span className="label" title="No file yet — edit the overlay to attach one">idea only</span>
+                    )}
+                  </td>
                   <td><span className="id">{o.anchor}</span></td>
                   <td className="vp-mono">{o.holdS.toFixed(1)}s</td>
                   <td>{o.placement}</td>
@@ -1011,7 +1086,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       type="button"
                       className="vp-row-menu"
                       title="Edit overlay"
-                      onClick={() => setEditing({ scope: 'overlay', overlayId: o.id, isNew: false, anchor: o.anchor, trigger: o.trigger, what: o.what, hold: `${o.holdS}s`, placement: o.placement })}
+                      onClick={() => setEditing({ scope: 'overlay', overlayId: o.id, isNew: false, anchor: o.anchor, trigger: o.trigger, what: o.what, hold: `${o.holdS}s`, placement: o.placement, asset: o.asset })}
                     >✎</button>
                     <button type="button" className="vp-row-menu" title="Remove overlay" onClick={() => removeOverlay(o.id)}>✕</button>
                   </td>
@@ -1024,7 +1099,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           type="button"
           className="vp-undo"
           style={{ marginTop: 8 }}
-          onClick={() => setEditing({ scope: 'overlay', overlayId: nextOverlayId(), isNew: true, anchor: active?.id ?? '', trigger: '', what: '', hold: '2s', placement: 'centered' })}
+          onClick={() => setEditing({ scope: 'overlay', overlayId: nextOverlayId(), isNew: true, anchor: active?.id ?? '', trigger: '', what: '', hold: '2s', placement: 'centered', asset: '' })}
         >
           + Add overlay
         </button>
