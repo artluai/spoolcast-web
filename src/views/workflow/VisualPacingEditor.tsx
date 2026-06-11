@@ -877,9 +877,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'table' ? (
-        {/* paddingBottom = ~half the panel: lets the LAST rows scroll up to
-            the panel's center too (otherwise they pin to the bottom edge,
-            which can sit below the fold). */}
+        // paddingBottom ≈ half the panel: lets the LAST rows scroll up to the
+        // panel's center too (otherwise they pin to the bottom edge, which
+        // can sit below the fold).
         <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh' }}>
           <table className="shots vp-pacing">
             <thead>
