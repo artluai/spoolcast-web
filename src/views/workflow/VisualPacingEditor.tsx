@@ -624,20 +624,20 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
       <div className="vp-timeline" style={zoom > 1 ? { overflowX: 'auto', paddingBottom: 4 } : undefined}>
        <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
-        {/* "Audio chunks": the narration owns these units — per-template
-            naming can come from the contract once multi-template lands. */}
+        {/* Row order follows video-editor convention: overlays on top, then
+            the visual track, the audio (chunks), sections, and the clock. */}
         <div className="vp-tl-row">
-          <span className="vp-tl-label">Audio chunks</span>
-          <div className="vp-tl-track ruler">
-            {chunkSpans.map((c, i) => (
+          <span className="vp-tl-label">Overlays</span>
+          <div className="vp-tl-track overlays">
+            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
+            {overlayMarks.map((o) => (
               <div
-                key={c.id}
-                className={`vp-ruler-seg ${i % 2 ? 'alt' : ''} ${active && active.chunkId === c.id ? 'on' : ''}`}
-                style={{ left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%` }}
-                title={`${c.id} · ${c.title} — right-click to edit`}
-                onContextMenu={(e) => openMenu(e, { chunkId: c.id, imageId: images.find((im) => im.chunkId === c.id)?.id })}
+                key={o.id}
+                className="vp-overlay-mark"
+                style={{ left: `${pct(o.center)}%` }}
+                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
               >
-                <span>{c.id}</span>
+                {o.id} · {o.holdS.toFixed(1)}s
               </div>
             ))}
           </div>
@@ -687,18 +687,20 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
 
+        {/* "Audio chunks": the narration owns these units — per-template
+            naming can come from the contract once multi-template lands. */}
         <div className="vp-tl-row">
-          <span className="vp-tl-label">Overlays</span>
-          <div className="vp-tl-track overlays">
-            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
-            {overlayMarks.map((o) => (
+          <span className="vp-tl-label">Audio chunks</span>
+          <div className="vp-tl-track ruler">
+            {chunkSpans.map((c, i) => (
               <div
-                key={o.id}
-                className="vp-overlay-mark"
-                style={{ left: `${pct(o.center)}%` }}
-                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
+                key={c.id}
+                className={`vp-ruler-seg ${i % 2 ? 'alt' : ''} ${active && active.chunkId === c.id ? 'on' : ''}`}
+                style={{ left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%` }}
+                title={`${c.id} · ${c.title} — right-click to edit`}
+                onContextMenu={(e) => openMenu(e, { chunkId: c.id, imageId: images.find((im) => im.chunkId === c.id)?.id })}
               >
-                {o.id} · {o.holdS.toFixed(1)}s
+                <span>{c.id}</span>
               </div>
             ))}
           </div>
