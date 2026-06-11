@@ -260,7 +260,9 @@ export function WorkflowView({
     engineStatus === 'not_started' ? 'Not started' :
     engineStatus === 'ready' ? 'Ready' :
     'Pending'
-  const showWide = ['setup', 'idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'script'].includes(activeStep.id)
+  // Width should serve the content: wide is for big editors, grids, and
+  // timelines. Steps that are just rows/options (setup) stay at normal width.
+  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'script'].includes(activeStep.id)
 
   const NODE_W = 172
   const NODE_H = 88
