@@ -9,7 +9,8 @@ import {
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
-import { ShotListPanel, VisualGallery } from './VisualPacing'
+import { VisualGallery } from './VisualPacing'
+import { ShotListStage } from './ShotListStage'
 import { ScreenplayStage } from './ScreenplayStage'
 import { StageDraftEditor } from './StageDraftEditor'
 
@@ -78,7 +79,11 @@ export function StepContent({
     // the timeline/table/script editor bound to working/visual-pacing-plan.md.
     return <StageDraftEditor stageId={stepId} />
   }
-  if (step.id === 'shots') return <ShotListPanel />
+  if (step.id === 'shots') {
+    // Storyboard, made real: AI compile (validated in the same operation) +
+    // work-order editor + free re-check. Approval gates the paid image steps.
+    return <ShotListStage stageId={stepId} />
+  }
   if (step.id === 'pics') return <VisualGallery />
   if (step.id === 'post')
     return <SaveTemplateContent step={step} origin={origin} formatDirty={formatDirty} onToast={onToast} />
