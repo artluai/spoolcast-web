@@ -131,7 +131,7 @@ export function Header({
           </button>
           {onRules ? (
             <button className={`btn-soft ${isRules ? 'active' : ''}`} onClick={onRules} title="The rulebooks the AI works under — view and edit">
-              House rules
+              Project Wiki
             </button>
           ) : null}
           <button

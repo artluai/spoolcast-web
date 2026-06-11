@@ -136,7 +136,7 @@ export function RulesView() {
         <div className="cast-head">
           <button className="back-btn" onClick={() => navigate(`/p/${params.id ?? 'dev-log-12'}`)}>←</button>
           <div>
-            <div className="eyebrow">House rules</div>
+            <div className="eyebrow">Project Wiki</div>
             <div className="title-row">
               <h1>The rulebooks the AI works under</h1>
             </div>
