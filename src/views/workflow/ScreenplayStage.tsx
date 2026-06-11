@@ -39,6 +39,33 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [audit, setAudit] = useState<AuditView | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
   const [needRewind, setNeedRewind] = useState<StationKey | null>(null)
+  // PER-ISSUE IGNORE: ignored findings are excluded from what Re-polish asks
+  // the AI to fix (and listed as "leave alone"). The CHECKS still see them —
+  // waiving the gate itself stays the explicit "Skip the checks" act.
+  const [ignored, setIgnored] = useState<Set<string>>(new Set())
+  const [hoverIssue, setHoverIssue] = useState<string | null>(null)
+  const fkey = (f: { label: string; detail: string }) => `${f.label}:${f.detail}`
+  const toggleIgnore = (k: string) =>
+    setIgnored((s) => {
+      const next = new Set(s)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  const remainingBlocking = audit ? audit.blocking.filter((f) => !ignored.has(fkey(f))) : []
+  const ignoredBlocking = audit ? audit.blocking.filter((f) => ignored.has(fkey(f))) : []
+  const composeAuditFeedback = (fb: string) => {
+    const parts: string[] = []
+    if (fb.trim()) parts.push(fb.trim())
+    if (remainingBlocking.length)
+      parts.push('Fix these rule-check findings:\n' + remainingBlocking.map((f) => `- ${f.detail}`).join('\n'))
+    if (ignoredBlocking.length)
+      parts.push(
+        'The user chose to IGNORE these findings — do NOT rework the script for them:\n' +
+          ignoredBlocking.map((f) => `- ${f.detail}`).join('\n'),
+      )
+    return parts.join('\n')
+  }
   const seededRef = useRef(false)
   const sourceWords = useSourceWords()
 
@@ -233,9 +260,25 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             </span>
           )}
           {st === 'screenplay' && audit && (
-            <span style={{ fontSize: 13, color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)' }}>
-              {audit.skipped ? '△ checks skipped' : audit.passed ? (audit.warnings.length ? `✓ checks passed · ${audit.warnings.length} warning(s)` : '✓ checks passed') : `✕ ${audit.blocking.length} blocking issue(s)`}
-            </span>
+            <button
+              type="button"
+              title={audit.passed || audit.skipped ? undefined : 'Jump to the issues'}
+              onClick={() => document.getElementById(`audit-findings-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              style={{
+                background: 'none', border: 'none', padding: 0,
+                cursor: audit.passed || audit.skipped ? 'default' : 'pointer',
+                fontSize: 13,
+                color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)',
+              }}
+            >
+              {audit.skipped
+                ? '△ checks skipped'
+                : audit.passed
+                  ? audit.warnings.length
+                    ? `✓ checks passed · ${audit.warnings.length} warning(s)`
+                    : '✓ checks passed'
+                  : `✕ ${remainingBlocking.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
+            </button>
           )}
           {st === 'screenplay' && draft.trim() && (
             <button
@@ -358,13 +401,40 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         // all live inside this station — polishing and checking are one thing.
         <>
           {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {audit.blocking.map((f, i) => (
-                <div key={`b${i}`} style={{ borderLeft: '2px solid var(--red)', padding: '2px 10px', fontSize: 13 }}>
-                  <span style={{ color: 'var(--red)' }}>✕ {f.label}</span>
-                  <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
-                </div>
-              ))}
+            <div id={`audit-findings-${stageId}`} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {audit.blocking.map((f, i) => {
+                const k = fkey(f)
+                const isIgnored = ignored.has(k)
+                return (
+                  <div
+                    key={`b${i}`}
+                    onMouseEnter={() => setHoverIssue(k)}
+                    onMouseLeave={() => setHoverIssue(null)}
+                    style={{
+                      display: 'flex', alignItems: 'baseline', gap: 8,
+                      borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--red)'}`,
+                      padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
+                    }}
+                  >
+                    <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--red)', whiteSpace: 'nowrap' }}>✕ {f.label}</span>
+                    <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
+                    {hoverIssue === k || isIgnored ? (
+                      <button
+                        type="button"
+                        style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                        title={
+                          isIgnored
+                            ? 'Re-polish will try to fix this again'
+                            : 'Re-polish won’t chase this — the check itself still flags it (use Skip the checks to waive the gate)'
+                        }
+                        onClick={() => toggleIgnore(k)}
+                      >
+                        {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })}
               {audit.warnings.map((f, i) => (
                 <div key={`w${i}`} style={{ borderLeft: '2px solid var(--amber)', padding: '2px 10px', fontSize: 13 }}>
                   <span style={{ color: 'var(--amber)' }}>△ {f.label}</span>
@@ -379,9 +449,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             </p>
           )}
           {draftOf('screenplay').trim() && !confirmSkip && audit && !audit.passed && (
-            <button style={{ ...ghost, marginTop: 10 }} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
-              Skip the checks
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+              <FeedbackButton
+                label={ignoredBlocking.length ? 'Re-polish (fix the rest)' : 'Re-polish to fix these'}
+                busy={busy === 'screenplay'}
+                disabled={!!busy && busy !== 'screenplay'}
+                title="Re-polishes the script to address the findings above (minus any you ignored) — uses model credits"
+                rulesFocus="story"
+                onRun={(fb) => runDraft('screenplay', composeAuditFeedback(fb))}
+              />
+              <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
+                Skip the checks
+              </button>
+            </div>
           )}
           {confirmSkip && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
