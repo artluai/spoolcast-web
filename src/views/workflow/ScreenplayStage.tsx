@@ -527,6 +527,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     setErr(out?.message || out?.error || 'Could not set the step back to pending.')
                     return
                   }
+                  // The rewind just DELETED this stage's files from disk. Put
+                  // what's on screen back first — even if the redraft fails,
+                  // disk must match what the user sees.
+                  const ok1 = await saveDraft('listener')
+                  const ok2 = await saveDraft('screenplay')
+                  if (!ok1 || !ok2) {
+                    setErr('Could not restore the drafts to the engine after the rewind.')
+                    return
+                  }
                   setAudit(null)
                   await runDraft(st, feedback) // SAME instructions, not a generic re-run
                 } catch {
