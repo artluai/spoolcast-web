@@ -3,6 +3,7 @@ import { asset } from '../../lib/assets'
 import type { SetupMode, Step } from '../../types'
 import {
   CoreMessageContent,
+  EpisodeSettings,
   IdeaBriefContent,
   NarrationContent,
   SaveTemplateContent,
@@ -55,6 +56,10 @@ export function StepContent({
               <button onClick={onOpenCast}>World Kit →</button>
             </div>
           </div>
+          {/* Per-episode fields the series does NOT inherit (target length).
+              Saved by the standard step-1 save — editing re-approves the step
+              and rewinds downstream, as the protocol promises. */}
+          <EpisodeSettings stepId={stepId} />
           <TemplateComponents inherited templateName={showName} />
         </div>
       )

@@ -1070,3 +1070,77 @@ function FileGlyph({ kind }: { kind: 'doc' | 'clock' | 'image' }) {
     </svg>
   )
 }
+
+// Per-episode settings for SERIES projects. The inherited view locks what the
+// series owns (style, format, voice) — but episode length is a per-episode
+// decision the series must not swallow. This section feeds the SAME save path
+// as the blank-project flow: step-1 save writes target_length_s to the engine
+// (set_session_fields), which every AI drafter downstream reads.
+export function EpisodeSettings({ stepId }: { stepId: string }) {
+  const s1 = useWorkflowStore((s) => s.s1)
+  const storeSetS1 = useWorkflowStore((s) => s.setS1)
+  const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
+  const seededRef = useRef(false)
+  const setS1: React.Dispatch<React.SetStateAction<S1>> = (updater) => storeSetS1(stepId, updater)
+
+  // Prefill from the engine's session.json (files are truth) — never clobber
+  // an edit in progress.
+  useEffect(() => {
+    if (seededRef.current) return
+    seededRef.current = true
+    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=session.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!out?.ok || !out.data?.exists || typeof out.data.content !== 'string') return
+        try {
+          const cfg = JSON.parse(out.data.content)
+          const len = Number(cfg?.target_length_s)
+          const store = useWorkflowStore.getState()
+          if (Number.isFinite(len) && len > 0 && !store.dirtySteps[stepId]) {
+            seedDrafts({ s1: { ...store.s1, length: len } })
+          }
+        } catch {
+          /* unreadable session.json — keep the default */
+        }
+      })
+      .catch(() => {
+        /* engine offline — the status UI explains */
+      })
+  }, [stepId, seedDrafts])
+
+  return (
+    <div className="s1-question active s1-length-q" style={{ marginTop: 16 }}>
+      <div className="s1-q-head">
+        <span className="s1-q-title">This episode — how long?</span>
+      </div>
+      <div className={`s1-length-val ${s1.length === 0 ? 'muted' : ''}`}>
+        {s1.length === 0 ? (
+          <>Auto <em>· set at the structure outline (step 04)</em></>
+        ) : (
+          <>
+            ~{Math.round((s1.length / 60) * 10) / 10} min{' '}
+            <em>({s1.length}s · ~{Math.round(s1.length / 8)} scenes)</em>
+          </>
+        )}
+      </div>
+      <input
+        type="range"
+        min={30}
+        max={600}
+        step={15}
+        value={s1.length || 300}
+        disabled={s1.length === 0}
+        onChange={(event) => setS1((c) => ({ ...c, length: Number(event.target.value) }))}
+      />
+      <button
+        className={`ai-btn ${s1.length === 0 ? 'sel' : ''}`}
+        onClick={() => setS1((c) => ({ ...c, length: c.length === 0 ? 300 : 0 }))}
+      >
+        <span className="ap-spark">✦</span> Let AI decide
+      </button>
+      <span className="label" style={{ display: 'block', marginTop: 8 }}>
+        Not inherited from the show — structure, script, and visuals are planned to this length.
+      </span>
+    </div>
+  )
+}
