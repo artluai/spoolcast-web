@@ -778,7 +778,7 @@ export function WorkflowView({
                 <>
                   <span className="vp-menu-backdrop" onClick={() => setResetMenu(false)} />
                   <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 290 }}>
-                    <span className="vp-menu-h">SET BACK TO PENDING</span>
+                    <span className="vp-menu-h">START OVER</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -786,7 +786,7 @@ export function WorkflowView({
                         setResetConfirm({ stageId: activeStep.sourceId ?? activeStep.id, name: activeStep.name, whole: false })
                       }}
                     >
-                      This step & everything after…
+                      Start over from this step
                     </button>
                     <button
                       type="button"
@@ -797,7 +797,7 @@ export function WorkflowView({
                         setResetConfirm({ stageId: first.sourceId ?? first.id, name: first.name, whole: true })
                       }}
                     >
-                      The whole project, back to step 1…
+                      Start over from the beginning
                     </button>
                   </span>
                 </>
@@ -813,18 +813,20 @@ export function WorkflowView({
                 <span className="need">CAN’T BE UNDONE</span>
                 <h3>
                   {resetConfirm.whole
-                    ? 'Start the whole project over?'
-                    : `Set “${resetConfirm.name}” and everything after back to pending?`}
+                    ? 'Start over from the beginning?'
+                    : `Start over from “${resetConfirm.name}”?`}
                 </h3>
                 <p>
-                  Approvals from {resetConfirm.whole ? 'step 1' : 'this step'} onward are revoked
-                  and the files those steps produced are deleted. Your source material and project
-                  settings stay. Anything the AI drafted will cost credits to regenerate.
+                  {resetConfirm.whole
+                    ? 'Everything the steps produced is deleted and every approval is undone.'
+                    : 'This step and everything after it go back to square one — their approvals are undone and the files they produced are deleted.'}{' '}
+                  Your source material and project settings stay. Anything the AI drafted will
+                  cost credits to make again.
                 </p>
                 <div className="actions">
                   <button onClick={() => setResetConfirm(null)}>Never mind</button>
                   <button className="primary" onClick={doReset} disabled={resetting}>
-                    {resetting ? 'Working…' : 'Yes, set back to pending'}
+                    {resetting ? 'Working…' : 'Yes, start over'}
                   </button>
                 </div>
               </div>
