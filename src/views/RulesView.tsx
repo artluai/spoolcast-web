@@ -80,8 +80,30 @@ export function RulesView() {
   // Per-rule hover actions: edit one bullet in place, or remove just it.
   const [hoverRule, setHoverRule] = useState<string | null>(null)
   const [ruleEdit, setRuleEdit] = useState<{ si: number; bi: number; text: string } | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState<{ si: number; bi: number; text: string } | null>(null)
+  // Undo: snapshots of the rulebook before each change made here (last 20).
+  const [history, setHistory] = useState<Record<string, string[]>>({})
+  const pushHistory = (id: string, prev: string) =>
+    setHistory((h) => ({ ...h, [id]: [...(h[id] ?? []), prev].slice(-20) }))
+  const undo = async () => {
+    if (!active) return
+    const stack = history[active.id] ?? []
+    const prev = stack[stack.length - 1]
+    if (prev == null) return
+    setSavingRule(true)
+    setNote(null)
+    const res = await saveRuleContent(active.id, prev)
+    if (!res.ok) setNote(res.error)
+    else {
+      setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+      setHistory((h) => ({ ...h, [active.id]: stack.slice(0, -1) }))
+      setNote('Undid the last rule change.')
+    }
+    setSavingRule(false)
+  }
   const saveBlocks = async (si: number, mutate: (blocks: Block[]) => Block[] | null) => {
     if (!active) return
+    const prev = active.content
     const blocks = mutate(parseBlocks(sections[si].body))
     if (blocks === null) return
     const newBody = blocks.map((b) => b.text).join('\n')
@@ -90,7 +112,10 @@ export function RulesView() {
     setNote(null)
     const res = await saveRuleContent(active.id, content)
     if (!res.ok) setNote(res.error)
-    else setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+    else {
+      pushHistory(active.id, prev)
+      setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+    }
     setSavingRule(false)
     setRuleEdit(null)
   }
@@ -107,14 +132,18 @@ export function RulesView() {
   const removeRule = (si: number, bi: number) => {
     void saveBlocks(si, (blocks) => blocks.filter((_, i) => i !== bi))
   }
+  const requestRemove = (si: number, bi: number, raw: string) =>
+    setConfirmRemove({ si, bi, text: flattenRule(raw) })
   const addRule = async () => {
     if (!active || !newRule.trim()) return
     setSavingRule(true)
     setNote(null)
+    const prev = active.content
     const res = await appendUserRule(active.id, newRule)
     if (!res.ok) {
       setNote(res.error)
     } else {
+      pushHistory(active.id, prev)
       setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
       setNewRule('')
       setAdding(false)
@@ -126,9 +155,11 @@ export function RulesView() {
     if (!active) return
     setSavingRule(true)
     setNote(null)
+    const prev = active.content
     const res = await removeUserRules(active.id)
     if (!res.ok) setNote(res.error)
     else {
+      pushHistory(active.id, prev)
       setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
       setNote('User-added rules removed — back to the rulebook’s defaults.')
     }
@@ -215,6 +246,7 @@ export function RulesView() {
         setNote(`Engine: ${out?.message || out?.error || 'could not save the rulebook.'}`)
         return
       }
+      pushHistory(active.id, active.content)
       setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: draft } : r)) : rs))
       setEditing(false)
       setNote('Saved — the next AI draft works under the updated rules.')
@@ -232,6 +264,29 @@ export function RulesView() {
 
   return (
     <section className="cast-view">
+      {confirmRemove ? (
+        <div className="modal-scrim">
+          <div className="confirm-modal">
+            <span className="need">RULE CHANGE</span>
+            <h3>Remove this rule?</h3>
+            <p style={{ fontStyle: 'italic' }}>“{confirmRemove.text}”</p>
+            <p>Every future AI draft stops following it. Undo (up top) can bring it back.</p>
+            <div className="actions">
+              <button onClick={() => setConfirmRemove(null)}>Never mind</button>
+              <button
+                className="primary"
+                disabled={savingRule}
+                onClick={() => {
+                  removeRule(confirmRemove.si, confirmRemove.bi)
+                  setConfirmRemove(null)
+                }}
+              >
+                Remove rule
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="cast-wrap">
         <div className="cast-head">
           <button className="back-btn" onClick={() => navigate(`/p/${params.id ?? 'dev-log-12'}`)}>←</button>
@@ -329,6 +384,15 @@ export function RulesView() {
                       <>
                         <button className="vp-undo" type="button" title="Add one rule to this rulebook — no file editing needed" onClick={() => setAdding((v) => !v)}>
                           + Add rule
+                        </button>
+                        <button
+                          className="vp-undo"
+                          type="button"
+                          title="Undo the last rule change made here"
+                          disabled={savingRule || (history[active.id] ?? []).length === 0}
+                          onClick={undo}
+                        >
+                          ↶ Undo
                         </button>
                         {active.content.includes(USER_RULES_HEADER) ? (
                           <button
@@ -452,7 +516,7 @@ export function RulesView() {
                                       title="Remove just this rule"
                                       style={{ padding: '2px 8px', fontSize: 11 }}
                                       disabled={savingRule}
-                                      onClick={() => removeRule(i, bi)}
+                                      onClick={() => requestRemove(i, bi, b.text)}
                                     >
                                       ✕
                                     </button>
