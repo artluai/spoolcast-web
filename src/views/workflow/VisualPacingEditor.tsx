@@ -74,6 +74,17 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // Only fires for hovers that come FROM the timeline, not from the list.
   const listRef = useRef<HTMLDivElement>(null)
   const followRef = useRef(false)
+  // The pacing list is content-height by default. Only when it actually
+  // overflows its 48vh cap does it gain the bottom padding that lets the
+  // last rows center on hover-follow.
+  const [listOverflows, setListOverflows] = useState(false)
+  useEffect(() => {
+    const box = listRef.current
+    if (!box) return
+    const padPx = listOverflows ? window.innerHeight * 0.24 : 0
+    const overflowing = box.scrollHeight - padPx > box.clientHeight + 2
+    if (overflowing !== listOverflows) setListOverflows(overflowing)
+  })
   const setActiveFromTimeline = (id: string) => {
     followRef.current = true
     setActiveId(id)
@@ -893,10 +904,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'table' ? (
-        // paddingBottom ≈ half the panel: lets the LAST rows scroll up to the
-        // panel's center too (otherwise they pin to the bottom edge, which
-        // can sit below the fold).
-        <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh' }}>
+        <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: listOverflows ? '24vh' : 0 }}>
           <table className="shots vp-pacing">
             <thead>
               <tr><th>Start</th><th>Img</th><th>Audio chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
@@ -921,7 +929,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div
           className="vp-script"
           ref={listRef}
-          style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: '24vh', ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
+          style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: listOverflows ? '24vh' : 0, ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
         >
           {dp.chunks.map((chunk) => {
             const { words, imgs, spans } = chunkWordData(chunk)
