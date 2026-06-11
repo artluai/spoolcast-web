@@ -47,6 +47,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
+  // PROPOSAL: when the AI couldn't stay inside the user's targets after its
+  // self-correct retries, the engine saves the last attempt as a *.proposed.md
+  // file and the user chooses: keep the current plan, or accept it anyway
+  // (an explicit human override is an approval, not a leak).
+  const [proposal, setProposal] = useState<{ content: string; issues: string[] } | null>(null)
   // Markdown is RENDERED for reading; clicking the rendered view switches to
   // the raw markdown editor; clicking away renders again.
   const [editing, setEditing] = useState(false)
@@ -109,6 +114,29 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           setNeedRewind(true)
           return
         }
+        const msg: string = out?.message || ''
+        if (msg.includes('PROPOSAL:')) {
+          // The draft broke the user's targets even after retries — the engine
+          // saved it as a proposal. Offer the human the explicit choice.
+          const proposedPath = cfg.path.replace(/\.md$/, '.proposed.md')
+          try {
+            const pr = await fetch(
+              `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(proposedPath)}`,
+            )
+            const pOut = await pr.json().catch(() => null)
+            if (pOut?.ok && pOut.data?.exists && typeof pOut.data.content === 'string') {
+              const issues = msg
+                .split('\n')
+                .map((l: string) => l.trim())
+                .filter((l: string) => l.startsWith('- '))
+                .map((l: string) => l.slice(2))
+              setProposal({ content: pOut.data.content, issues })
+              return
+            }
+          } catch {
+            /* fall through to the plain error */
+          }
+        }
         setDraftError(out?.message || out?.error || 'Drafting failed.')
         return
       }
@@ -156,6 +184,43 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
 
   return (
     <div style={{ marginBottom: 24 }}>
+      {proposal && (
+        <div className="modal-scrim">
+          <div className="confirm-modal">
+            <span className="need">YOUR CALL</span>
+            <h3>The AI couldn’t stay inside your targets</h3>
+            <p>
+              It tried {`3 times`} and the best attempt still breaks the limits you set. Your
+              current plan is untouched — you choose what happens with the new draft.
+            </p>
+            {proposal.issues.length > 0 && (
+              <div className="check">
+                <b>What’s over the line</b>
+                <ul>
+                  {proposal.issues.slice(0, 6).map((issue, i) => (
+                    <li key={i}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="actions">
+              <button onClick={() => setProposal(null)}>Keep my current plan</button>
+              <button
+                className="primary"
+                onClick={() => {
+                  // Accepting an over-target draft is an explicit human
+                  // decision — it lands as an unsaved edit you still review.
+                  setStageDraft(stageId, proposal.content)
+                  setOpen(true)
+                  setProposal(null)
+                }}
+              >
+                Use it anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {needRewind && (
         <div style={{ marginBottom: 16 }}>
           <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
