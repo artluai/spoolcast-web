@@ -772,8 +772,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 {editing.index < secs.length - 1 ? (
                   <label>Ends at<input value={editing.to} onChange={(e) => setDraftField({ to: e.target.value })} placeholder="45s" /></label>
                 ) : null}
-                <label>Image target<input value={editing.imageBudget} onChange={(e) => setDraftField({ imageBudget: e.target.value })} placeholder="e.g. 10 or 8–12 or 10±2" /></label>
-                <label>Overlay target<input value={editing.overlayBudget} onChange={(e) => setDraftField({ overlayBudget: e.target.value })} placeholder="e.g. 2 or 1–3" /></label>
+                <label>Image target<input value={editing.imageBudget} onChange={(e) => setDraftField({ imageBudget: e.target.value })} placeholder="e.g. 10 or 8-12" /></label>
+                <label>Overlay target<input value={editing.overlayBudget} onChange={(e) => setDraftField({ overlayBudget: e.target.value })} placeholder="e.g. 2 or 1-3" /></label>
               </div>
               <p className="vp-hint" style={{ margin: '8px 0 0' }}>
                 Targets are read by “Re-draft with AI” above — the AI must stay at or under them

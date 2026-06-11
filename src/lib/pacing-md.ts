@@ -28,21 +28,15 @@ export type PacingOverlay = {
   holdS: number
   placement: string
 }
-// A BUDGET is a density target: "10" (aim 10, never more) or a range
-// "8–12" / "10±2" (aim the middle, BOTH edges enforced in code — the user
-// explicitly chose the floor, so falling under it is a rejection too).
+// A BUDGET is a density target: "10" (aim 10, never more) or a range "8–12"
+// (aim the middle, BOTH edges enforced in code — the user explicitly chose
+// the floor, so falling under it is a rejection too).
 export type Budget = { min: number | null; max: number }
 
 export function parseBudget(s: string): Budget | null {
   const t = String(s).trim()
   if (!t || t === '—' || t === '-') return null
-  let m = t.match(/^(\d+)\s*(?:±|\+\/-|\+-)\s*(\d+)$/)
-  if (m) {
-    const aim = parseInt(m[1], 10)
-    const tol = parseInt(m[2], 10)
-    return { min: Math.max(0, aim - tol), max: aim + tol }
-  }
-  m = t.match(/^(\d+)\s*[–-]\s*(\d+)$/)
+  let m = t.match(/^(\d+)\s*[–-]\s*(\d+)$/)
   if (m) {
     const a = parseInt(m[1], 10)
     const b = parseInt(m[2], 10)
