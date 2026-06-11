@@ -1108,21 +1108,19 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
       })
   }, [stepId, seedDrafts])
 
+  // One flat row — label · slider · value · AI-decide. The "not inherited"
+  // explanation lives in the tooltip, not as inline clutter.
   return (
-    <div className="s1-question active s1-length-q" style={{ marginTop: 16 }}>
-      <div className="s1-q-head">
-        <span className="s1-q-title">This episode — how long?</span>
-      </div>
-      <div className={`s1-length-val ${s1.length === 0 ? 'muted' : ''}`}>
-        {s1.length === 0 ? (
-          <>Auto <em>· set at the structure outline (step 04)</em></>
-        ) : (
-          <>
-            ~{Math.round((s1.length / 60) * 10) / 10} min{' '}
-            <em>({s1.length}s · ~{Math.round(s1.length / 8)} scenes)</em>
-          </>
-        )}
-      </div>
+    <div
+      title="Not inherited from the show — structure, script, and visuals are planned to this length"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        marginTop: 16, padding: '14px 0',
+        borderTop: '1px solid var(--line, #2a3142)',
+        borderBottom: '1px solid var(--line, #2a3142)',
+      }}
+    >
+      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Episode length</span>
       <input
         type="range"
         min={30}
@@ -1131,16 +1129,23 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
         value={s1.length || 300}
         disabled={s1.length === 0}
         onChange={(event) => setS1((c) => ({ ...c, length: Number(event.target.value) }))}
+        style={{ flex: 1, opacity: s1.length === 0 ? 0.35 : 1 }}
       />
-      <button
-        className={`ai-btn ${s1.length === 0 ? 'sel' : ''}`}
-        onClick={() => setS1((c) => ({ ...c, length: c.length === 0 ? 300 : 0 }))}
+      <b style={{ fontSize: 13, color: s1.length === 0 ? 'var(--ink-3)' : 'var(--ink)', whiteSpace: 'nowrap', minWidth: 86, textAlign: 'right' }}>
+        {s1.length === 0 ? 'Auto' : `~${Math.round((s1.length / 60) * 10) / 10} min · ${s1.length}s`}
+      </b>
+      <label
+        title="The AI picks a length from the source material at the structure step"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
       >
-        <span className="ap-spark">✦</span> Let AI decide
-      </button>
-      <span className="label" style={{ display: 'block', marginTop: 8 }}>
-        Not inherited from the show — structure, script, and visuals are planned to this length.
-      </span>
+        <input
+          type="checkbox"
+          checked={s1.length === 0}
+          onChange={() => setS1((c) => ({ ...c, length: c.length === 0 ? 300 : 0 }))}
+          style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+        />
+        AI decides
+      </label>
     </div>
   )
 }
