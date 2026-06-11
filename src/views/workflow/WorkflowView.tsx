@@ -826,7 +826,7 @@ export function WorkflowView({
                     ? 'Everything the steps produced is removed and every approval is undone.'
                     : 'This step and everything after it go back to square one — their approvals are undone and the files they produced are removed.'}{' '}
                   Your source material and project settings stay, and a save point of everything
-                  removed is kept automatically (the last 10), so it can be brought back if you
+                  removed is kept automatically (the last 5), so it can be brought back if you
                   change your mind.
                 </p>
                 <div className="actions">
