@@ -98,6 +98,46 @@ export function WorkflowView({
   const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
   const stageDrafts = useWorkflowStore((s) => s.stageDrafts)
   const clearDirty = useWorkflowStore((s) => s.clearDirty)
+  const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
+  // START OVER: a guarded door to the engine's rewind — revoke approvals and
+  // clear produced files from a step onward. Deliberately two clicks deep
+  // (menu → confirm) so it can't be hit by accident.
+  const [resetMenu, setResetMenu] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState<{ stageId: string; name: string; whole: boolean } | null>(null)
+  const [resetting, setResetting] = useState(false)
+  const doReset = async () => {
+    if (!resetConfirm || resetting) return
+    setResetting(true)
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: 'spoolcast-dev-log-12',
+          tenant: 'local',
+          action: 'rewind_stage',
+          stage_id: resetConfirm.stageId,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        onToast(`Engine: ${out?.message || out?.error || 'could not set things back to pending.'}`)
+        return
+      }
+      // Drop every cached draft so the editors reload the engine's truth.
+      for (const s of orderedSteps) clearStageDrafts(s.sourceId ?? s.id)
+      onToast(
+        resetConfirm.whole
+          ? 'Project set back to step 1 — approvals revoked, produced files cleared.'
+          : `“${resetConfirm.name}” and everything after set back to pending.`,
+      )
+      setResetConfirm(null)
+    } catch {
+      onToast('Could not reach the engine.')
+    } finally {
+      setResetting(false)
+    }
+  }
   const handoff = useWorkflowStore((s) => s.handoff)
   // The step an AI hand-off is currently preparing: locked, shows a waiting state.
   const handoffHere = !!handoff && (activeStep.sourceId ?? activeStep.id) === handoff.stageId
@@ -730,10 +770,66 @@ export function WorkflowView({
             >
               Next ›
             </button>
+            <span style={{ position: 'relative' }}>
+              <button className="icon-btn" title="Start over options" onClick={() => setResetMenu((v) => !v)}>
+                ↺
+              </button>
+              {resetMenu ? (
+                <>
+                  <span className="vp-menu-backdrop" onClick={() => setResetMenu(false)} />
+                  <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 290 }}>
+                    <span className="vp-menu-h">SET BACK TO PENDING</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetMenu(false)
+                        setResetConfirm({ stageId: activeStep.sourceId ?? activeStep.id, name: activeStep.name, whole: false })
+                      }}
+                    >
+                      This step & everything after…
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        setResetMenu(false)
+                        const first = orderedSteps[0]
+                        setResetConfirm({ stageId: first.sourceId ?? first.id, name: first.name, whole: true })
+                      }}
+                    >
+                      The whole project, back to step 1…
+                    </button>
+                  </span>
+                </>
+              ) : null}
+            </span>
             <button className="icon-btn expand-btn" onClick={() => setFull((value) => !value)}>
               {fullView ? '⤡' : '⤢'}
             </button>
           </div>
+          {resetConfirm ? (
+            <div className="modal-scrim">
+              <div className="confirm-modal">
+                <span className="need">CAN’T BE UNDONE</span>
+                <h3>
+                  {resetConfirm.whole
+                    ? 'Start the whole project over?'
+                    : `Set “${resetConfirm.name}” and everything after back to pending?`}
+                </h3>
+                <p>
+                  Approvals from {resetConfirm.whole ? 'step 1' : 'this step'} onward are revoked
+                  and the files those steps produced are deleted. Your source material and project
+                  settings stay. Anything the AI drafted will cost credits to regenerate.
+                </p>
+                <div className="actions">
+                  <button onClick={() => setResetConfirm(null)}>Never mind</button>
+                  <button className="primary" onClick={doReset} disabled={resetting}>
+                    {resetting ? 'Working…' : 'Yes, set back to pending'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="detail-body">
             {handoffHere ? (
               // AI HAND-OFF IN FLIGHT: this step is being prepared — show a
