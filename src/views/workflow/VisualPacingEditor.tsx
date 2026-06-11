@@ -6,7 +6,6 @@ import {
   isUnderBudget,
   nextChunkId,
   nextImageId,
-  OPENING_WINDOW_S,
   pacingStats,
   parseHold,
   parseBudget,
@@ -559,27 +558,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
   return (
     <div className="vp panel-flat">
+      {/* One line of facts — per-section counts live on the dimension lines
+          below the timeline. No separate stats row (clean UI). */}
       <div className="ch">
-        <h3>Visual pacing — {stats.chunks} chunks · {stats.images} images</h3>
+        <h3>Visual pacing — {stats.chunks} audio chunks · {stats.images} images · ~{fmtClock(stats.runtimeS)}</h3>
         <span>working/visual-pacing-plan.md</span>
       </div>
 
-      {/* Density line only — image/chunk totals already live in the title.
-          Opening vs body is the one pacing number the law cares about. */}
-      <div className="vp-stats">
-        <span title={`images starting in the first ${OPENING_WINDOW_S}s — one every ${stats.openingSecPerImage.toFixed(1)}s`}>
-          <b>{stats.openingImages}</b> opening
-        </span>
-        <span title={stats.bodyImages ? `one image every ${stats.bodySecPerImage.toFixed(1)}s after the opening` : undefined}>
-          <b>{stats.bodyImages}</b> body
-        </span>
-        <span><b>{stats.overlays}</b> overlay{stats.overlays === 1 ? '' : 's'}</span>
-        <b>~{fmtClock(stats.runtimeS)} est. · {p.meta['Style'] ?? ''}</b>
-      </div>
-
       <div className="vp-timeline">
+        {/* "Audio chunks": the narration owns these units — per-template
+            naming can come from the contract once multi-template lands. */}
         <div className="vp-tl-row">
-          <span className="vp-tl-label">Chunks</span>
+          <span className="vp-tl-label">Audio chunks</span>
           <div className="vp-tl-track ruler">
             {chunkSpans.map((c, i) => (
               <div
@@ -639,9 +629,36 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
 
-        {/* SECTIONS: dimension lines (|— opening · 5/9 img —|) under the bar.
-            Click the label to edit name/targets; drag the shared tick to move
-            the boundary. Amber = over a user-set budget. */}
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Overlays</span>
+          <div className="vp-tl-track overlays">
+            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
+            {overlayMarks.map((o) => (
+              <div
+                key={o.id}
+                className="vp-overlay-mark"
+                style={{ left: `${pct(o.center)}%` }}
+                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
+              >
+                {o.id} · {o.holdS.toFixed(1)}s
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="vp-tl-row axis">
+          <span className="vp-tl-label" />
+          <div className="vp-tl-track">
+            {ticks.map((t) => (
+              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
+            ))}
+            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
+          </div>
+        </div>
+
+        {/* SECTIONS at the bottom: dimension lines (|— opening · 5/9 img —|).
+            Click a label to edit name/targets; drag the shared tick to move
+            the boundary. Amber = outside a user-set target. */}
         <div className="vp-tl-row">
           <span className="vp-tl-label">Sections</span>
           <div className="vp-tl-track" style={{ position: 'relative', height: 20 }}>
@@ -686,33 +703,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             ))}
           </div>
         </div>
-
-        <div className="vp-tl-row">
-          <span className="vp-tl-label">Overlays</span>
-          <div className="vp-tl-track overlays">
-            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
-            {overlayMarks.map((o) => (
-              <div
-                key={o.id}
-                className="vp-overlay-mark"
-                style={{ left: `${pct(o.center)}%` }}
-                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
-              >
-                {o.id} · {o.holdS.toFixed(1)}s
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="vp-tl-row axis">
-          <span className="vp-tl-label" />
-          <div className="vp-tl-track">
-            {ticks.map((t) => (
-              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
-            ))}
-            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
-          </div>
-        </div>
       </div>
 
       <div className="vp-hintbar">
@@ -747,7 +737,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     ? (secs[editing.index]?.name ?? 'section')
                     : editing.chunkId}
             </span>
-            <b>{editing.isNew ? 'New' : 'Editing'} {editing.scope}</b>
+            <b>{editing.isNew ? 'New' : 'Editing'} {editing.scope === 'chunk' ? 'audio chunk' : editing.scope}</b>
             {editing.scope === 'image' ? <span className="vp-active-hold">in {editing.chunkId} · beat {editing.beatCode}</span> : null}
           </div>
 
@@ -760,7 +750,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <textarea rows={2} value={editing.summary} onChange={(e) => setDraftField({ summary: e.target.value })} placeholder="One line: what this chunk does for the viewer" />
               </label>
               {editing.isNew ? (
-                <label className="vp-edit-field">Narration (the script lines this chunk covers)
+                <label className="vp-edit-field">Narration (the script lines this audio chunk covers)
                   <textarea rows={2} value={editing.narration} onChange={(e) => setDraftField({ narration: e.target.value })} placeholder="Paste the narration sentence(s) from the script…" />
                 </label>
               ) : null}
@@ -836,10 +826,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <div className="vp-menu-div" />
               </>
             ) : null}
-            <button type="button" onClick={() => startEditChunk(menu.chunkId)}>Edit chunk</button>
-            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'before')}>Add chunk before</button>
-            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'after')}>Add chunk after</button>
-            <button type="button" className="danger" onClick={() => removeChunk(menu.chunkId)}>Remove chunk</button>
+            <button type="button" onClick={() => startEditChunk(menu.chunkId)}>Edit audio chunk</button>
+            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'before')}>Add audio chunk before</button>
+            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'after')}>Add audio chunk after</button>
+            <button type="button" className="danger" onClick={() => removeChunk(menu.chunkId)}>Remove audio chunk</button>
           </div>
         </>
       ) : null}
@@ -856,7 +846,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div className="table-wrap">
           <table className="shots vp-pacing">
             <thead>
-              <tr><th>Start</th><th>Img</th><th>Chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
+              <tr><th>Start</th><th>Img</th><th>Audio chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
             </thead>
             <tbody>
               {images.map((img) => (
