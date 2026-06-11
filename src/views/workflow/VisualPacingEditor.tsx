@@ -59,6 +59,29 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // scroll (busy openings, long videos). All drag math is %-based, so it
   // works unchanged at any zoom.
   const [zoom, setZoom] = useState(1)
+  // FOLLOW THE TIMELINE: hovering a block centers its row/words inside the
+  // pacing list (the list scrolls, never the page — no cursor feedback loop).
+  // Only fires for hovers that come FROM the timeline, not from the list.
+  const listRef = useRef<HTMLDivElement>(null)
+  const followRef = useRef(false)
+  const setActiveFromTimeline = (id: string) => {
+    followRef.current = true
+    setActiveId(id)
+  }
+  useEffect(() => {
+    if (!followRef.current) return
+    followRef.current = false
+    const box = listRef.current
+    if (!box || !activeId) return
+    const el = box.querySelector<HTMLElement>(`[data-img="${activeId}"]`)
+    if (!el) return
+    const boxRect = box.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    box.scrollTo({
+      top: box.scrollTop + (elRect.top - boxRect.top) - box.clientHeight / 2 + elRect.height / 2,
+      behavior: 'smooth',
+    })
+  }, [activeId])
 
   const editKey = editing
     ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : 'index' in editing ? editing.index : editing.chunkId}`
@@ -600,8 +623,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 key={img.id}
                 className={`vp-seg ${img.id === activeId ? 'on' : ''}`}
                 style={{ left: `${pct(img.startS)}%`, width: `${pct(img.holdS)}%` }}
-                onMouseEnter={() => setActiveId(img.id)}
-                onFocus={() => setActiveId(img.id)}
+                onMouseEnter={() => setActiveFromTimeline(img.id)}
+                onFocus={() => setActiveFromTimeline(img.id)}
                 onContextMenu={(e) => openMenu(e, { chunkId: img.chunkId, beatCode: img.beatCode, imageId: img.id })}
                 title={`${img.id} · ${img.holdS.toFixed(1)}s — right-click to edit`}
               >
@@ -854,14 +877,14 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'table' ? (
-        <div className="table-wrap">
+        <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto' }}>
           <table className="shots vp-pacing">
             <thead>
               <tr><th>Start</th><th>Img</th><th>Audio chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
             </thead>
             <tbody>
               {images.map((img) => (
-                <tr key={img.id} className={img.id === activeId ? 'on' : ''} onMouseEnter={() => setActiveId(img.id)}>
+                <tr key={img.id} data-img={img.id} className={img.id === activeId ? 'on' : ''} onMouseEnter={() => setActiveId(img.id)}>
                   <td className="vp-mono">{fmtClock(img.startS)}</td>
                   <td><span className="id">{img.id}</span></td>
                   <td><span className="id">{img.chunkId}</span></td>
@@ -876,7 +899,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </table>
         </div>
       ) : (
-        <div className="vp-script" style={scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : undefined}>
+        <div
+          className="vp-script"
+          ref={listRef}
+          style={{ maxHeight: '48vh', overflowY: 'auto', ...(scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : {}) }}
+        >
           {dp.chunks.map((chunk) => (
             <p className="vp-script-chunk" key={chunk.id}>
               <span className="vp-script-cid">{chunk.id}</span>
@@ -897,6 +924,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       {owner && i === owner.from ? (
                         <span
                           className="vp-w-tag"
+                          data-img={owner.id}
                           title={`${ownerImg?.what ?? ''} — drag to the word where this image should start`}
                           onPointerDown={(e) => startTagDrag(e, chunk.id, beat.code, owner.id)}
                           style={{
