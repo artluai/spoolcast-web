@@ -439,20 +439,33 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     ? diffTokens(displayBody(draftOf('listener')), displayBody(draft))
                     : null
                 return diff ? (
-                  // CHANGES VIEW: the final script with everything that differs
-                  // from the draft tinted. Click to edit, as usual.
+                  // CHANGES VIEW: same .md-preview typography as the normal
+                  // view (real <p> paragraphs) so toggling never shifts the
+                  // layout — only the tint appears/disappears.
                   <div
+                    className="md-preview"
                     title="Click to edit · tinted = changed from the draft script"
                     onClick={() => setEditing(st)}
-                    style={{ marginTop: 6, cursor: 'text', fontSize: 14, lineHeight: 1.75, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}
+                    style={{ marginTop: 6, cursor: 'text' }}
                   >
-                    {diff.tokens.map((t, k) =>
-                      diff.marks[k] ? (
-                        <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
-                      ) : (
-                        <span key={k}>{t}</span>
-                      ),
-                    )}
+                    {(() => {
+                      const paras: React.ReactNode[][] = [[]]
+                      diff.tokens.forEach((t, k) => {
+                        if (!diff.isWord[k]) {
+                          if (/\n\s*\n/.test(t)) paras.push([])
+                          else if (paras[paras.length - 1].length) paras[paras.length - 1].push(' ')
+                          return
+                        }
+                        paras[paras.length - 1].push(
+                          diff.marks[k] ? (
+                            <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
+                          ) : (
+                            t
+                          ),
+                        )
+                      })
+                      return paras.filter((p) => p.length).map((p, i) => <p key={i}>{p}</p>)
+                    })()}
                   </div>
                 ) : (
                   <div
