@@ -815,7 +815,7 @@ export function WorkflowView({
           {resetConfirm ? (
             <div className="modal-scrim">
               <div className="confirm-modal">
-                <span className="need">CAN’T BE UNDONE</span>
+                <span className="need">SAVE POINT KEPT</span>
                 <h3>
                   {resetConfirm.whole
                     ? 'Start over from the beginning?'
@@ -823,10 +823,11 @@ export function WorkflowView({
                 </h3>
                 <p>
                   {resetConfirm.whole
-                    ? 'Everything the steps produced is deleted and every approval is undone.'
-                    : 'This step and everything after it go back to square one — their approvals are undone and the files they produced are deleted.'}{' '}
-                  Your source material and project settings stay. Anything the AI drafted will
-                  cost credits to make again.
+                    ? 'Everything the steps produced is removed and every approval is undone.'
+                    : 'This step and everything after it go back to square one — their approvals are undone and the files they produced are removed.'}{' '}
+                  Your source material and project settings stay, and a save point of everything
+                  removed is kept automatically (the last 10), so it can be brought back if you
+                  change your mind.
                 </p>
                 <div className="actions">
                   <button onClick={() => setResetConfirm(null)}>Never mind</button>
