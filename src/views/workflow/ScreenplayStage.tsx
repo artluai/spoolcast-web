@@ -87,6 +87,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [showDiff, setShowDiff] = useState(true)
   // When the findings were produced — so the user knows they're post-draft.
   const [auditAt, setAuditAt] = useState<string | null>(null)
+  // The second half of a "Fix these" chain (the polish feedback) — kept here
+  // so a rewind detour during the Draft rewrite can resume the full chain.
+  const fixChainRef = useRef<string | null>(null)
   // PER-ISSUE IGNORE: ignored findings are excluded from what Re-polish asks
   // the AI to fix (and listed as "leave alone"). The CHECKS still see them —
   // waiving the gate itself stays the explicit "Skip the checks" act.
@@ -544,7 +547,14 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     return
                   }
                   setAudit(null)
-                  await runDraft(st, feedback) // SAME instructions, not a generic re-run
+                  const okDraft = await runDraft(st, feedback) // SAME instructions, not a generic re-run
+                  // Resume an interrupted "Fix these" chain: after the Draft
+                  // rewrite, the Final still needs its polish + auto-check.
+                  if (okDraft && st === 'listener' && fixChainRef.current) {
+                    const polishFb = fixChainRef.current
+                    fixChainRef.current = null
+                    await runDraft('screenplay', polishFb)
+                  }
                 } catch {
                   setErr('Could not reach the engine.')
                 }
@@ -639,6 +649,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   // final can never clear them. Fix the draft first, then
                   // polish; the checks re-run automatically at the end.
                   const voice = remainingBlocking.filter((f) => f.label === 'voice')
+                  const polishFb = composeAuditFeedback(fb)
                   if (voice.length) {
                     const voiceFb = [
                       'Fix these voice-check findings:',
@@ -647,10 +658,12 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     ]
                       .filter(Boolean)
                       .join('\n')
+                    fixChainRef.current = polishFb // survives a rewind detour
                     const ok = await runDraft('listener', voiceFb)
-                    if (!ok) return
+                    if (!ok) return // the rewind prompt resumes the chain
+                    fixChainRef.current = null
                   }
-                  await runDraft('screenplay', composeAuditFeedback(fb))
+                  await runDraft('screenplay', polishFb)
                 }}
               />
               <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
