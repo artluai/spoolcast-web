@@ -28,9 +28,21 @@ export type PacingOverlay = {
   holdS: number
   placement: string
 }
+// A SECTION is a named time window with density targets ("opening: 9 images").
+// Sections are directives the human sets and the AI drafter must honor —
+// budgets are enforced as caps in code on redraft. toS 'end' = video end.
+export type PacingSection = {
+  name: string
+  fromS: number
+  toS: number | 'end'
+  imageBudget: number | null
+  overlayBudget: number | null
+}
+
 export type PacingPlan = {
   title: string
   meta: Record<string, string>
+  sections: PacingSection[] // empty = defaults apply (opening 0–45s, body 45–end)
   chunks: PacingChunk[]
   overlays: PacingOverlay[]
 }
@@ -67,9 +79,9 @@ const unquote = (s: string): string => {
 
 export function parsePacingPlan(md: string): PacingPlan {
   const lines = md.split('\n')
-  const plan: PacingPlan = { title: '', meta: {}, chunks: [], overlays: [] }
+  const plan: PacingPlan = { title: '', meta: {}, sections: [], chunks: [], overlays: [] }
 
-  type Section = { kind: 'meta' | 'overlays' | 'chunk'; chunk?: PacingChunk }
+  type Section = { kind: 'meta' | 'overlays' | 'sections' | 'chunk'; chunk?: PacingChunk }
   let section: Section | null = null
   let beat: PacingBeat | null = null
   let tableCols: string[] | null = null
@@ -96,6 +108,8 @@ export function parsePacingPlan(md: string): PacingPlan {
         section = { kind: 'meta' }
       } else if (/^overlays$/i.test(h)) {
         section = { kind: 'overlays' }
+      } else if (/^sections$/i.test(h)) {
+        section = { kind: 'sections' }
       } else if (m) {
         const chunk: PacingChunk = {
           id: m[1],
@@ -136,6 +150,19 @@ export function parsePacingPlan(md: string): PacingPlan {
         const key = col(cols, cells, 'Field') || cells[0]
         const val = col(cols, cells, 'Value') || cells[1] || ''
         if (key) plan.meta[key] = val
+      } else if (section.kind === 'sections') {
+        const toRaw = col(cols, cells, 'To').trim().toLowerCase()
+        const budget = (s: string): number | null => {
+          const n = parseInt(s, 10)
+          return Number.isFinite(n) && n >= 0 ? n : null
+        }
+        plan.sections.push({
+          name: col(cols, cells, 'Name') || cells[0] || 'section',
+          fromS: parseHold(col(cols, cells, 'From')),
+          toS: toRaw === 'end' || toRaw === '' ? 'end' : parseHold(toRaw),
+          imageBudget: budget(col(cols, cells, 'Image budget')),
+          overlayBudget: budget(col(cols, cells, 'Overlay budget')),
+        })
       } else if (section.kind === 'overlays') {
         plan.overlays.push({
           id: col(cols, cells, 'ID') || cells[0] || '',
@@ -221,6 +248,46 @@ export function pacingStats(plan: PacingPlan): PacingStats {
 export const fmtClock = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 
+// Resolved sections with concrete end times and live counts. When the plan
+// stores no sections, the house defaults apply (opening 0–45s, body 45–end)
+// without being written to the file until the user edits them.
+export type ResolvedSection = {
+  name: string
+  fromS: number
+  toS: number
+  imageBudget: number | null
+  overlayBudget: number | null
+  imageCount: number
+  overlayCount: number
+}
+
+export function resolvedSections(plan: PacingPlan): ResolvedSection[] {
+  const runtime = planDurationS(plan)
+  const raw: PacingSection[] = plan.sections.length
+    ? plan.sections
+    : runtime > OPENING_WINDOW_S
+      ? [
+          { name: 'opening', fromS: 0, toS: OPENING_WINDOW_S, imageBudget: null, overlayBudget: null },
+          { name: 'body', fromS: OPENING_WINDOW_S, toS: 'end', imageBudget: null, overlayBudget: null },
+        ]
+      : [{ name: 'opening', fromS: 0, toS: 'end', imageBudget: null, overlayBudget: null }]
+  const tl = timelineOf(plan)
+  return raw.map((s) => {
+    const toS = s.toS === 'end' ? runtime : Math.min(s.toS, runtime)
+    const inWindow = tl.filter((i) => i.startS >= s.fromS && i.startS < toS)
+    const ids = new Set(inWindow.map((i) => i.id))
+    return {
+      name: s.name,
+      fromS: s.fromS,
+      toS,
+      imageBudget: s.imageBudget,
+      overlayBudget: s.overlayBudget,
+      imageCount: inWindow.length,
+      overlayCount: plan.overlays.filter((o) => ids.has(o.anchor)).length,
+    }
+  })
+}
+
 // --- serialize (canonical form; chunk ranges are re-derived every time) ---
 
 const cell = (s: string): string => s.replace(/\|/g, '/').replace(/\n+/g, ' ').trim()
@@ -230,6 +297,16 @@ export function serializePacingPlan(plan: PacingPlan): string {
 
   parts.push('', '## Meta', '', '| Field | Value |', '|---|---|')
   for (const [k, v] of Object.entries(plan.meta)) parts.push(`| ${cell(k)} | ${cell(v)} |`)
+
+  if (plan.sections.length > 0) {
+    parts.push('', '## Sections', '')
+    parts.push('| Name | From | To | Image budget | Overlay budget |', '|---|---|---|---|---|')
+    for (const s of plan.sections)
+      parts.push(
+        `| ${cell(s.name)} | ${Math.round(s.fromS)}s | ${s.toS === 'end' ? 'end' : `${Math.round(s.toS)}s`} ` +
+          `| ${s.imageBudget ?? '—'} | ${s.overlayBudget ?? '—'} |`,
+      )
+  }
 
   let cursor = 0
   for (const c of plan.chunks) {

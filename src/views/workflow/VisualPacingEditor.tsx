@@ -7,11 +7,15 @@ import {
   pacingStats,
   parseHold,
   parsePacingPlan,
+  planDurationS,
   planIsWellFormed,
+  resolvedSections,
   serializePacingPlan,
   timelineOf,
   type PacingOverlay,
   type PacingPlan,
+  type PacingSection,
+  type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
 import { useWorkflowStore } from '../../store/workflow'
@@ -27,6 +31,7 @@ type EditDraft =
   | { scope: 'image'; chunkId: string; beatCode: string; imageId: string; isNew: boolean; nearImageId?: string; insertPos?: 'before' | 'after'; what: string; why: string; hold: string; refs: string }
   | { scope: 'chunk'; chunkId: string; isNew: boolean; refChunkId?: string; insertPos?: 'before' | 'after'; title: string; summary: string; narration: string }
   | { scope: 'overlay'; overlayId: string; isNew: boolean; anchor: string; trigger: string; what: string; hold: string; placement: string }
+  | { scope: 'section'; index: number; isNew: boolean; name: string; to: string; imageBudget: string; overlayBudget: string }
 
 export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
@@ -44,8 +49,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // SCRIPT TAG DRAG: which image tag is being dragged to a new start word.
   const [scriptDrag, setScriptDrag] = useState<{ chunkId: string; beatCode: string; imageId: string; candidate: number | null } | null>(null)
   const scriptDragRef = useRef<typeof scriptDrag>(null)
+  // SECTION BOUNDARY DRAG: live override of one boundary (dimension-line tick).
+  const [secDrag, setSecDrag] = useState<{ index: number; toS: number } | null>(null)
+  const secDragRef = useRef<typeof secDrag>(null)
 
-  const editKey = editing ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : editing.chunkId}` : ''
+  const editKey = editing
+    ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : 'index' in editing ? editing.index : editing.chunkId}`
+    : ''
   useEffect(() => {
     if (editKey) document.querySelector('.vp-edit')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [editKey])
@@ -173,7 +183,20 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const last = imgs[imgs.length - 1]
     return { id: chunk.id, title: chunk.title, start, end: (last?.startS ?? 0) + (last?.holdS ?? 0) }
   })
-  const openingEnd = Math.min(totalSec, OPENING_WINDOW_S)
+  // Sections (dimension lines): defaults apply until the user edits, then they
+  // live in the plan file. During a tick drag, bounds + counts preview live.
+  let secs: ResolvedSection[] = resolvedSections(dp)
+  if (secDrag && secs[secDrag.index] && secs[secDrag.index + 1]) {
+    secs = secs.map((s) => ({ ...s }))
+    secs[secDrag.index].toS = secDrag.toS
+    secs[secDrag.index + 1].fromS = secDrag.toS
+    for (const s of secs) {
+      const inWindow = images.filter((i) => i.startS >= s.fromS && i.startS < s.toS)
+      s.imageCount = inWindow.length
+      const ids = new Set(inWindow.map((i) => i.id))
+      s.overlayCount = dp.overlays.filter((o) => ids.has(o.anchor)).length
+    }
+  }
   const overlayMarks = dp.overlays
     .map((o) => {
       const host = images.find((img) => img.id === o.anchor)
@@ -264,6 +287,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
   const saveEdit = () => {
     if (!editing) return
+    if (editing.scope === 'section') {
+      const d = editing
+      const updated = secs.map((s) => ({ ...s }))
+      const s = updated[d.index]
+      if (s) {
+        s.name = d.name.trim() || s.name
+        const ib = parseInt(d.imageBudget, 10)
+        s.imageBudget = Number.isFinite(ib) && ib >= 0 ? ib : null
+        const ob = parseInt(d.overlayBudget, 10)
+        s.overlayBudget = Number.isFinite(ob) && ob >= 0 ? ob : null
+        if (d.index < updated.length - 1 && d.to.trim()) {
+          const toS = parseHold(d.to)
+          if (toS > s.fromS + 1 && toS < updated[d.index + 1].toS - 1) {
+            s.toS = toS
+            updated[d.index + 1].fromS = toS
+          }
+        }
+        writeSections(updated)
+      }
+      setEditing(null)
+      return
+    }
     const next = clone()
     if (editing.scope === 'image') {
       const d = editing
@@ -322,7 +367,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         ? !d.what.trim() && !d.why.trim()
         : d.scope === 'chunk'
           ? !d.title.trim() && !d.summary.trim()
-          : !d.what.trim() && !d.trigger.trim()
+          : d.scope === 'overlay'
+            ? !d.what.trim() && !d.trigger.trim()
+            : false
     if (d.isNew && blank) setEditing(null)
     else saveEdit()
   }
@@ -344,6 +391,82 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const setDraftField = (patch: Record<string, string>) => setEditing((d) => (d ? ({ ...d, ...patch } as EditDraft) : d))
 
   const round1 = (n: number) => Math.round(n * 10) / 10
+
+  // --- sections (dimension lines): write resolved bounds back into the plan.
+  // The last section's end is always written as 'end' so it follows runtime.
+  const writeSections = (resolved: ResolvedSection[]) => {
+    const next = clone()
+    const runtime = planDurationS(next)
+    next.sections = resolved.map(
+      (s, k): PacingSection => ({
+        name: s.name,
+        fromS: Math.round(s.fromS),
+        toS: k === resolved.length - 1 || s.toS >= runtime - 0.01 ? 'end' : Math.round(s.toS),
+        imageBudget: s.imageBudget,
+        overlayBudget: s.overlayBudget,
+      }),
+    )
+    apply(next)
+  }
+  const startSecDrag = (e: React.PointerEvent, index: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const track = (e.currentTarget as HTMLElement).parentElement
+    const rect = track?.getBoundingClientRect()
+    if (!rect || !secs[index + 1]) return
+    const lo = secs[index].fromS + 2
+    const hi = secs[index + 1].toS - 2
+    const onMove = (ev: PointerEvent) => {
+      const frac = (ev.clientX - rect.left) / rect.width
+      const toS = Math.round(Math.min(Math.max(frac * totalSec, lo), hi))
+      const next = { index, toS }
+      secDragRef.current = next
+      setSecDrag(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const d = secDragRef.current
+      secDragRef.current = null
+      setSecDrag(null)
+      if (d) {
+        const updated = secs.map((s) => ({ ...s }))
+        updated[d.index].toS = d.toS
+        updated[d.index + 1].fromS = d.toS
+        writeSections(updated)
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  const splitSection = (index: number) => {
+    const updated = secs.map((s) => ({ ...s }))
+    const s = updated[index]
+    const mid = Math.round((s.fromS + s.toS) / 2)
+    if (mid - s.fromS < 2) return
+    updated.splice(index + 1, 0, { ...s, name: `${s.name} b`, fromS: mid, imageBudget: null, overlayBudget: null, imageCount: 0, overlayCount: 0 })
+    updated[index].toS = mid
+    writeSections(updated)
+    setEditing(null)
+  }
+  const mergeSection = (index: number) => {
+    if (index <= 0 || secs.length <= 1) return
+    const updated = secs.map((s) => ({ ...s }))
+    updated[index - 1].toS = updated[index].toS
+    updated.splice(index, 1)
+    writeSections(updated)
+    setEditing(null)
+  }
+  const openSectionEdit = (index: number) => {
+    const s = secs[index]
+    if (!s) return
+    setEditing({
+      scope: 'section', index, isNew: false, name: s.name,
+      to: `${Math.round(s.toS)}s`,
+      imageBudget: s.imageBudget != null ? String(s.imageBudget) : '',
+      overlayBudget: s.overlayBudget != null ? String(s.overlayBudget) : '',
+    })
+  }
 
   // --- timeline edge drag (zero-sum hold rebalance between beat siblings) ---
   const startHoldDrag = (e: React.PointerEvent, left: TimedImage, right: TimedImage) => {
@@ -473,9 +596,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div className="vp-tl-row">
           <span className="vp-tl-label">Visuals</span>
           <div className="vp-tl-track visuals">
-            <div className="vp-opening-band" style={{ width: `${pct(openingEnd)}%` }}>
-              <span>opening · dense</span>
-            </div>
             {images.map((img) => (
               <button
                 type="button"
@@ -514,6 +634,55 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 />
               )
             })}
+          </div>
+        </div>
+
+        {/* SECTIONS: dimension lines (|— opening · 5/9 img —|) under the bar.
+            Click the label to edit name/targets; drag the shared tick to move
+            the boundary. Amber = over a user-set budget. */}
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Sections</span>
+          <div className="vp-tl-track" style={{ position: 'relative', height: 20 }}>
+            {secs.map((s, k) => {
+              const over =
+                (s.imageBudget != null && s.imageCount > s.imageBudget) ||
+                (s.overlayBudget != null && s.overlayCount > s.overlayBudget)
+              const color = over ? 'var(--amber)' : 'var(--ink-3)'
+              return (
+                <button
+                  type="button"
+                  key={`${s.name}-${k}`}
+                  onClick={() => openSectionEdit(k)}
+                  title={`${s.name}: ${fmtClock(s.fromS)}–${fmtClock(s.toS)} · ${s.imageCount}${s.imageBudget != null ? `/${s.imageBudget}` : ''} images${s.overlayBudget != null ? ` · ${s.overlayCount}/${s.overlayBudget} overlays` : ''} — click to set targets`}
+                  style={{
+                    position: 'absolute', left: `${pct(s.fromS)}%`, width: `${pct(s.toS - s.fromS)}%`,
+                    top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 6,
+                    background: 'none', border: 'none',
+                    borderLeft: `1px solid ${color}`, borderRight: `1px solid ${color}`,
+                    padding: '0 4px', cursor: 'pointer', color, fontSize: 10, letterSpacing: '.04em',
+                  }}
+                >
+                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {s.name} · {s.imageCount}{s.imageBudget != null ? `/${s.imageBudget}` : ''} img
+                    {s.overlayBudget != null ? ` · ${s.overlayCount}/${s.overlayBudget} ovl` : ''}
+                    {over ? ' · over budget' : ''}
+                  </span>
+                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
+                </button>
+              )
+            })}
+            {secs.slice(0, -1).map((s, k) => (
+              <div
+                key={`sb-${k}`}
+                title={`Drag to move the ${s.name} boundary (${fmtClock(s.toS)})`}
+                onPointerDown={(e) => startSecDrag(e, k)}
+                style={{
+                  position: 'absolute', left: `calc(${pct(s.toS)}% - 4px)`,
+                  top: -2, bottom: -2, width: 8, cursor: 'ew-resize', zIndex: 3, touchAction: 'none',
+                }}
+              />
+            ))}
           </div>
         </div>
 
@@ -569,7 +738,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div className="vp-edit" ref={editBoxRef}>
           <div className="vp-edit-head">
             <span className="id">
-              {editing.scope === 'image' ? editing.imageId : editing.scope === 'overlay' ? editing.overlayId : editing.chunkId}
+              {editing.scope === 'image'
+                ? editing.imageId
+                : editing.scope === 'overlay'
+                  ? editing.overlayId
+                  : editing.scope === 'section'
+                    ? (secs[editing.index]?.name ?? 'section')
+                    : editing.chunkId}
             </span>
             <b>{editing.isNew ? 'New' : 'Editing'} {editing.scope}</b>
             {editing.scope === 'image' ? <span className="vp-active-hold">in {editing.chunkId} · beat {editing.beatCode}</span> : null}
@@ -588,6 +763,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                   <textarea rows={2} value={editing.narration} onChange={(e) => setDraftField({ narration: e.target.value })} placeholder="Paste the narration sentence(s) from the script…" />
                 </label>
               ) : null}
+            </>
+          ) : editing.scope === 'section' ? (
+            <>
+              <div className="vp-edit-grid">
+                <label>Name<input value={editing.name} onChange={(e) => setDraftField({ name: e.target.value })} placeholder="opening" /></label>
+                {editing.index < secs.length - 1 ? (
+                  <label>Ends at<input value={editing.to} onChange={(e) => setDraftField({ to: e.target.value })} placeholder="45s" /></label>
+                ) : null}
+                <label>Image target<input value={editing.imageBudget} onChange={(e) => setDraftField({ imageBudget: e.target.value })} placeholder="no target" /></label>
+                <label>Overlay target<input value={editing.overlayBudget} onChange={(e) => setDraftField({ overlayBudget: e.target.value })} placeholder="no target" /></label>
+              </div>
+              <p className="vp-hint" style={{ margin: '8px 0 0' }}>
+                Targets are read by “Re-draft with AI” above — the AI must stay at or under them
+                (checked by code, drafts over budget are rejected). Editing here doesn’t move
+                images by itself.
+              </p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button type="button" className="vp-undo" onClick={() => splitSection(editing.index)}>Split in half</button>
+                {editing.index > 0 ? (
+                  <button type="button" className="vp-undo" onClick={() => mergeSection(editing.index)}>Merge into previous</button>
+                ) : null}
+              </div>
             </>
           ) : editing.scope === 'overlay' ? (
             <>
