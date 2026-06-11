@@ -1180,7 +1180,10 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       .catch(() => {})
   }, [])
 
-  const goRules = () => { window.location.href = '/p/dev-log-12/rules' }
+  // Deep-link straight to the relevant rulebook — never make the user hunt.
+  const goRules = (focus?: string) => {
+    window.location.href = `/p/dev-log-12/rules${focus ? `?focus=${focus}` : ''}`
+  }
 
   const rows: { id: string; label: string; value: string; jump?: () => void; detail?: React.ReactNode }[] = [
     {
@@ -1217,7 +1220,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       detail: (
         <>
           {voiceExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{voiceExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The voice profile loads from the engine.</p>}
-          <button type="button" className="vp-undo" onClick={goRules}>Read or edit in House rules →</button>
+          <button type="button" className="vp-undo" onClick={() => goRules('voice')}>Read or edit the full profile →</button>
         </>
       ),
     },
@@ -1228,7 +1231,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       detail: (
         <>
           {rulesExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{rulesExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The series rulebook loads from the engine.</p>}
-          <button type="button" className="vp-undo" onClick={goRules}>Read or edit in House rules →</button>
+          <button type="button" className="vp-undo" onClick={() => goRules('series-rules')}>Read or edit the full rulebook →</button>
         </>
       ),
     },
@@ -1260,7 +1263,18 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
           >
             <span style={{ width: 150, flexShrink: 0, color: 'var(--ink-2)' }}>{r.label}</span>
             <span style={{ flex: 1, color: 'var(--ink)' }}>{r.value}</span>
-            <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.jump ? '→' : open === r.id ? '▾' : '▸'}</span>
+            {r.jump ? (
+              <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>→</span>
+            ) : (
+              // Same chevron as everywhere else in the app (rotating SVG).
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ color: 'var(--ink-3)', transform: open === r.id ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease', flexShrink: 0 }}
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            )}
           </div>
           {open === r.id && r.detail ? (
             // Reading width, not page width.

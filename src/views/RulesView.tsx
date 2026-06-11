@@ -41,8 +41,19 @@ export function RulesView() {
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.rules)) {
-          setRules(out.data.rules)
-          if (out.data.rules.length > 0) setSelected(out.data.rules[0].id)
+          const list: RuleFile[] = out.data.rules
+          setRules(list)
+          // Deep link: ?focus=voice / ?focus=series-rules / a rule id —
+          // arriving from a "read or edit" button lands on the right book.
+          const focus = new URLSearchParams(window.location.search).get('focus')
+          const target =
+            focus === 'voice'
+              ? list.find((r) => r.id.endsWith(':voice'))
+              : focus === 'series-rules'
+                ? list.find((r) => r.scope === 'series' && r.id.endsWith(':rules'))
+                : list.find((r) => r.id === focus)
+          if (target) setSelected(target.id)
+          else if (list.length > 0) setSelected(list[0].id)
         } else setError('The engine did not return the rulebooks.')
       })
       .catch(() => setError('Could not reach the engine — is it running?'))
