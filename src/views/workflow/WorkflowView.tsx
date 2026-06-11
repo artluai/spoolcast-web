@@ -1071,7 +1071,9 @@ export function WorkflowView({
                           : isAlreadyApproved && !dirty
                             ? 'Step is complete. Edit to re-approve.'
                             : !stepComplete
-                              ? 'Finish this step’s sections first'
+                              ? activeStep.id === 'script'
+                                ? 'The rule checks must pass — or be skipped — before this step can be approved'
+                                : 'Finish this step’s sections first'
                               : isBeyondBlocked
                                 ? 'Resolve the blocker above before continuing'
                                 : needsApproval
