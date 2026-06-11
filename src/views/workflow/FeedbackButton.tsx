@@ -144,8 +144,8 @@ export function FeedbackButton({
             setRuleNote(null)
             if (asRule && feedback.trim()) {
               const res = await appendUserRule(SERIES_RULES_ID, feedback)
-              if (res !== true) {
-                setRuleNote(res)
+              if (!res.ok) {
+                setRuleNote(res.error)
                 return // don't run on a failed rule save — the user asked for both
               }
             }

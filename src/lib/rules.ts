@@ -5,34 +5,71 @@
 
 export const SERIES_RULES_ID = 'series:spoolcast-devlog:rules' // session-id debt, like elsewhere
 
-export async function appendUserRule(ruleId: string, text: string): Promise<true | string> {
-  const clean = text.trim().replace(/\s*\n+\s*/g, ' ')
-  if (!clean) return 'The rule is empty.'
+export const USER_RULES_HEADER = '## User-added rules'
+
+type RuleResult = { ok: true; content: string } | { ok: false; error: string }
+
+async function saveRuleFile(ruleId: string, content: string): Promise<RuleResult> {
+  const save = await fetch('http://localhost:8000/api/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session: 'spoolcast-dev-log-12',
+      tenant: 'local',
+      action: 'set_rule_file',
+      rule_id: ruleId,
+      content,
+    }),
+  })
+  const saved = await save.json().catch(() => null)
+  if (!save.ok || saved?.ok === false)
+    return { ok: false, error: saved?.message || saved?.error || 'Could not save the rulebook.' }
+  return { ok: true, content }
+}
+
+async function loadRuleContent(ruleId: string): Promise<string | null> {
+  const r = await fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
+  const out = await r.json().catch(() => null)
+  const rule = out?.ok ? (out.data?.rules || []).find((x: { id: string }) => x.id === ruleId) : null
+  return rule ? String(rule.content) : null
+}
+
+export async function appendUserRule(ruleId: string, text: string): Promise<RuleResult> {
+  // Rules state the principle; specific worked examples get copied verbatim
+  // into drafts, so "(e.g. …)" / "(for example …)" parentheticals are stripped.
+  const clean = text
+    .trim()
+    .replace(/\s*\n+\s*/g, ' ')
+    .replace(/\s*\((?:e\.g\.|eg\.|for example|example)[^)]*\)/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  if (!clean) return { ok: false, error: 'The rule is empty.' }
   try {
-    const r = await fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
-    const out = await r.json().catch(() => null)
-    const rule = out?.ok ? (out.data?.rules || []).find((x: { id: string }) => x.id === ruleId) : null
-    if (!rule) return 'Could not load the rulebook from the engine.'
-    const header = '## User-added rules'
-    let content: string = String(rule.content).replace(/\s+$/, '')
-    content += content.includes(header)
-      ? `\n- ${clean}\n`
-      : `\n\n${header}\n\nRules added from the app — every AI draft works under these.\n\n- ${clean}\n`
-    const save = await fetch('http://localhost:8000/api/action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session: 'spoolcast-dev-log-12',
-        tenant: 'local',
-        action: 'set_rule_file',
-        rule_id: ruleId,
-        content,
-      }),
-    })
-    const saved = await save.json().catch(() => null)
-    if (!save.ok || saved?.ok === false) return saved?.message || saved?.error || 'Could not save the rule.'
-    return true
+    const current = await loadRuleContent(ruleId)
+    if (current === null) return { ok: false, error: 'Could not load the rulebook from the engine.' }
+    const today = new Date().toISOString().slice(0, 10)
+    const entry = `- ${clean} *(added ${today})*`
+    let content = current.replace(/\s+$/, '')
+    content += content.includes(USER_RULES_HEADER)
+      ? `\n${entry}\n`
+      : `\n\n${USER_RULES_HEADER}\n\nRules added from the app — every AI draft works under these.\n\n${entry}\n`
+    return await saveRuleFile(ruleId, content)
   } catch {
-    return 'Could not reach the engine.'
+    return { ok: false, error: 'Could not reach the engine.' }
+  }
+}
+
+// "Set to default": remove the whole User-added rules section (it is always
+// the last section, because this lib only ever appends it at the end).
+export async function removeUserRules(ruleId: string): Promise<RuleResult> {
+  try {
+    const current = await loadRuleContent(ruleId)
+    if (current === null) return { ok: false, error: 'Could not load the rulebook from the engine.' }
+    const idx = current.indexOf(USER_RULES_HEADER)
+    if (idx < 0) return { ok: false, error: 'This rulebook has no user-added rules.' }
+    const content = current.slice(0, idx).replace(/\s+$/, '') + '\n'
+    return await saveRuleFile(ruleId, content)
+  } catch {
+    return { ok: false, error: 'Could not reach the engine.' }
   }
 }

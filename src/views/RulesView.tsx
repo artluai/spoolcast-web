@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { appendUserRule } from '../lib/rules'
+import { appendUserRule, removeUserRules, USER_RULES_HEADER } from '../lib/rules'
 
 // HOUSE RULES: the canonical rule files every AI drafter works under, made
 // visible and editable. The files stay the single source of truth (engine
@@ -41,33 +41,33 @@ export function RulesView() {
   const [adding, setAdding] = useState(false)
   const [newRule, setNewRule] = useState('')
   const [savingRule, setSavingRule] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
   const addRule = async () => {
     if (!active || !newRule.trim()) return
     setSavingRule(true)
     setNote(null)
     const res = await appendUserRule(active.id, newRule)
-    if (res !== true) {
-      setNote(res)
+    if (!res.ok) {
+      setNote(res.error)
     } else {
-      // reflect the new rule locally without a refetch
-      const header = '## User-added rules'
-      const clean = newRule.trim().replace(/\s*\n+\s*/g, ' ')
-      setRules((rs) =>
-        rs
-          ? rs.map((r) => {
-              if (r.id !== active.id) return r
-              const base = r.content.replace(/\s+$/, '')
-              const content = base.includes(header)
-                ? `${base}\n- ${clean}\n`
-                : `${base}\n\n${header}\n\nRules added from the app — every AI draft works under these.\n\n- ${clean}\n`
-              return { ...r, content }
-            })
-          : rs,
-      )
+      setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
       setNewRule('')
       setAdding(false)
       setNote('Rule added — every AI draft from now on works under it.')
     }
+    setSavingRule(false)
+  }
+  const resetUserRules = async () => {
+    if (!active) return
+    setSavingRule(true)
+    setNote(null)
+    const res = await removeUserRules(active.id)
+    if (!res.ok) setNote(res.error)
+    else {
+      setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+      setNote('User-added rules removed — back to the rulebook’s defaults.')
+    }
+    setConfirmReset(false)
     setSavingRule(false)
   }
 
@@ -265,6 +265,19 @@ export function RulesView() {
                         <button className="vp-undo" type="button" title="Add one rule to this rulebook — no file editing needed" onClick={() => setAdding((v) => !v)}>
                           + Add rule
                         </button>
+                        {active.content.includes(USER_RULES_HEADER) ? (
+                          <button
+                            className="vp-undo"
+                            type="button"
+                            disabled={savingRule}
+                            style={confirmReset ? { color: 'var(--amber)' } : undefined}
+                            title="Removes every user-added rule from this rulebook (the built-in rules stay)"
+                            onClick={() => (confirmReset ? resetUserRules() : setConfirmReset(true))}
+                            onBlur={() => setConfirmReset(false)}
+                          >
+                            {confirmReset ? 'Really remove user rules?' : 'Set to default'}
+                          </button>
+                        ) : null}
                         <button className="vp-undo" type="button" title="Edit the exact file the drafters read" onClick={startEdit}>
                           Edit as text
                         </button>
