@@ -18,6 +18,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { Footer } from './components/Footer'
 import { Header } from './components/Header'
 import { ProfileDrawer } from './components/ProfileDrawer'
+import { SavePointsModal } from './components/SavePointsModal'
 import { LibraryView } from './views/LibraryView'
 import { LoginView, SignupModal } from './views/LoginView'
 import { OnboardingView } from './views/OnboardingView'
@@ -46,6 +47,7 @@ function SpoolcastApp() {
   const [selected, setSelected] = useState<string>('setup') // Will be updated by useEffect once API loads
   const [autopilot, setAutopilot] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [savesOpen, setSavesOpen] = useState(false)
   const [chatState, setChatState] = useState<ChatState>('closed')
   const [chatTab, setChatTab] = useState<ChatTab>('chat')
   const [confirmAuto, setConfirmAuto] = useState(false)
@@ -286,6 +288,7 @@ function SpoolcastApp() {
       }}
       onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/world-kit`)}
       onRules={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}/rules`)}
+      onSaves={() => setSavesOpen(true)}
       isRules={isRules}
       onNew={() => {
         restoreDemo()
@@ -658,6 +661,7 @@ function SpoolcastApp() {
         <Footer blank={setupMode === 'standalone'} />
       )}
       <ProfileDrawer open={profileOpen} onClose={() => setProfileOpen(false)} />
+      {savesOpen ? <SavePointsModal onClose={() => setSavesOpen(false)} onToast={setToast} /> : null}
       {pendingFinish ? (
         <SignupModal
           auto={pendingFinish.auto}

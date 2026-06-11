@@ -333,7 +333,7 @@ export function LibraryView({ onScrolled }: { onScrolled: (scrolled: boolean) =>
       onScrollCapture={(e) => onScrolled((e.target as HTMLElement).scrollTop > 8)}
     >
       <div className="lib-topbar">
-        <h1>Library</h1>
+        <h1>Asset Library</h1>
         <div className="lib-view">
           <button className={view === 'flow' ? 'sel' : ''} onClick={() => setView('flow')}>
             Flow

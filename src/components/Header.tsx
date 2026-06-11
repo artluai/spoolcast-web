@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { SetupMode } from '../types'
 
 export function Header({
@@ -13,6 +14,7 @@ export function Header({
   onAutopilot,
   onCast,
   onRules,
+  onSaves,
   onNew,
   onLibrary,
   onProfile,
@@ -29,10 +31,17 @@ export function Header({
   onAutopilot: () => void
   onCast: () => void
   onRules?: () => void
+  onSaves?: () => void
   onNew: () => void
   onLibrary: () => void
   onProfile: () => void
 }) {
+  // One menu instead of a row of header buttons — simpler, scales.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const pick = (fn?: () => void) => () => {
+    setMenuOpen(false)
+    fn?.()
+  }
   // Project label comes from the route (/p/dev-log-12 → "Dev Log #12") — the
   // crumb must reflect the project actually open, never a hardcoded episode.
   const projectId = route.startsWith('/p/') ? (route.split('/')[2] ?? '') : ''
@@ -126,23 +135,35 @@ export function Header({
               <span className="ap-state">{autopilot ? 'on' : 'off'}</span>
             </button>
           ) : null}
-          <button className={`btn-soft ${isWorldKit ? 'active' : ''}`} onClick={onCast}>
-            World Kit
-          </button>
-          {onRules ? (
-            <button className={`btn-soft ${isRules ? 'active' : ''}`} onClick={onRules} title="The rulebooks the AI works under — view and edit">
-              Project Wiki
+          <span style={{ position: 'relative' }}>
+            <button
+              className={`btn-soft ${isWorldKit || isRules || route === '/library' ? 'active' : ''}`}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              Menu ▾
             </button>
-          ) : null}
-          <button
-            className={`btn-soft ${route === '/library' ? 'active' : ''}`}
-            onClick={onLibrary}
-          >
-            Library
-          </button>
-          <button className="btn-soft" onClick={onNew}>
-            New<span className="np-extra"> project</span>
-          </button>
+            {menuOpen ? (
+              <>
+                <span className="vp-menu-backdrop" onClick={() => setMenuOpen(false)} />
+                <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 200 }}>
+                  {onRules ? (
+                    <button type="button" onClick={pick(onRules)} title="The rulebooks the AI works under — view and edit">
+                      Project Wiki
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={pick(onCast)}>World Kit</button>
+                  <button type="button" onClick={pick(onLibrary)}>Asset Library</button>
+                  <span className="vp-menu-div" style={{ display: 'block' }} />
+                  {onSaves ? (
+                    <button type="button" onClick={pick(onSaves)} title="Snapshots taken automatically before every start-over">
+                      Recent saves
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={pick(onNew)}>New project</button>
+                </span>
+              </>
+            ) : null}
+          </span>
           <button className="avatar-btn" onClick={onProfile}>
             R
           </button>
