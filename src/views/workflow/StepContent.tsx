@@ -1,12 +1,11 @@
 import { castByShow } from '../../data/cast'
-import { asset } from '../../lib/assets'
 import type { SetupMode, Step } from '../../types'
 import {
   CoreMessageContent,
-  EpisodeSettings,
   IdeaBriefContent,
   NarrationContent,
   SaveTemplateContent,
+  SeriesSetup,
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
@@ -39,30 +38,11 @@ export function StepContent({
   const stepId = step.sourceId ?? step.id
   if (step.id === 'setup') {
     if (setupMode === 'series' && !blankProject) {
-      return (
-        <div className="inherited-block">
-          <div className="field-card">
-            <span className="eyebrow">SHOW</span>
-            <b>{showName}</b>
-          </div>
-          <div className="inherited-card">
-            <img src={asset('styles/wojak-comic/references/chad.png')} alt="" />
-            <div>
-              <span className="eyebrow">LOCKED STYLE</span>
-              <h3>Wojak comic</h3>
-              <p>Format · Illustration video</p>
-              <p>Output · 16:9 widescreen</p>
-              <p>Narration voice · schedar-en-male-01</p>
-              <button onClick={onOpenCast}>World Kit →</button>
-            </div>
-          </div>
-          {/* Per-episode fields the series does NOT inherit (target length).
-              Saved by the standard step-1 save — editing re-approves the step
-              and rewinds downstream, as the protocol promises. */}
-          <EpisodeSettings stepId={stepId} />
-          <TemplateComponents inherited templateName={showName} />
-        </div>
-      )
+      // Flat hairline rows, no nested boxes: the REAL inherited items (style,
+      // format, voice, series rules, World Kit) with click-to-expand detail,
+      // then the per-episode fields (length). Saved by the standard step-1
+      // save — editing re-approves the step and rewinds downstream.
+      return <SeriesSetup stepId={stepId} showName={showName} onOpenCast={onOpenCast} />
     }
     return (
       <>

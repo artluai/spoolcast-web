@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pill } from '../../components/common/Pill'
+import { asset } from '../../lib/assets'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
@@ -1108,44 +1109,176 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
       })
   }, [stepId, seedDrafts])
 
-  // One flat row — label · slider · value · AI-decide. The "not inherited"
-  // explanation lives in the tooltip, not as inline clutter.
+  // One flat row — preset chips instead of a slider, the ✦ AI button at the
+  // end. The "not inherited" explanation lives in the tooltip.
+  const PRESETS: [number, string][] = [
+    [60, '1 min'], [120, '2 min'], [180, '3 min'], [300, '5 min'], [480, '8 min'],
+  ]
+  const chipStyle = (sel: boolean): React.CSSProperties => ({
+    border: `1px solid ${sel ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+    background: sel ? 'var(--bg-3, rgba(255,255,255,.05))' : 'none',
+    color: sel ? 'var(--ink)' : 'var(--ink-2)',
+    borderRadius: 99, padding: '5px 13px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
+  })
   return (
     <div
       title="Not inherited from the show — structure, script, and visuals are planned to this length"
-      style={{
-        display: 'flex', alignItems: 'center', gap: 14,
-        marginTop: 16, padding: '14px 0',
-        borderTop: '1px solid var(--line, #2a3142)',
-        borderBottom: '1px solid var(--line, #2a3142)',
-      }}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', flexWrap: 'wrap' }}
     >
-      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Episode length</span>
-      <input
-        type="range"
-        min={30}
-        max={600}
-        step={15}
-        value={s1.length || 300}
-        disabled={s1.length === 0}
-        onChange={(event) => setS1((c) => ({ ...c, length: Number(event.target.value) }))}
-        style={{ flex: 1, opacity: s1.length === 0 ? 0.35 : 1 }}
-      />
-      <b style={{ fontSize: 13, color: s1.length === 0 ? 'var(--ink-3)' : 'var(--ink)', whiteSpace: 'nowrap', minWidth: 86, textAlign: 'right' }}>
-        {s1.length === 0 ? 'Auto' : `~${Math.round((s1.length / 60) * 10) / 10} min · ${s1.length}s`}
-      </b>
-      <label
-        title="The AI picks a length from the source material at the structure step"
-        style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
-      >
+      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap', marginRight: 6 }}>Length</span>
+      {PRESETS.map(([sec, label]) => (
+        <button key={sec} type="button" style={chipStyle(s1.length === sec)} onClick={() => setS1((c) => ({ ...c, length: sec }))}>
+          {label}
+        </button>
+      ))}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ink-3)', fontSize: 12 }}>
         <input
-          type="checkbox"
-          checked={s1.length === 0}
-          onChange={() => setS1((c) => ({ ...c, length: c.length === 0 ? 300 : 0 }))}
-          style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+          type="number"
+          min={1}
+          max={60}
+          value={s1.length > 0 ? Math.round(s1.length / 60 * 10) / 10 : ''}
+          placeholder="…"
+          onChange={(e) => {
+            const m = parseFloat(e.target.value)
+            if (Number.isFinite(m) && m > 0) setS1((c) => ({ ...c, length: Math.round(m * 60) }))
+          }}
+          style={{
+            width: 52, background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
+            border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '5px 8px', fontSize: 12,
+          }}
         />
-        AI decides
-      </label>
+        min
+      </span>
+      <span style={{ flex: 1 }} />
+      <button
+        className={`ai-btn ${s1.length === 0 ? 'sel' : ''}`}
+        title="The AI picks a length from the source material at the structure step"
+        onClick={() => setS1((c) => ({ ...c, length: c.length === 0 ? 300 : 0 }))}
+      >
+        <span className="ap-spark">✦</span> Let AI decide
+      </button>
+    </div>
+  )
+}
+
+// SERIES SETUP (step 01 for series episodes): flat rows with hairline
+// dividers — no nested boxes. Inherited rows show the REAL sources (style
+// from session.json, voice + series rules from the engine's rulebooks) and
+// expand in place for detail. Per-episode fields (length) sit below.
+export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; showName: string; onOpenCast: () => void }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const [styleId, setStyleId] = useState('')
+  const [series, setSeries] = useState('')
+  const [voiceExcerpt, setVoiceExcerpt] = useState('')
+  const [rulesExcerpt, setRulesExcerpt] = useState('')
+
+  useEffect(() => {
+    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=session.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.ok && out.data?.exists) {
+          try {
+            const cfg = JSON.parse(out.data.content)
+            if (typeof cfg?.style === 'string') setStyleId(cfg.style)
+            if (typeof cfg?.series === 'string') setSeries(cfg.series)
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => {})
+    fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.ok && Array.isArray(out.data?.rules)) {
+          for (const r of out.data.rules) {
+            if (String(r.id).endsWith(':voice')) setVoiceExcerpt(String(r.content).slice(0, 420))
+            if (String(r.id).endsWith(':rules') && r.scope === 'series') setRulesExcerpt(String(r.content).slice(0, 420))
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const goRules = () => { window.location.href = '/p/dev-log-12/rules' }
+
+  const rows: { id: string; label: string; value: string; jump?: () => void; detail?: React.ReactNode }[] = [
+    {
+      id: 'style',
+      label: 'Visual style',
+      value: `Wojak comic${styleId ? ` · ${styleId}` : ''}`,
+      detail: (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <img src={asset('styles/wojak-comic/references/chad.png')} alt="" style={{ width: 96, borderRadius: 6 }} />
+          <p style={{ margin: 0 }}>
+            Locked by the show — every episode renders in this style so the channel looks
+            consistent. The style anchor, character references, and prompt rules live in the
+            World Kit and the Visuals rulebook.
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: 'format',
+      label: 'Format',
+      value: 'Illustration video · 16:9 widescreen',
+      detail: (
+        <p style={{ margin: 0 }}>
+          Chunked still images rendered into video: the script is split into audio chunks, each
+          chunk gets one or more generated images, and the renderer assembles them with narration,
+          captions, and overlays. Locked by the show's format template.
+        </p>
+      ),
+    },
+    {
+      id: 'voice',
+      label: 'Narration voice',
+      value: series ? `${series} voice profile` : 'series voice profile',
+      detail: (
+        <>
+          {voiceExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{voiceExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The voice profile loads from the engine.</p>}
+          <button type="button" className="vp-undo" onClick={goRules}>Read or edit in House rules →</button>
+        </>
+      ),
+    },
+    {
+      id: 'rules',
+      label: 'Series rules',
+      value: series || 'series editorial conventions',
+      detail: (
+        <>
+          {rulesExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{rulesExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The series rulebook loads from the engine.</p>}
+          <button type="button" className="vp-undo" onClick={goRules}>Read or edit in House rules →</button>
+        </>
+      ),
+    },
+    { id: 'worldkit', label: 'World Kit', value: 'cast, places, props & references', jump: onOpenCast },
+  ]
+
+  const rowBtn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+    padding: '13px 2px', background: 'none', border: 'none',
+    borderBottom: '1px solid var(--line, #2a3142)',
+    cursor: 'pointer', fontSize: 13, textAlign: 'left',
+  }
+
+  return (
+    <div>
+      <div className="eyebrow" style={{ marginBottom: 2 }}>Inherited from {showName}</div>
+      {rows.map((r) => (
+        <div key={r.id}>
+          <button type="button" style={rowBtn} onClick={() => (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))}>
+            <span style={{ width: 150, flexShrink: 0, color: 'var(--ink-2)' }}>{r.label}</span>
+            <span style={{ flex: 1, color: 'var(--ink)' }}>{r.value}</span>
+            <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.jump ? '→' : open === r.id ? '▾' : '▸'}</span>
+          </button>
+          {open === r.id && r.detail ? (
+            <div style={{ padding: '12px 2px 16px 164px', borderBottom: '1px solid var(--line, #2a3142)', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+              {r.detail}
+            </div>
+          ) : null}
+        </div>
+      ))}
+      <div className="eyebrow" style={{ margin: '22px 0 2px' }}>This episode</div>
+      <EpisodeSettings stepId={stepId} />
     </div>
   )
 }
