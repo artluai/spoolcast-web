@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   fmtClock,
   nextChunkId,
@@ -40,6 +40,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const editKey = editing ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : editing.chunkId}` : ''
   useEffect(() => {
     if (editKey) document.querySelector('.vp-edit')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [editKey])
+
+  // CLICK-OUT BEHAVIOR: clicking outside the editor applies the edit (it's
+  // local until the step is saved, and Undo covers regrets); Esc discards.
+  // A brand-new, still-empty item is discarded instead of saved.
+  const editBoxRef = useRef<HTMLDivElement>(null)
+  const applyOrDiscardRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    if (!editKey) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (editBoxRef.current && !editBoxRef.current.contains(t)) applyOrDiscardRef.current()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEditing(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [editKey])
 
   if (!draft.trim()) {
@@ -87,7 +109,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     return (
       <div className="vp panel-flat">
         <div className="ch">
-          <h3>Visual pacing — raw plan</h3>
+          <h3>Visual pacing — as text</h3>
           <span>working/visual-pacing-plan.md</span>
         </div>
         {!wellFormed ? (
@@ -136,8 +158,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       return host ? { ...o, center: host.startS + host.holdS / 2 } : null
     })
     .filter(Boolean) as (PacingOverlay & { center: number })[]
+  // Minute ticks, but skip any that would crowd the end label (a 2:01 video
+  // otherwise prints "2:00" and "2:01" on top of each other).
   const ticks: number[] = []
-  for (let s = 0; s <= totalSec; s += 60) ticks.push(s)
+  const tickGuard = Math.max(8, totalSec * 0.05)
+  for (let s = 0; s <= totalSec; s += 60) if (totalSec - s >= tickGuard) ticks.push(s)
 
   // --- mutations (every one snapshots for undo, then serializes back) ---
   const openMenu = (e: React.MouseEvent, m: { chunkId: string; beatCode?: string; imageId?: string }) => {
@@ -266,6 +291,19 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     apply(next)
     setEditing(null)
   }
+  // Latest-save ref for the document-level click-out listener.
+  applyOrDiscardRef.current = () => {
+    const d = editing
+    if (!d) return
+    const blank =
+      d.scope === 'image'
+        ? !d.what.trim() && !d.why.trim()
+        : d.scope === 'chunk'
+          ? !d.title.trim() && !d.summary.trim()
+          : !d.what.trim() && !d.trigger.trim()
+    if (d.isNew && blank) setEditing(null)
+    else saveEdit()
+  }
 
   // Script view: distribute each beat's words across its images proportionally
   // to hold time (estimated timing — real word alignment arrives with TTS).
@@ -290,16 +328,16 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <span>working/visual-pacing-plan.md</span>
       </div>
 
+      {/* Density line only — image/chunk totals already live in the title.
+          Opening vs body is the one pacing number the law cares about. */}
       <div className="vp-stats">
-        <span><b>{stats.images}</b> images</span>
         <span title={`images starting in the first ${OPENING_WINDOW_S}s — one every ${stats.openingSecPerImage.toFixed(1)}s`}>
           <b>{stats.openingImages}</b> opening
         </span>
         <span title={stats.bodyImages ? `one image every ${stats.bodySecPerImage.toFixed(1)}s after the opening` : undefined}>
           <b>{stats.bodyImages}</b> body
         </span>
-        <span><b>{stats.overlays}</b> overlays</span>
-        <span><b>{stats.chunks}</b> chunks</span>
+        <span><b>{stats.overlays}</b> overlay{stats.overlays === 1 ? '' : 's'}</span>
         <b>~{fmtClock(stats.runtimeS)} est. · {p.meta['Style'] ?? ''}</b>
       </div>
 
@@ -378,7 +416,14 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           timings are estimates until narration audio exists
         </p>
         <span style={{ display: 'inline-flex', gap: 8 }}>
-          <button type="button" className="vp-undo" onClick={() => setRaw(true)}>Raw</button>
+          <button
+            type="button"
+            className="vp-undo"
+            title="See or edit the exact text file the engine reads"
+            onClick={() => setRaw(true)}
+          >
+            Edit as text
+          </button>
           <button type="button" className="vp-undo" onClick={undo} disabled={history.length === 0}>
             ↶ Undo{history.length ? ` (${history.length})` : ''}
           </button>
@@ -386,7 +431,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {editing ? (
-        <div className="vp-edit">
+        <div className="vp-edit" ref={editBoxRef}>
           <div className="vp-edit-head">
             <span className="id">
               {editing.scope === 'image' ? editing.imageId : editing.scope === 'overlay' ? editing.overlayId : editing.chunkId}
@@ -439,7 +484,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-edit-actions">
             <button type="button" className="vp-save" onClick={saveEdit}>Save</button>
             <button type="button" className="vp-cancel" onClick={() => setEditing(null)}>Cancel</button>
-            <span className="vp-edit-note">Edits land in the plan file when you save the step</span>
+            <span className="vp-edit-note">Click outside to apply · Esc to discard · saved to the plan file when you save the step</span>
           </div>
         </div>
       ) : null}
