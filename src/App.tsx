@@ -24,6 +24,7 @@ import { OnboardingView } from './views/OnboardingView'
 import { PickerView } from './views/PickerView'
 import { WorkflowView } from './views/workflow/WorkflowView'
 import { WorldKitView } from './views/workflow/WorldKit'
+import { RulesView } from './views/RulesView'
 
 function App() {
   return (
@@ -161,6 +162,7 @@ function SpoolcastApp() {
 
   const isWorkflow = route.startsWith('/p/')
   const isWorldKit = route.endsWith('/world-kit')
+  const isRules = route.endsWith('/rules')
   const blankProject = setupMode === 'standalone'
   const castData =
     castByShow[showName as keyof typeof castByShow] ?? castByShow['spoolcast dev log']
@@ -262,7 +264,7 @@ function SpoolcastApp() {
         navigate('/projects')
       }}
       onBack={() => {
-        if (isWorldKit) navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}`)
+        if (isWorldKit || isRules) navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}`)
         else {
           restoreDemo()
           navigate('/projects')
@@ -283,6 +285,8 @@ function SpoolcastApp() {
         }
       }}
       onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/world-kit`)}
+      onRules={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}/rules`)}
+      isRules={isRules}
       onNew={() => {
         restoreDemo()
         navigate('/projects')
@@ -644,6 +648,7 @@ function SpoolcastApp() {
             path="/p/:id/world-kit"
             element={<WorldKitView castData={castData} showName={showName} />}
           />
+          <Route path="/p/:id/rules" element={<RulesView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -6,11 +6,13 @@ export function Header({
   showName,
   isWorkflow,
   isWorldKit,
+  isRules,
   autopilot,
   onLogo,
   onBack,
   onAutopilot,
   onCast,
+  onRules,
   onNew,
   onLibrary,
   onProfile,
@@ -20,11 +22,13 @@ export function Header({
   showName: string
   isWorkflow: boolean
   isWorldKit: boolean
+  isRules?: boolean
   autopilot: boolean
   onLogo: () => void
   onBack: () => void
   onAutopilot: () => void
   onCast: () => void
+  onRules?: () => void
   onNew: () => void
   onLibrary: () => void
   onProfile: () => void
@@ -125,6 +129,11 @@ export function Header({
           <button className={`btn-soft ${isWorldKit ? 'active' : ''}`} onClick={onCast}>
             World Kit
           </button>
+          {onRules ? (
+            <button className={`btn-soft ${isRules ? 'active' : ''}`} onClick={onRules} title="The rulebooks the AI works under — view and edit">
+              House rules
+            </button>
+          ) : null}
           <button
             className={`btn-soft ${route === '/library' ? 'active' : ''}`}
             onClick={onLibrary}
