@@ -14,6 +14,7 @@ export function Header({
   onAutopilot,
   onCast,
   onRules,
+  onSave,
   onSaves,
   onNew,
   onLibrary,
@@ -31,6 +32,7 @@ export function Header({
   onAutopilot: () => void
   onCast: () => void
   onRules?: () => void
+  onSave?: () => void
   onSaves?: () => void
   onNew: () => void
   onLibrary: () => void
@@ -154,10 +156,21 @@ export function Header({
                   <button type="button" onClick={pick(onCast)}>World Kit</button>
                   <button type="button" onClick={pick(onLibrary)}>Asset Library</button>
                   <span className="vp-menu-div" style={{ display: 'block' }} />
-                  {onSaves ? (
-                    <button type="button" onClick={pick(onSaves)} title="Snapshots taken automatically before every start-over">
-                      Recent saves
-                    </button>
+                  {onSave || onSaves ? (
+                    // Save (the action) with Recent saves (the list) tucked
+                    // quietly to its right.
+                    <span style={{ display: 'flex' }}>
+                      {onSave ? (
+                        <button type="button" style={{ flex: 1 }} onClick={pick(onSave)} title="Keep a save point of the whole project right now — free">
+                          Save
+                        </button>
+                      ) : null}
+                      {onSaves ? (
+                        <button type="button" style={{ color: 'var(--ink-3)' }} onClick={pick(onSaves)} title="Saves are also kept automatically before every start-over">
+                          Recent saves
+                        </button>
+                      ) : null}
+                    </span>
                   ) : null}
                   <button type="button" onClick={pick(onNew)}>New project</button>
                 </span>

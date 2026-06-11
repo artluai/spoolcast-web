@@ -288,6 +288,20 @@ function SpoolcastApp() {
       }}
       onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/world-kit`)}
       onRules={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}/rules`)}
+      onSave={async () => {
+        try {
+          const r = await fetch('http://localhost:8000/api/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'create_save_point' }),
+          })
+          const out = await r.json().catch(() => null)
+          if (r.ok && out?.ok !== false) setToast('Save point kept.')
+          else setToast(`Engine: ${out?.message || out?.error || 'could not save.'}`)
+        } catch {
+          setToast('Could not reach the engine.')
+        }
+      }}
       onSaves={() => setSavesOpen(true)}
       isRules={isRules}
       onNew={() => {

@@ -49,7 +49,7 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
       <div className="confirm-modal" style={{ minWidth: 460 }}>
         <span className="need">AUTOMATIC</span>
         <h3>Recent saves</h3>
-        <p>A save point is kept every time you start over (the last 5). Restoring puts those files and approvals back.</p>
+        <p>Saved when you hit Save, and automatically before every start-over (the last 5 kept). Restoring puts those files and approvals back.</p>
         {error ? <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p> : null}
         {points === null && !error ? <p className="label">Loading…</p> : null}
         {points !== null && points.length === 0 ? (
@@ -61,7 +61,7 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', fontSize: 13 }}>
               <span style={{ color: 'var(--ink)' }}>{when}</span>
               <span style={{ color: 'var(--ink-3)', flex: 1 }}>
-                before starting over from {plain(p.rewound_stage)} · {p.files} file{p.files === 1 ? '' : 's'}
+                {p.rewound_stage ? `before starting over from ${plain(p.rewound_stage)}` : 'saved by you'} · {p.files} file{p.files === 1 ? '' : 's'}
               </span>
               <button
                 type="button"
