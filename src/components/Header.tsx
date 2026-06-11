@@ -29,6 +29,16 @@ export function Header({
   onLibrary: () => void
   onProfile: () => void
 }) {
+  // Project label comes from the route (/p/dev-log-12 → "Dev Log #12") — the
+  // crumb must reflect the project actually open, never a hardcoded episode.
+  const projectId = route.startsWith('/p/') ? (route.split('/')[2] ?? '') : ''
+  const devLogMatch = projectId.match(/^dev-log-(\d+)$/)
+  const projectLabel = devLogMatch
+    ? `Dev Log #${devLogMatch[1].padStart(2, '0')}`
+    : projectId
+      ? projectId.replace(/-/g, ' ')
+      : 'Untitled video'
+
   let crumb = null
   if (route === '/projects') {
     crumb = (
@@ -73,7 +83,7 @@ export function Header({
           </>
         ) : setupMode === 'series' ? (
           <>
-            <b>Dev Log #06</b>
+            <b>{projectLabel}</b>
             <span className="sep">·</span>
             <span className="crumb-secondary">{showName}</span>
           </>

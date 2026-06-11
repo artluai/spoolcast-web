@@ -12,6 +12,7 @@ import {
   timelineOf,
   type PacingOverlay,
   type PacingPlan,
+  type TimedImage,
 } from '../../lib/pacing-md'
 import { useWorkflowStore } from '../../store/workflow'
 
@@ -36,6 +37,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [editing, setEditing] = useState<EditDraft | null>(null)
   const [view, setView] = useState<'table' | 'script'>('table')
   const [activeId, setActiveId] = useState('')
+  // TIMELINE EDGE DRAG: live hold overrides while dragging the boundary
+  // between two images of the same beat (zero-sum — the words own the total).
+  const [dragHolds, setDragHolds] = useState<Record<string, number> | null>(null)
+  const dragHoldsRef = useRef<Record<string, number> | null>(null)
+  // SCRIPT TAG DRAG: which image tag is being dragged to a new start word.
+  const [scriptDrag, setScriptDrag] = useState<{ chunkId: string; beatCode: string; imageId: string; candidate: number | null } | null>(null)
+  const scriptDragRef = useRef<typeof scriptDrag>(null)
 
   const editKey = editing ? `${editing.scope}:${'imageId' in editing ? editing.imageId : 'overlayId' in editing ? editing.overlayId : editing.chunkId}` : ''
   useEffect(() => {
@@ -139,20 +147,34 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     )
   }
   const p = plan!
-  const stats = pacingStats(p)
-  const images = timelineOf(p)
+  // While a boundary drag is live, render from a hold-overridden copy so the
+  // blocks follow the pointer; the real plan is updated once on release.
+  const dp: PacingPlan = dragHolds
+    ? {
+        ...p,
+        chunks: p.chunks.map((c) => ({
+          ...c,
+          beats: c.beats.map((b) => ({
+            ...b,
+            images: b.images.map((i) => (dragHolds[i.id] != null ? { ...i, holdS: dragHolds[i.id] } : i)),
+          })),
+        })),
+      }
+    : p
+  const stats = pacingStats(dp)
+  const images = timelineOf(dp)
   const totalSec = stats.runtimeS || 1
   const pct = (sec: number) => (sec / totalSec) * 100
   const active = images.find((img) => img.id === activeId) ?? images[0]
 
-  const chunkSpans = p.chunks.map((chunk) => {
+  const chunkSpans = dp.chunks.map((chunk) => {
     const imgs = images.filter((img) => img.chunkId === chunk.id)
     const start = imgs[0]?.startS ?? 0
     const last = imgs[imgs.length - 1]
     return { id: chunk.id, title: chunk.title, start, end: (last?.startS ?? 0) + (last?.holdS ?? 0) }
   })
   const openingEnd = Math.min(totalSec, OPENING_WINDOW_S)
-  const overlayMarks = p.overlays
+  const overlayMarks = dp.overlays
     .map((o) => {
       const host = images.find((img) => img.id === o.anchor)
       return host ? { ...o, center: host.startS + host.holdS / 2 } : null
@@ -321,6 +343,95 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
   const setDraftField = (patch: Record<string, string>) => setEditing((d) => (d ? ({ ...d, ...patch } as EditDraft) : d))
 
+  const round1 = (n: number) => Math.round(n * 10) / 10
+
+  // --- timeline edge drag (zero-sum hold rebalance between beat siblings) ---
+  const startHoldDrag = (e: React.PointerEvent, left: TimedImage, right: TimedImage) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const total = left.holdS + right.holdS
+    if (total < 2.2) return // nothing meaningful to rebalance
+    const track = (e.currentTarget as HTMLElement).parentElement
+    const width = track?.getBoundingClientRect().width ?? 1
+    const pxPerSec = width / totalSec
+    const startX = e.clientX
+    const left0 = left.holdS
+    const onMove = (ev: PointerEvent) => {
+      const delta = (ev.clientX - startX) / pxPerSec
+      const newLeft = round1(Math.min(Math.max(left0 + delta, 1), total - 1))
+      const next = { [left.id]: newLeft, [right.id]: round1(total - newLeft) }
+      dragHoldsRef.current = next
+      setDragHolds(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const dh = dragHoldsRef.current
+      dragHoldsRef.current = null
+      setDragHolds(null)
+      if (dh) {
+        const next = clone()
+        for (const c of next.chunks)
+          for (const b of c.beats)
+            for (const i of b.images) if (dh[i.id] != null) i.holdS = dh[i.id]
+        apply(next)
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // --- script tag drag (move an image's start to a different word) ---
+  const startTagDrag = (e: React.PointerEvent, chunkId: string, beatCode: string, imageId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const d = { chunkId, beatCode, imageId, candidate: null as number | null }
+    scriptDragRef.current = d
+    setScriptDrag(d)
+    const onMove = (ev: PointerEvent) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)
+      const wordEl = el instanceof Element ? el.closest('[data-widx]') : null
+      const cur = scriptDragRef.current
+      if (!cur) return
+      if (wordEl && wordEl.getAttribute('data-beat') === `${cur.chunkId}:${cur.beatCode}`) {
+        const idx = Number(wordEl.getAttribute('data-widx'))
+        if (Number.isFinite(idx) && idx !== cur.candidate) {
+          const next = { ...cur, candidate: idx }
+          scriptDragRef.current = next
+          setScriptDrag(next)
+        }
+      }
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const cur = scriptDragRef.current
+      scriptDragRef.current = null
+      setScriptDrag(null)
+      if (!cur || cur.candidate == null) return
+      const next = clone()
+      const beat = next.chunks.find((c) => c.id === cur.chunkId)?.beats.find((b) => b.code === cur.beatCode)
+      if (!beat) return
+      const words = beat.narration.split(/\s+/).filter(Boolean)
+      const total = beat.images.reduce((n, i) => n + i.holdS, 0)
+      const k = beat.images.findIndex((i) => i.id === cur.imageId)
+      if (k <= 0 || words.length < 2) return // first image always starts the beat
+      const starts = beatSpans(beat.narration, beat.images).map((s) => s.from)
+      const minStart = (starts[k - 1] ?? 0) + 1
+      const maxStart = k + 1 < starts.length ? starts[k + 1] - 1 : words.length - 1
+      if (minStart > maxStart) return
+      starts[k] = Math.min(Math.max(cur.candidate, minStart), maxStart)
+      const bounds = [...starts, words.length]
+      beat.images.forEach((img, i2) => {
+        img.holdS = Math.max(0.5, round1(((bounds[i2 + 1] - bounds[i2]) / words.length) * total))
+      })
+      apply(next)
+      setActiveId(cur.imageId)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   return (
     <div className="vp panel-flat">
       <div className="ch">
@@ -379,6 +490,30 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <span>{img.id}</span>
               </button>
             ))}
+            {/* Drag handles on boundaries between images of the SAME beat —
+                zero-sum: one grows, the other shrinks. Beat/chunk edges are
+                owned by the narration words, so they don't get handles. */}
+            {images.map((img, idx) => {
+              const nxt = images[idx + 1]
+              if (!nxt || nxt.chunkId !== img.chunkId || nxt.beatCode !== img.beatCode) return null
+              return (
+                <div
+                  key={`h-${img.id}`}
+                  title={`Drag to rebalance ${img.id} ↔ ${nxt.id} (total stays ${(img.holdS + nxt.holdS).toFixed(1)}s)`}
+                  onPointerDown={(e) => startHoldDrag(e, img, nxt)}
+                  style={{
+                    position: 'absolute',
+                    left: `calc(${pct(img.startS + img.holdS)}% - 4px)`,
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    cursor: 'ew-resize',
+                    zIndex: 3,
+                    touchAction: 'none',
+                  }}
+                />
+              )
+            })}
           </div>
         </div>
 
@@ -412,8 +547,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
       <div className="vp-hintbar">
         <p className="vp-hint">
-          Hover a block to inspect · right-click a block or chunk to edit, add, or remove ·
-          timings are estimates until narration audio exists
+          Hover to inspect · right-click to edit, add, or remove · drag the edge between two
+          blocks to rebalance their time · timings are estimates until narration audio exists
         </p>
         <span style={{ display: 'inline-flex', gap: 8 }}>
           <button
@@ -542,26 +677,45 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </table>
         </div>
       ) : (
-        <div className="vp-script">
-          {p.chunks.map((chunk) => (
+        <div className="vp-script" style={scriptDrag ? { userSelect: 'none', cursor: 'grabbing' } : undefined}>
+          {dp.chunks.map((chunk) => (
             <p className="vp-script-chunk" key={chunk.id}>
               <span className="vp-script-cid">{chunk.id}</span>
               {chunk.beats.map((beat) => {
                 const words = beat.narration.split(/\s+/).filter(Boolean)
                 const spans = beatSpans(beat.narration, beat.images)
+                const beatKey = `${chunk.id}:${beat.code}`
+                const dragHere = scriptDrag && scriptDrag.chunkId === chunk.id && scriptDrag.beatCode === beat.code
                 return words.map((w, i) => {
                   const owner = spans.find((s) => i >= s.from && i <= s.to)
                   const cls = ['vp-w']
                   if (owner) cls.push('img')
                   if (owner && owner.id === activeId) cls.push('on')
                   const ownerImg = owner ? beat.images.find((im) => im.id === owner.id) : undefined
+                  const isDropTarget = dragHere && scriptDrag!.candidate === i
                   return (
                     <span key={`${beat.code}:${i}`}>
-                      {owner && i === owner.from ? <span className="vp-w-tag" title={ownerImg?.what}>{owner.id}</span> : null}
+                      {owner && i === owner.from ? (
+                        <span
+                          className="vp-w-tag"
+                          title={`${ownerImg?.what ?? ''} — drag to the word where this image should start`}
+                          onPointerDown={(e) => startTagDrag(e, chunk.id, beat.code, owner.id)}
+                          style={{
+                            cursor: scriptDrag?.imageId === owner.id ? 'grabbing' : 'grab',
+                            touchAction: 'none',
+                            opacity: scriptDrag && scriptDrag.imageId !== owner.id ? 0.5 : undefined,
+                          }}
+                        >
+                          {owner.id}
+                        </span>
+                      ) : null}
                       <span
                         className={cls.join(' ')}
-                        onMouseEnter={owner ? () => setActiveId(owner.id) : undefined}
-                        onClick={owner ? (e) => openMenu(e, { chunkId: chunk.id, beatCode: beat.code, imageId: owner.id }) : undefined}
+                        data-beat={beatKey}
+                        data-widx={i}
+                        onMouseEnter={owner && !scriptDrag ? () => setActiveId(owner.id) : undefined}
+                        onClick={owner && !scriptDrag ? (e) => openMenu(e, { chunkId: chunk.id, beatCode: beat.code, imageId: owner.id }) : undefined}
+                        style={isDropTarget ? { outline: '1px dashed var(--ink-2)', borderRadius: 3 } : undefined}
                       >{w}</span>{' '}
                     </span>
                   )
