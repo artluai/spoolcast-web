@@ -2,7 +2,42 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { appendUserRule, removeUserRules, USER_RULES_HEADER } from '../lib/rules'
+import { appendUserRule, removeUserRules, saveRuleContent, USER_RULES_HEADER } from '../lib/rules'
+
+// Split a section body into prose chunks and individual bullet rules, so each
+// rule can get its own hover actions (edit / remove) while prose stays prose.
+type Block = { kind: 'md' | 'rule'; text: string }
+function parseBlocks(body: string): Block[] {
+  const lines = body.split('\n')
+  const blocks: Block[] = []
+  let buf: string[] = []
+  const flush = () => {
+    if (buf.length) {
+      blocks.push({ kind: 'md', text: buf.join('\n') })
+      buf = []
+    }
+  }
+  let i = 0
+  while (i < lines.length) {
+    if (/^\s*[-*]\s+/.test(lines[i])) {
+      flush()
+      const rule = [lines[i]]
+      i += 1
+      while (i < lines.length && /^\s{2,}\S/.test(lines[i])) {
+        rule.push(lines[i])
+        i += 1
+      }
+      blocks.push({ kind: 'rule', text: rule.join('\n') })
+    } else {
+      buf.push(lines[i])
+      i += 1
+    }
+  }
+  flush()
+  return blocks
+}
+
+const flattenRule = (raw: string) => raw.replace(/^\s*[-*]\s+/, '').replace(/\n\s+/g, ' ').trim()
 
 // HOUSE RULES: the canonical rule files every AI drafter works under, made
 // visible and editable. The files stay the single source of truth (engine
@@ -42,6 +77,36 @@ export function RulesView() {
   const [newRule, setNewRule] = useState('')
   const [savingRule, setSavingRule] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  // Per-rule hover actions: edit one bullet in place, or remove just it.
+  const [hoverRule, setHoverRule] = useState<string | null>(null)
+  const [ruleEdit, setRuleEdit] = useState<{ si: number; bi: number; text: string } | null>(null)
+  const saveBlocks = async (si: number, mutate: (blocks: Block[]) => Block[] | null) => {
+    if (!active) return
+    const blocks = mutate(parseBlocks(sections[si].body))
+    if (blocks === null) return
+    const newBody = blocks.map((b) => b.text).join('\n')
+    const content = sections.map((s, i) => (i === si ? newBody : s.body)).join('\n')
+    setSavingRule(true)
+    setNote(null)
+    const res = await saveRuleContent(active.id, content)
+    if (!res.ok) setNote(res.error)
+    else setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+    setSavingRule(false)
+    setRuleEdit(null)
+  }
+  const saveRuleEdit = () => {
+    if (!ruleEdit) return
+    const text = ruleEdit.text.trim().replace(/\s*\n+\s*/g, ' ')
+    void saveBlocks(ruleEdit.si, (blocks) => {
+      if (!text) return null
+      const next = [...blocks]
+      next[ruleEdit.bi] = { kind: 'rule', text: `- ${text}` }
+      return next
+    })
+  }
+  const removeRule = (si: number, bi: number) => {
+    void saveBlocks(si, (blocks) => blocks.filter((_, i) => i !== bi))
+  }
   const addRule = async () => {
     if (!active || !newRule.trim()) return
     setSavingRule(true)
@@ -319,16 +384,84 @@ export function RulesView() {
                   ) : (
                     visibleSections.map((s) => {
                       const i = sections.indexOf(s)
+                      const blocks = parseBlocks(s.body)
                       return (
                         <div
                           key={i}
                           id={`rule-sec-${i}`}
-                          className="md-preview"
                           style={{ borderBottom: '1px solid var(--line, #2a3142)', padding: '4px 0 12px', marginBottom: 12 }}
-                          dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(marked.parse(s.body, { async: false }) as string),
-                          }}
-                        />
+                        >
+                          {blocks.map((b, bi) =>
+                            b.kind === 'md' ? (
+                              b.text.trim() ? (
+                                <div
+                                  key={bi}
+                                  className="md-preview"
+                                  dangerouslySetInnerHTML={{
+                                    __html: DOMPurify.sanitize(marked.parse(b.text, { async: false }) as string),
+                                  }}
+                                />
+                              ) : null
+                            ) : ruleEdit && ruleEdit.si === i && ruleEdit.bi === bi ? (
+                              // EDIT THIS RULE in place
+                              <div key={bi} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '4px 0' }}>
+                                <textarea
+                                  autoFocus
+                                  rows={2}
+                                  value={ruleEdit.text}
+                                  onChange={(e) => setRuleEdit((d) => (d ? { ...d, text: e.target.value } : d))}
+                                  style={{
+                                    flex: 1, background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
+                                    border: '1px dashed var(--line, #2a3142)', borderRadius: 8,
+                                    padding: '8px 10px', fontSize: 13, lineHeight: 1.5, resize: 'vertical',
+                                  }}
+                                />
+                                <button className="vp-undo" type="button" disabled={savingRule} onClick={saveRuleEdit}>
+                                  {savingRule ? 'Saving…' : 'Save'}
+                                </button>
+                                <button className="vp-undo" type="button" onClick={() => setRuleEdit(null)}>Cancel</button>
+                              </div>
+                            ) : (
+                              // ONE RULE — hover for edit/remove
+                              <div
+                                key={bi}
+                                onMouseEnter={() => setHoverRule(`${i}:${bi}`)}
+                                onMouseLeave={() => setHoverRule(null)}
+                                style={{ position: 'relative', paddingRight: 64 }}
+                              >
+                                <div
+                                  className="md-preview"
+                                  dangerouslySetInnerHTML={{
+                                    __html: DOMPurify.sanitize(marked.parse(b.text, { async: false }) as string),
+                                  }}
+                                />
+                                {hoverRule === `${i}:${bi}` ? (
+                                  <span style={{ position: 'absolute', right: 0, top: 4, display: 'inline-flex', gap: 4 }}>
+                                    <button
+                                      type="button"
+                                      className="vp-undo"
+                                      title="Edit just this rule"
+                                      style={{ padding: '2px 8px', fontSize: 11 }}
+                                      onClick={() => setRuleEdit({ si: i, bi, text: flattenRule(b.text) })}
+                                    >
+                                      ✎
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="vp-undo"
+                                      title="Remove just this rule"
+                                      style={{ padding: '2px 8px', fontSize: 11 }}
+                                      disabled={savingRule}
+                                      onClick={() => removeRule(i, bi)}
+                                    >
+                                      ✕
+                                    </button>
+                                  </span>
+                                ) : null}
+                              </div>
+                            ),
+                          )}
+                        </div>
                       )
                     })
                   )}

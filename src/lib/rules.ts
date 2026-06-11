@@ -7,7 +7,12 @@ export const SERIES_RULES_ID = 'series:spoolcast-devlog:rules' // session-id deb
 
 export const USER_RULES_HEADER = '## User-added rules'
 
-type RuleResult = { ok: true; content: string } | { ok: false; error: string }
+export type RuleResult = { ok: true; content: string } | { ok: false; error: string }
+
+// Save a full rulebook (used by per-rule edit/remove in the wiki).
+export async function saveRuleContent(ruleId: string, content: string): Promise<RuleResult> {
+  return saveRuleFile(ruleId, content)
+}
 
 async function saveRuleFile(ruleId: string, content: string): Promise<RuleResult> {
   const save = await fetch('http://localhost:8000/api/action', {
