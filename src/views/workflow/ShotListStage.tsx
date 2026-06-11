@@ -197,6 +197,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
             busyLabel="Building…"
             busy={building}
             title="Compiles the approved pacing plan — structure copied by code, AI writes the picture directions, the validator certifies it before you see it. Uses model credits."
+            rulesFocus="visual-pacing"
             onRun={(fb) => build(fb)}
           />
           {chunks.length > 0 ? (

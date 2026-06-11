@@ -267,6 +267,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             busy={busy === st}
             disabled={!enabled}
             title={disabledReason || `Uses model credits${draft.trim() ? ' · replaces the current text' : ''}`}
+            rulesFocus="story"
             onRun={(fb) => runDraft(st, fb)}
           />
         </div>

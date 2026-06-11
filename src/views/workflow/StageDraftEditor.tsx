@@ -246,6 +246,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
             busy={drafting}
             title="Runs the AI — uses model credits"
+            rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
             onRun={(fb) => runDraft(fb)}
           />
           <span style={{ position: 'relative' }}>

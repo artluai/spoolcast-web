@@ -17,6 +17,7 @@ export function FeedbackButton({
   disabled,
   title,
   placeholder = 'Tell the AI what to change — e.g. “easier to understand”, “shorter”, “more dramatic”…',
+  rulesFocus = 'series-rules',
   onRun,
 }: {
   label: string
@@ -25,6 +26,9 @@ export function FeedbackButton({
   disabled?: boolean
   title?: string
   placeholder?: string
+  // Which rulebook this step works under — the "view existing rules" link
+  // deep-links there (Project Wiki). Defaults to the series rulebook.
+  rulesFocus?: string
   onRun: (feedback: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -114,6 +118,13 @@ export function FeedbackButton({
           />
           also save as a permanent rule
         </label>
+        <a
+          href={`/p/dev-log-12/rules?focus=${rulesFocus}`}
+          title="Open the rulebook this step works under"
+          style={{ color: 'var(--ink-3)', fontSize: 12, textDecoration: 'underline', textUnderlineOffset: 3 }}
+        >
+          view existing rules
+        </a>
         {ruleNote ? <span style={{ color: 'var(--amber)', fontSize: 12 }}>{ruleNote}</span> : null}
         <span style={{ flex: 1 }} />
         <button
