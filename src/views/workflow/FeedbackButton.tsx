@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { appendUserRule, SERIES_RULES_ID } from '../../lib/rules'
 
 /**
  * The house control for every AI re-draft/re-suggest action:
@@ -28,6 +29,10 @@ export function FeedbackButton({
 }) {
   const [open, setOpen] = useState(false)
   const [feedback, setFeedback] = useState('')
+  // "Make it law": optionally save this feedback as a permanent series rule
+  // (Project Wiki → Series rules → User-added rules) before running.
+  const [asRule, setAsRule] = useState(false)
+  const [ruleNote, setRuleNote] = useState<string | null>(null)
 
   // Auto-collapse when a run completes (busy goes true → false).
   const wasBusy = useRef(false)
@@ -96,7 +101,21 @@ export function FeedbackButton({
           lineHeight: 1.5,
         }}
       />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, padding: '4px 10px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px 10px' }}>
+        <label
+          title="Adds this to the series rulebook (Project Wiki) so EVERY future draft follows it — not just this one"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}
+        >
+          <input
+            type="checkbox"
+            checked={asRule}
+            onChange={(e) => setAsRule(e.target.checked)}
+            style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+          />
+          also save as a permanent rule
+        </label>
+        {ruleNote ? <span style={{ color: 'var(--amber)', fontSize: 12 }}>{ruleNote}</span> : null}
+        <span style={{ flex: 1 }} />
         <button
           type="button"
           title="Collapse"
@@ -110,7 +129,17 @@ export function FeedbackButton({
           className="save-continue"
           disabled={disabled || busy}
           title={title}
-          onClick={() => onRun(feedback)}
+          onClick={async () => {
+            setRuleNote(null)
+            if (asRule && feedback.trim()) {
+              const res = await appendUserRule(SERIES_RULES_ID, feedback)
+              if (res !== true) {
+                setRuleNote(res)
+                return // don't run on a failed rule save — the user asked for both
+              }
+            }
+            onRun(feedback)
+          }}
           style={{ width: 'auto', padding: '6px 14px', fontSize: 12 }}
         >
           ✦ {busy ? busyLabel : label}

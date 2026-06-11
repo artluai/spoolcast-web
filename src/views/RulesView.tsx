@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { appendUserRule } from '../lib/rules'
 
 // HOUSE RULES: the canonical rule files every AI drafter works under, made
 // visible and editable. The files stay the single source of truth (engine
@@ -35,6 +36,40 @@ export function RulesView() {
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // Quick "Add rule": one input, lands under '## User-added rules' in the
+  // open rulebook — no raw-markdown editing required.
+  const [adding, setAdding] = useState(false)
+  const [newRule, setNewRule] = useState('')
+  const [savingRule, setSavingRule] = useState(false)
+  const addRule = async () => {
+    if (!active || !newRule.trim()) return
+    setSavingRule(true)
+    setNote(null)
+    const res = await appendUserRule(active.id, newRule)
+    if (res !== true) {
+      setNote(res)
+    } else {
+      // reflect the new rule locally without a refetch
+      const header = '## User-added rules'
+      const clean = newRule.trim().replace(/\s*\n+\s*/g, ' ')
+      setRules((rs) =>
+        rs
+          ? rs.map((r) => {
+              if (r.id !== active.id) return r
+              const base = r.content.replace(/\s+$/, '')
+              const content = base.includes(header)
+                ? `${base}\n- ${clean}\n`
+                : `${base}\n\n${header}\n\nRules added from the app — every AI draft works under these.\n\n- ${clean}\n`
+              return { ...r, content }
+            })
+          : rs,
+      )
+      setNewRule('')
+      setAdding(false)
+      setNote('Rule added — every AI draft from now on works under it.')
+    }
+    setSavingRule(false)
+  }
 
   useEffect(() => {
     fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
@@ -226,11 +261,35 @@ export function RulesView() {
                         <button className="vp-undo" type="button" onClick={() => setEditing(false)}>Cancel</button>
                       </>
                     ) : (
-                      <button className="vp-undo" type="button" title="Edit the exact file the drafters read" onClick={startEdit}>
-                        Edit as text
-                      </button>
+                      <>
+                        <button className="vp-undo" type="button" title="Add one rule to this rulebook — no file editing needed" onClick={() => setAdding((v) => !v)}>
+                          + Add rule
+                        </button>
+                        <button className="vp-undo" type="button" title="Edit the exact file the drafters read" onClick={startEdit}>
+                          Edit as text
+                        </button>
+                      </>
                     )}
                   </div>
+                  {adding && !editing ? (
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                      <input
+                        autoFocus
+                        value={newRule}
+                        onChange={(e) => setNewRule(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') addRule() }}
+                        placeholder="Write the rule in plain words — e.g. “Always bridge the cold open into the intro with one sentence.”"
+                        style={{
+                          flex: 1, background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
+                          border: '1px dashed var(--line, #2a3142)', borderRadius: 8,
+                          padding: '9px 12px', fontSize: 13,
+                        }}
+                      />
+                      <button className="vp-undo" type="button" disabled={savingRule || !newRule.trim()} onClick={addRule}>
+                        {savingRule ? 'Adding…' : 'Add'}
+                      </button>
+                    </div>
+                  ) : null}
                   {note ? <p className="label" style={{ margin: '0 0 10px' }}>{note}</p> : null}
                   {editing ? (
                     <textarea
