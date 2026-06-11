@@ -314,36 +314,56 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             onRun={(fb) => runDraft(st, fb)}
           />
         </div>
-        {editing === st ? (
-          <textarea
-            autoFocus
-            value={draft}
-            placeholder="Write the narration here…"
-            onChange={(e) => setStageFileDraft(stageId, key(st), e.target.value)}
-            onBlur={() => setEditing(null)}
-            style={{
-              width: '100%', minHeight: 240, marginTop: 10, resize: 'vertical', background: 'transparent',
-              color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
-              padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
-            }}
-          />
-        ) : draft.trim() ? (
-          <div
-            className="md-preview"
-            title="Click to edit"
-            onClick={() => setEditing(st)}
-            style={{ marginTop: 6, cursor: 'text' }}
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing(st)}
-            style={{ background: 'none', border: 'none', padding: 0, marginTop: 10, color: 'var(--ink-3)', fontSize: 13, cursor: 'pointer' }}
-          >
-            ▸ or write it yourself
-          </button>
-        )}
+        {/* WORK IN PROGRESS: while the AI rewrites this station, say so where
+            the user is looking — spinner over the text, content dimmed+locked. */}
+        <div style={{ position: 'relative' }}>
+          {busy === st ? (
+            <div
+              style={{
+                position: 'absolute', inset: 0, zIndex: 2,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                background: 'rgba(10, 12, 18, .45)', borderRadius: 8, minHeight: 80,
+              }}
+            >
+              <span className="spin" />
+              <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>
+                {st === 'screenplay' ? 'AI is polishing the script…' : 'AI is writing the draft…'}
+              </span>
+            </div>
+          ) : null}
+          <div style={busy === st ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+            {editing === st ? (
+              <textarea
+                autoFocus
+                value={draft}
+                placeholder="Write the narration here…"
+                onChange={(e) => setStageFileDraft(stageId, key(st), e.target.value)}
+                onBlur={() => setEditing(null)}
+                style={{
+                  width: '100%', minHeight: 240, marginTop: 10, resize: 'vertical', background: 'transparent',
+                  color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
+                  padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
+                }}
+              />
+            ) : draft.trim() ? (
+              <div
+                className="md-preview"
+                title="Click to edit"
+                onClick={() => setEditing(st)}
+                style={{ marginTop: 6, cursor: 'text' }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditing(st)}
+                style={{ background: 'none', border: 'none', padding: 0, marginTop: 10, color: 'var(--ink-3)', fontSize: 13, cursor: 'pointer' }}
+              >
+                ▸ or write it yourself
+              </button>
+            )}
+          </div>
+        </div>
         {footer}
       </div>
     )
