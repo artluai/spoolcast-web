@@ -443,31 +443,28 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return null
   })()
   const locateRef = useRef<HTMLSpanElement>(null)
-  // The script panel scrolls ITSELF (like the pacing list): content-height by
-  // default, capped when it overflows, with bottom padding so end-of-script
-  // spots can still center. Hover-locate scrolls the panel, never the page —
-  // the finding you're hovering stays under your cursor.
   const scriptBoxRef = useRef<HTMLDivElement>(null)
-  const [scriptOverflows, setScriptOverflows] = useState(false)
+  // The script shows at FULL height (no inner scrollbar). Hover-locate
+  // scrolls the page to center the highlight; while that scroll animates,
+  // hover changes are suppressed so rows sliding under the cursor can't
+  // cascade-trigger new locates or clear the highlight mid-read.
+  const scrollingRef = useRef(false)
   useEffect(() => {
-    const box = scriptBoxRef.current
-    if (!box) return
-    const padPx = scriptOverflows ? window.innerHeight * 0.22 : 0
-    const overflowing = box.scrollHeight - padPx > box.clientHeight + 2
-    if (overflowing !== scriptOverflows) setScriptOverflows(overflowing)
-  })
-  useEffect(() => {
-    const box = scriptBoxRef.current
-    const el = locateRef.current
-    if (!locate || !box || !el) return
-    const boxRect = box.getBoundingClientRect()
-    const elRect = el.getBoundingClientRect()
-    box.scrollTo({
-      top: box.scrollTop + (elRect.top - boxRect.top) - box.clientHeight / 2 + elRect.height / 2,
-      behavior: 'smooth',
-    })
+    if (!locate || !locateRef.current) return
+    scrollingRef.current = true
+    locateRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = window.setTimeout(() => {
+      scrollingRef.current = false
+    }, 650)
+    return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoverIssue, locate?.start])
+  const hoverEnter = (k: string) => {
+    if (!scrollingRef.current) setHoverIssue(k)
+  }
+  const hoverLeave = () => {
+    if (!scrollingRef.current) setHoverIssue(null)
+  }
   const composeAuditFeedback = (fb: string) => {
     const parts: string[] = []
     if (fb.trim()) parts.push(fb.trim())
@@ -700,12 +697,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>AI is writing the next revision…</span>
                 </div>
               ) : null}
+              {/* SCRIPT COLUMN: a centered reading measure with real margins —
+                  it should feel like a script page, not a wall of UI text. */}
               <div
                 ref={scriptBoxRef}
                 style={{
-                  maxHeight: '48vh',
-                  overflowY: 'auto',
-                  paddingBottom: scriptOverflows ? '22vh' : 0,
+                  maxWidth: 680,
+                  margin: '6px auto 0',
+                  padding: '10px 28px 16px',
+                  fontSize: 15,
                   ...(busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : {}),
                 }}
               >
@@ -823,8 +823,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     return (
                       <div
                         key={`b${k}`}
-                        onMouseEnter={() => setHoverIssue(fk)}
-                        onMouseLeave={() => setHoverIssue(null)}
+                        onMouseEnter={() => hoverEnter(fk)}
+                        onMouseLeave={hoverLeave}
                         style={{
                           display: 'flex', alignItems: 'baseline', gap: 8,
                           borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--red)'}`,
@@ -889,8 +889,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   return (
                     <div
                       key={`ai${k}`}
-                      onMouseEnter={() => setHoverIssue(fk)}
-                      onMouseLeave={() => setHoverIssue(null)}
+                      onMouseEnter={() => hoverEnter(fk)}
+                      onMouseLeave={hoverLeave}
                       style={{
                         display: 'flex', alignItems: 'baseline', gap: 8,
                         borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--accent, #8fa1ff)'}`,
