@@ -178,13 +178,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   }
   const saveCurrent = () => saveText(current)
 
-  // Grade a specific revision: save its text to both files, then run both
-  // deterministic checks on it. Used by Re-check AND after every AI revision —
-  // findings can never grade anything but the text they're attached to.
-  const gradeRevision = async (text: string, revIndex: number): Promise<void> => {
+  // Run the deterministic checks on a text (saved to both files first) and
+  // RETURN the result — the caller decides when it appears on screen, so a
+  // combined code+AI run can reveal everything at once.
+  const computeCodeAudit = async (text: string): Promise<AuditView | null> => {
     if (!(await saveText(text))) {
       setErr('Could not save the script to the engine.')
-      return
+      return null
     }
     const audits: Record<string, unknown> = {}
     for (const stage of ['screenplay', 'narration'] as const) {
@@ -192,11 +192,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       const out = await r.json().catch(() => null)
       if (!r.ok || out?.ok === false) {
         setErr(out?.message || out?.error || 'A check failed to run.')
-        return
+        return null
       }
       audits[stage] = { ok: true, ...out.data }
     }
-    const view = readAudits(audits as Parameters<typeof readAudits>[0])
+    return readAudits(audits as Parameters<typeof readAudits>[0])
+  }
+
+  const gradeRevision = async (text: string, revIndex: number): Promise<void> => {
+    const view = await computeCodeAudit(text)
     if (view) {
       setAudit(view)
       setAuditAt(new Date().toLocaleTimeString())
@@ -333,7 +337,18 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     setErr(null)
     setConfirmSkip(false)
     try {
-      if (checkCode) await gradeRevision(current, sel)
+      // ONE REVEAL: when both checkers run, hold the code results until the
+      // AI finishes so everything lands together — no staged half-verdicts.
+      let codeView: AuditView | null = null
+      if (checkCode) {
+        setAiPhase(checkAI ? 'review' : null)
+        codeView = await computeCodeAudit(current)
+        if (!checkAI && codeView) {
+          setAudit(codeView)
+          setAuditAt(new Date().toLocaleTimeString())
+          setAuditRev(sel)
+        }
+      }
       if (checkAI) {
         if (!checkCode && !(await saveText(current))) {
           setErr('Could not save the script to the engine.')
@@ -346,12 +361,20 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         // array) counts. An engine that doesn't know this action answers
         // through a legacy catch-all — that must read as an error, never as
         // a clean review.
-        if (!r.ok || out?.ok === false || out?.data?.advisory !== true || !Array.isArray(out?.data?.findings)) {
+        const aiOk = r.ok && out?.ok !== false && out?.data?.advisory === true && Array.isArray(out?.data?.findings)
+        if (!aiOk) {
           setErr(
             out?.message || out?.error ||
               'The AI review did not run — if the engine was started before this feature, restart it (Ctrl+C, ↑, Enter).',
           )
-        } else {
+        }
+        // Reveal together (code results land even if the AI failed).
+        if (codeView) {
+          setAudit(codeView)
+          setAuditAt(new Date().toLocaleTimeString())
+          setAuditRev(sel)
+        }
+        if (aiOk) {
           setAiNotes(out.data.findings)
           setAiRev(sel)
         }
