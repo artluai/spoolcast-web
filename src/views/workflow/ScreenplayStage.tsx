@@ -7,12 +7,8 @@ import { useWorkflowStore } from '../../store/workflow'
 
 const SESSION = 'spoolcast-dev-log-12'
 const API = 'http://localhost:8000/api'
-
-type StationKey = 'listener' | 'screenplay'
-const FILES: Record<StationKey, string> = {
-  listener: 'working/listener-draft.md',
-  screenplay: 'working/screenplay-v3.md',
-}
+const FILE_LISTENER = 'working/listener-draft.md'
+const FILE_SCREENPLAY = 'working/screenplay-v3.md'
 
 // Word-level diff (longest-common-subsequence): marks which words of `after`
 // are new/changed relative to `before`. Whitespace (incl. paragraph breaks)
@@ -53,48 +49,243 @@ type AuditView = {
   warnings: { label: string; detail: string }[]
 }
 
+type Rev = { label: string; text: string }
+
 /**
- * Step 6 — Screenplay, three flat sections (no nested boxes):
- *   1 · Initial script — AI writes the narration prose (or write it yourself)
- *   2 · Final script   — AI tightens it (or edit by hand)
- *   3 · Audit          — BOTH deterministic rule checks (script rules + voice
- *       rules; the voice check is what flips the T gate). Skippable, with a
- *       warning — the skip is recorded honestly in the audit files.
+ * Step 6 — Screenplay as a REVISION CHAIN:
+ *   Initial draft → Review 1 → Review 2 → …
+ * The SELECTED revision is the script: it's what both rule checks grade, what
+ * gets saved to the engine (both contract files), and what every later step
+ * builds on. Each AI pass appends a new revision; older ones collapse to one
+ * line and stay selectable. Revision history beyond what's on disk lives in
+ * this session only (full history arrives with content versioning).
  */
 export function ScreenplayStage({ stageId }: { stageId: string }) {
-  const drafts = useWorkflowStore((s) => s.stageDrafts)
   const setStageFileDraft = useWorkflowStore((s) => s.setStageFileDraft)
   const seedStageFileDraft = useWorkflowStore((s) => s.seedStageFileDraft)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [editing, setEditing] = useState<StationKey | null>(null)
+  const [revs, setRevs] = useState<Rev[]>([])
+  const [sel, setSel] = useState(0)
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState<'ai' | 'audit' | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [audit, setAudit] = useState<AuditView | null>(null)
+  const [auditAt, setAuditAt] = useState<string | null>(null)
+  const [auditRev, setAuditRev] = useState<number | null>(null) // which revision the findings grade
   const [confirmSkip, setConfirmSkip] = useState(false)
-  // The rewind prompt carries the feedback that triggered it — after "set back
-  // to pending", the SAME instructions run (losing them silently re-polished
-  // generically and reproduced the very findings the user asked to fix).
-  const [needRewind, setNeedRewind] = useState<{ st: StationKey; feedback: string } | null>(null)
+  const [needRewind, setNeedRewind] = useState<{ feedback: string } | null>(null)
+  const [ignored, setIgnored] = useState<Set<string>>(new Set())
+  const [hoverIssue, setHoverIssue] = useState<string | null>(null)
+  const [showDiff, setShowDiff] = useState(true)
+  const seededRef = useRef(false)
   const rewindRef = useRef<HTMLDivElement>(null)
+  const sourceWords = useSourceWords()
   useEffect(() => {
     if (needRewind) rewindRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [needRewind])
-  // Station collapse: while the Final script exists, the Draft station folds
-  // to one line (expandable) — the user works on one thing at a time.
-  const [collapseOverride, setCollapseOverride] = useState<Partial<Record<StationKey, boolean>>>({})
-  const isCollapsed = (st: StationKey) =>
-    collapseOverride[st] ?? (st === 'listener' && draftOf('screenplay').trim() !== '')
-  // Diff highlight: show where the Final script changed from the Draft.
-  const [showDiff, setShowDiff] = useState(true)
-  // When the findings were produced — so the user knows they're post-draft.
-  const [auditAt, setAuditAt] = useState<string | null>(null)
-  // The second half of a "Fix these" chain (the polish feedback) — kept here
-  // so a rewind detour during the Draft rewrite can resume the full chain.
-  const fixChainRef = useRef<string | null>(null)
-  // PER-ISSUE IGNORE: ignored findings are excluded from what Re-polish asks
-  // the AI to fix (and listed as "leave alone"). The CHECKS still see them —
-  // waiving the gate itself stays the explicit "Skip the checks" act.
-  const [ignored, setIgnored] = useState<Set<string>>(new Set())
-  const [hoverIssue, setHoverIssue] = useState<string | null>(null)
+
+  const current = revs[sel]?.text ?? ''
+
+  // THE SELECTED REVISION IS THE SCRIPT: mirror it into both store keys so the
+  // standard save flow persists it to both contract files.
+  const syncStore = (text: string) => {
+    setStageFileDraft(stageId, `${stageId}:listener`, text)
+    setStageFileDraft(stageId, `${stageId}:screenplay`, text)
+  }
+
+  // Seed from the engine's real files. A legacy session where the two files
+  // differ becomes two revisions (Initial draft + Review 1).
+  useEffect(() => {
+    if (seededRef.current) return
+    seededRef.current = true
+    Promise.all(
+      [FILE_LISTENER, FILE_SCREENPLAY].map((p) =>
+        fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(p)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((out) => (out?.ok && out.data?.exists ? String(out.data.content) : ''))
+          .catch(() => ''),
+      ),
+    ).then(([listener, screenplay]) => {
+      const L = listener.trim()
+      const S = screenplay.trim()
+      let seeded: Rev[] = []
+      if (L && S && displayBody(L) !== displayBody(S)) seeded = [{ label: 'Initial draft', text: listener }, { label: 'Review 1', text: screenplay }]
+      else if (S || L) seeded = [{ label: 'Initial draft', text: S ? screenplay : listener }]
+      if (seeded.length) {
+        setRevs(seeded)
+        setSel(seeded.length - 1)
+        seedStageFileDraft(`${stageId}:listener`, seeded[seeded.length - 1].text)
+        seedStageFileDraft(`${stageId}:screenplay`, seeded[seeded.length - 1].text)
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const stats = (text: string) => {
+    const body = text
+      .split('\n')
+      .filter((l) => !l.startsWith('#') && !l.startsWith('Voice source:'))
+      .join(' ')
+    const words = body.split(/\s+/).filter(Boolean).length
+    const secs = Math.round(words / 2.4)
+    return { words, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` }
+  }
+  const displayBody = (text: string) =>
+    text
+      .split('\n')
+      .filter((l) => !/^#\s/.test(l) && !/^##\s*Narration\s*$/i.test(l) && !l.startsWith('Voice source:'))
+      .join('\n')
+      .trim()
+
+  const post = (body: object) =>
+    fetch(`${API}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: SESSION, tenant: 'local', ...body }),
+    })
+
+  // Persist the SELECTED revision to BOTH contract files — one document, one
+  // truth; both checks grade the same text.
+  const saveCurrent = async (): Promise<boolean> => {
+    if (!current.trim()) return true
+    for (const path of [FILE_LISTENER, FILE_SCREENPLAY]) {
+      const r = await post({ action: 'set_stage_output', stage_id: stageId, path, content: current })
+      if (!r.ok) return false
+    }
+    return true
+  }
+
+  const readAudits = (audits: Record<string, { ok?: boolean; passed?: boolean; message?: string; blocking?: { detail?: string; message?: string; type?: string }[]; warnings?: { detail?: string; message?: string; type?: string }[] }>): AuditView | null => {
+    const view: AuditView = { passed: true, blocking: [], warnings: [] }
+    for (const [k, label] of [['screenplay', 'script'], ['narration', 'voice']] as const) {
+      const d = audits[k]
+      if (!d?.ok) {
+        setErr(d?.message || `${label} check could not run.`)
+        return null
+      }
+      if (!d.passed) view.passed = false
+      for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
+      for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
+    }
+    return view
+  }
+
+  // ONE AI ACTION: write/improve. Reads the selected revision (saved to disk
+  // first), produces the next revision, and the checks run in the same
+  // operation — the findings always grade the text they arrived with.
+  const runAI = async (feedback = ''): Promise<boolean> => {
+    setBusy('ai')
+    setErr(null)
+    try {
+      const initial = revs.length === 0
+      if (!initial && !(await saveCurrent())) {
+        setErr('Could not save the script to the engine.')
+        return false
+      }
+      const r = await post({
+        action: 'draft_stage',
+        stage_id: stageId,
+        variant: initial ? 'listener' : 'screenplay',
+        allow_cost: true,
+        ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) {
+        if (out?.error === 'illegal_action') {
+          setNeedRewind({ feedback })
+          return false
+        }
+        setErr(out?.message || out?.error || 'Drafting failed.')
+        return false
+      }
+      const file = initial ? FILE_LISTENER : FILE_SCREENPLAY
+      const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(file)}`)
+      const fileOut = await fr.json().catch(() => null)
+      const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
+      if (text.trim()) {
+        const label = revs.length === 0 ? 'Initial draft' : `Review ${revs.length}`
+        const nextIdx = revs.length
+        setRevs((rs) => [...rs, { label, text }])
+        setSel(nextIdx)
+        setEditing(false)
+        syncStore(text)
+        if (out?.data?.audits) {
+          const view = readAudits(out.data.audits)
+          if (view) {
+            setAudit(view)
+            setAuditAt(new Date().toLocaleTimeString())
+            setAuditRev(nextIdx)
+          }
+        } else {
+          setAudit(null)
+        }
+      }
+      return true
+    } catch {
+      setErr('Could not reach the engine.')
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // FREE RE-CHECK: grades the SELECTED revision (saved to disk first).
+  const runAudit = async () => {
+    setBusy('audit')
+    setErr(null)
+    setConfirmSkip(false)
+    try {
+      if (!(await saveCurrent())) {
+        setErr('Could not save the script to the engine.')
+        return
+      }
+      const audits: Record<string, unknown> = {}
+      for (const stage of ['screenplay', 'narration'] as const) {
+        const r = await post({ action: 'run_audit', stage })
+        const out = await r.json().catch(() => null)
+        if (!r.ok || out?.ok === false) {
+          setErr(out?.message || out?.error || 'A check failed to run.')
+          return
+        }
+        audits[stage] = { ok: true, ...out.data }
+      }
+      const view = readAudits(audits as Parameters<typeof readAudits>[0])
+      if (view) {
+        setAudit(view)
+        setAuditAt(new Date().toLocaleTimeString())
+        setAuditRev(sel)
+      }
+    } catch {
+      setErr('Could not reach the engine.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const skipAudit = async () => {
+    setConfirmSkip(false)
+    setBusy('audit')
+    setErr(null)
+    try {
+      await saveCurrent()
+      const stamp = new Date().toISOString()
+      const skipDoc = (what: string) =>
+        JSON.stringify({ skipped: true, skipped_at: stamp, note: `User skipped the ${what} check in the UI`, blocking: [], warnings: [{ type: 'skipped', detail: `${what} check was skipped by the user` }] }, null, 2)
+      const r1 = await post({ action: 'set_stage_output', stage_id: 'screenplay_plan', path: 'working/screenplay-audit.json', content: skipDoc('script') })
+      const r2 = await post({ action: 'set_stage_output', stage_id: 'narration_voice_check', path: 'working/narration-voice-review-v2.json', content: skipDoc('voice') })
+      if (!r1.ok || !r2.ok) {
+        setErr('Could not record the skip.')
+        return
+      }
+      setAudit({ passed: true, skipped: true, blocking: [], warnings: [] })
+      setAuditRev(sel)
+    } catch {
+      setErr('Could not reach the engine.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Findings triage
   const fkey = (f: { label: string; detail: string }) => `${f.label}:${f.detail}`
   const toggleIgnore = (k: string) =>
     setIgnored((s) => {
@@ -117,391 +308,14 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       )
     return parts.join('\n')
   }
-  const seededRef = useRef(false)
-  const sourceWords = useSourceWords()
-
-  const key = (st: StationKey) => `${stageId}:${st}`
-  const draftOf = (st: StationKey) => drafts[key(st)] ?? ''
-
-  // Word count + estimated speaking time (the engine plans at ~2.4 words/sec).
-  const stats = (text: string) => {
-    const body = text
-      .split('\n')
-      .filter((l) => !l.startsWith('#') && !l.startsWith('Voice source:'))
-      .join(' ')
-    const words = body.split(/\s+/).filter(Boolean).length
-    const secs = Math.round(words / 2.4)
-    return { words, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` }
-  }
-
-  // Rendered view shows only the narration — the document plumbing (title,
-  // voice-source path, section heading) stays in the file but not on screen.
-  const displayBody = (text: string) =>
-    text
-      .split('\n')
-      .filter((l) => !/^#\s/.test(l) && !/^##\s*Narration\s*$/i.test(l) && !l.startsWith('Voice source:'))
-      .join('\n')
-      .trim()
-
-  useEffect(() => {
-    if (seededRef.current) return
-    seededRef.current = true
-    ;(Object.keys(FILES) as StationKey[]).forEach((st) => {
-      fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(FILES[st])}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((out) => {
-          if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
-            const store = useWorkflowStore.getState()
-            if ((store.stageDrafts[key(st)] ?? '') === '') seedStageFileDraft(key(st), out.data.content)
-          }
-        })
-        .catch(() => {})
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const post = (body: object) =>
-    fetch(`${API}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: SESSION, tenant: 'local', ...body }),
-    })
-
-  const saveDraft = async (st: StationKey) => {
-    // Read straight from the store: callers may have just set the draft and the
-    // component closure can be one render behind.
-    const content = useWorkflowStore.getState().stageDrafts[key(st)] ?? ''
-    if (!content.trim()) return true
-    const r = await post({ action: 'set_stage_output', stage_id: stageId, path: FILES[st], content })
-    return r.ok
-  }
-
-  const runDraft = async (st: StationKey, feedback = ''): Promise<boolean> => {
-    setBusy(st)
-    setErr(null)
-    try {
-      if (st === 'screenplay') await saveDraft('listener')
-      const r = await post({
-        action: 'draft_stage',
-        stage_id: stageId,
-        variant: st,
-        allow_cost: true,
-        ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-      })
-      const out = await r.json().catch(() => null)
-      if (!r.ok || out?.ok === false) {
-        if (out?.error === 'illegal_action') {
-          // The engine has moved past this step (stale files / earlier approval).
-          setNeedRewind({ st, feedback })
-          return false
-        }
-        setErr(out?.message || out?.error || 'Drafting failed.')
-        return false
-      }
-      const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(FILES[st])}`)
-      const fileOut = await fr.json().catch(() => null)
-      if (fileOut?.ok && fileOut.data?.exists) setStageFileDraft(stageId, key(st), fileOut.data.content)
-      // MERGED POLISH+CHECK: the engine audits the polished script in the same
-      // operation — results arrive with the draft.
-      if (st === 'screenplay' && out?.data?.audits) {
-        const view: AuditView = { passed: true, blocking: [], warnings: [] }
-        for (const [k, label] of [['screenplay', 'script'], ['narration', 'voice']] as const) {
-          const d = out.data.audits[k]
-          if (!d?.ok) {
-            setErr(d?.message || `${label} check could not run.`)
-            setAudit(null)
-            return false
-          }
-          if (!d.passed) view.passed = false
-          for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
-          for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
-        }
-        setAudit(view)
-        setAuditAt(new Date().toLocaleTimeString())
-      } else if (st === 'screenplay') {
-        setAudit(null)
-      }
-      return true
-    } catch {
-      setErr('Could not reach the engine.')
-      return false
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // BOTH rule checks: script rules first, then narration voice rules (the
-  // voice review file is what the T gate on the canvas watches).
-  const runAudit = async () => {
-    setBusy('audit')
-    setErr(null)
-    setConfirmSkip(false)
-    try {
-      const ok1 = await saveDraft('listener')
-      const ok2 = await saveDraft('screenplay')
-      if (!ok1 || !ok2) {
-        setErr('Could not save drafts to the engine.')
-        return
-      }
-      const view: AuditView = { passed: true, blocking: [], warnings: [] }
-      for (const [stage, label] of [
-        ['screenplay', 'script'],
-        ['narration', 'voice'],
-      ] as const) {
-        const r = await post({ action: 'run_audit', stage })
-        const out = await r.json().catch(() => null)
-        if (!r.ok || out?.ok === false) {
-          setErr(out?.message || out?.error || `${label} check failed to run.`)
-          return
-        }
-        const d = out.data
-        if (!d.passed) view.passed = false
-        for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
-        for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
-      }
-      setAudit(view)
-      setAuditAt(new Date().toLocaleTimeString())
-    } catch {
-      setErr('Could not reach the engine.')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // SKIP (recorded honestly): writes both audit files marked as skipped so the
-  // protocol records that the checks were waived, never that they passed.
-  const skipAudit = async () => {
-    setConfirmSkip(false)
-    setBusy('audit')
-    setErr(null)
-    try {
-      await saveDraft('listener')
-      await saveDraft('screenplay')
-      const stamp = new Date().toISOString()
-      const skipDoc = (what: string) =>
-        JSON.stringify({ skipped: true, skipped_at: stamp, note: `User skipped the ${what} check in the UI`, blocking: [], warnings: [{ type: 'skipped', detail: `${what} check was skipped by the user` }] }, null, 2)
-      const r1 = await post({ action: 'set_stage_output', stage_id: 'screenplay_plan', path: 'working/screenplay-audit.json', content: skipDoc('script') })
-      const r2 = await post({ action: 'set_stage_output', stage_id: 'narration_voice_check', path: 'working/narration-voice-review-v2.json', content: skipDoc('voice') })
-      if (!r1.ok || !r2.ok) {
-        setErr('Could not record the skip.')
-        return
-      }
-      setAudit({ passed: true, skipped: true, blocking: [], warnings: [] })
-    } catch {
-      setErr('Could not reach the engine.')
-    } finally {
-      setBusy(null)
-    }
-  }
 
   const ghost: React.CSSProperties = {
     background: 'none', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
     color: 'var(--ink-2)', padding: '6px 12px', cursor: 'pointer', fontSize: 12,
   }
-  const section: React.CSSProperties = { padding: '16px 0', borderTop: '1px solid var(--line, #2a3142)' }
+  const section: React.CSSProperties = { padding: '14px 0', borderTop: '1px solid var(--line, #2a3142)' }
 
-  const station = (st: StationKey, num: string, title: string, blurb: string, actionLabel: string, disabledReason?: string, footer?: React.ReactNode) => {
-    const draft = draftOf(st)
-    const enabled = !disabledReason && !busy
-    const s = stats(draft)
-    const collapsed = isCollapsed(st)
-    const chevron = (
-      <button
-        type="button"
-        title={collapsed ? 'Expand' : 'Collapse'}
-        onClick={() => setCollapseOverride((o) => ({ ...o, [st]: !collapsed }))}
-        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink-3)', display: 'flex' }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .15s ease' }}>
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-    )
-    if (collapsed) {
-      return (
-        <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {chevron}
-            <h3 style={{ margin: 0, fontSize: 15, color: 'var(--ink-2)', cursor: 'pointer' }} onClick={() => setCollapseOverride((o) => ({ ...o, [st]: false }))}>
-              {num} · {title}
-            </h3>
-            <span style={{ flex: 1 }} />
-            {busy === st ? <span className="spin" /> : null}
-            {draft.trim() && (
-              <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-                {s.words} words · ~{s.time}
-              </span>
-            )}
-          </div>
-        </div>
-      )
-    }
-    return (
-      <div style={num === '1' ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          {chevron}
-          <h3 style={{ margin: 0, fontSize: 15, cursor: 'help' }} title={blurb}>{num} · {title}</h3>
-          <span style={{ flex: 1 }} />
-          {draft.trim() && (
-            <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-              {s.words} words · ~{s.time}
-            </span>
-          )}
-          {st === 'screenplay' && audit && (
-            <button
-              type="button"
-              title={audit.passed || audit.skipped ? undefined : 'Jump to the issues'}
-              onClick={() => document.getElementById(`audit-findings-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-              style={{
-                background: 'none', border: 'none', padding: 0,
-                cursor: audit.passed || audit.skipped ? 'default' : 'pointer',
-                fontSize: 13,
-                color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)',
-              }}
-            >
-              {audit.skipped
-                ? '△ checks skipped'
-                : audit.passed
-                  ? audit.warnings.length
-                    ? `✓ checks passed · ${audit.warnings.length} warning(s)`
-                    : '✓ checks passed'
-                  : `✕ ${remainingBlocking.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
-            </button>
-          )}
-          {st === 'screenplay' && draft.trim() && draftOf('listener').trim() && (
-            <button
-              style={{ ...ghost, color: showDiff ? 'var(--ink)' : 'var(--ink-2)' }}
-              title="Highlight what the polish changed from the draft script"
-              onClick={() => setShowDiff((v) => !v)}
-            >
-              Changes {showDiff ? 'on' : 'off'}
-            </button>
-          )}
-          {st === 'screenplay' && draft.trim() && (
-            <button
-              style={ghost}
-              disabled={!!busy}
-              title="Free — saves your edits and re-runs both rule checks"
-              onClick={runAudit}
-            >
-              {busy === 'audit' ? 'Checking…' : 'Re-check'}
-            </button>
-          )}
-          {st === 'screenplay' && draftOf('listener').trim() && (
-            <button
-              style={ghost}
-              disabled={!!busy}
-              title="No AI, no cost — takes the draft script exactly as it is, then runs the checks"
-              onClick={async () => {
-                const copied = draftOf('listener').replace(/^#\s*Listener Draft/i, '# Screenplay v3')
-                setStageFileDraft(stageId, key('screenplay'), copied)
-                setAudit(null)
-                await runAudit()
-              }}
-            >
-              Use draft as-is
-            </button>
-          )}
-          <FeedbackButton
-            label={draft.trim() ? `Re-${actionLabel.toLowerCase()}` : actionLabel}
-            busy={busy === st}
-            disabled={!enabled}
-            title={disabledReason || `Uses model credits${draft.trim() ? ' · replaces the current text' : ''}`}
-            rulesFocus="story"
-            onRun={(fb) => runDraft(st, fb)}
-          />
-        </div>
-        {/* WORK IN PROGRESS: while the AI rewrites this station, say so where
-            the user is looking — spinner over the text, content dimmed+locked. */}
-        <div style={{ position: 'relative' }}>
-          {busy === st ? (
-            <div
-              style={{
-                position: 'absolute', inset: 0, zIndex: 2,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                background: 'rgba(10, 12, 18, .45)', borderRadius: 8, minHeight: 80,
-              }}
-            >
-              <span className="spin" />
-              <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>
-                {st === 'screenplay' ? 'AI is polishing the script…' : 'AI is writing the draft…'}
-              </span>
-            </div>
-          ) : null}
-          <div style={busy === st ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
-            {editing === st ? (
-              <textarea
-                autoFocus
-                value={draft}
-                placeholder="Write the narration here…"
-                onChange={(e) => setStageFileDraft(stageId, key(st), e.target.value)}
-                onBlur={() => setEditing(null)}
-                style={{
-                  width: '100%', minHeight: 240, marginTop: 10, resize: 'vertical', background: 'transparent',
-                  color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
-                  padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
-                }}
-              />
-            ) : draft.trim() ? (
-              (() => {
-                const diff =
-                  st === 'screenplay' && showDiff && draftOf('listener').trim()
-                    ? diffTokens(displayBody(draftOf('listener')), displayBody(draft))
-                    : null
-                return diff ? (
-                  // CHANGES VIEW: same .md-preview typography as the normal
-                  // view (real <p> paragraphs) so toggling never shifts the
-                  // layout — only the tint appears/disappears.
-                  <div
-                    className="md-preview"
-                    title="Click to edit · tinted = changed from the draft script"
-                    onClick={() => setEditing(st)}
-                    style={{ marginTop: 6, cursor: 'text' }}
-                  >
-                    {(() => {
-                      const paras: React.ReactNode[][] = [[]]
-                      diff.tokens.forEach((t, k) => {
-                        if (!diff.isWord[k]) {
-                          if (/\n\s*\n/.test(t)) paras.push([])
-                          else if (paras[paras.length - 1].length) paras[paras.length - 1].push(' ')
-                          return
-                        }
-                        paras[paras.length - 1].push(
-                          diff.marks[k] ? (
-                            <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
-                          ) : (
-                            t
-                          ),
-                        )
-                      })
-                      return paras.filter((p) => p.length).map((p, i) => <p key={i}>{p}</p>)
-                    })()}
-                  </div>
-                ) : (
-                  <div
-                    className="md-preview"
-                    title="Click to edit"
-                    onClick={() => setEditing(st)}
-                    style={{ marginTop: 6, cursor: 'text' }}
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(draft), { async: false }) as string) }}
-                  />
-                )
-              })()
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEditing(st)}
-                style={{ background: 'none', border: 'none', padding: 0, marginTop: 10, color: 'var(--ink-3)', fontSize: 13, cursor: 'pointer' }}
-              >
-                ▸ or write it yourself
-              </button>
-            )}
-          </div>
-        </div>
-        {footer}
-      </div>
-    )
-  }
+  const auditStale = audit && auditRev !== null && auditRev !== sel
 
   return (
     <div>
@@ -509,26 +323,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       {needRewind && (
         <div
           ref={rewindRef}
-          style={{
-            margin: '4px 0 18px',
-            borderLeft: '2px solid var(--amber)',
-            padding: '10px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
+          style={{ margin: '4px 0 18px', borderLeft: '2px solid var(--amber)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}
         >
           <b style={{ fontSize: 13, color: 'var(--amber)' }}>This step is already approved</b>
           <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: 0, lineHeight: 1.5, maxWidth: 560 }}>
-            Making a new draft sets this step and everything after it back to pending — you review
-            and approve them again as you go.{needRewind.feedback ? ' Your feedback carries over to the new draft.' : ''}
+            Making a new revision sets this step and everything after it back to pending — you
+            review and approve them again as you go.{needRewind.feedback ? ' Your feedback carries over.' : ''}
           </p>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="save-continue"
               style={{ width: 'auto', padding: '8px 14px' }}
               onClick={async () => {
-                const { st, feedback } = needRewind
+                const { feedback } = needRewind
                 setNeedRewind(null)
                 try {
                   const r = await post({ action: 'rewind_stage', stage_id: stageId })
@@ -537,154 +344,288 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     setErr(out?.message || out?.error || 'Could not set the step back to pending.')
                     return
                   }
-                  // The rewind just DELETED this stage's files from disk. Put
-                  // what's on screen back first — even if the redraft fails,
-                  // disk must match what the user sees.
-                  const ok1 = await saveDraft('listener')
-                  const ok2 = await saveDraft('screenplay')
-                  if (!ok1 || !ok2) {
-                    setErr('Could not restore the drafts to the engine after the rewind.')
+                  // The rewind deleted this stage's files — put the selected
+                  // revision back first, then run the same instructions.
+                  if (!(await saveCurrent())) {
+                    setErr('Could not restore the script to the engine after the rewind.')
                     return
                   }
                   setAudit(null)
-                  const okDraft = await runDraft(st, feedback) // SAME instructions, not a generic re-run
-                  // Resume an interrupted "Fix these" chain: after the Draft
-                  // rewrite, the Final still needs its polish + auto-check.
-                  if (okDraft && st === 'listener' && fixChainRef.current) {
-                    const polishFb = fixChainRef.current
-                    fixChainRef.current = null
-                    await runDraft('screenplay', polishFb)
-                  }
+                  await runAI(feedback)
                 } catch {
                   setErr('Could not reach the engine.')
                 }
               }}
             >
-              Set back to pending & make the new draft
+              Set back to pending & make the new revision
             </button>
             <button style={ghost} onClick={() => setNeedRewind(null)}>Never mind, keep it</button>
           </div>
         </div>
       )}
+
       <div style={{ marginBottom: 4 }}>
         <ThinSourceNote words={sourceWords} />
       </div>
 
-      {station('listener', '1', 'Draft script', 'the first full draft — written to work by ear alone', 'Write it')}
-      {station(
-        'screenplay',
-        '2',
-        'Final script',
-        'polished and rule-checked — the version that gets recorded',
-        'Polish it',
-        draftOf('listener').trim() ? undefined : 'Write the draft script first',
-        // MERGED CHECKS FOOTER: findings, the skip escape hatch, and the pass note
-        // all live inside this station — polishing and checking are one thing.
-        <>
-          {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
-            <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '10px 0 0' }}>
-              Checks re-ran automatically after the last draft{auditAt ? ` (${auditAt})` : ''} — these findings are current.
-              Voice findings grade the Draft script; script findings grade the Final.
-            </p>
-          )}
-          {audit && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
-            <div id={`audit-findings-${stageId}`} style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {audit.blocking.map((f, i) => {
-                const k = fkey(f)
-                const isIgnored = ignored.has(k)
-                return (
-                  <div
-                    key={`b${i}`}
-                    onMouseEnter={() => setHoverIssue(k)}
-                    onMouseLeave={() => setHoverIssue(null)}
-                    style={{
-                      display: 'flex', alignItems: 'baseline', gap: 8,
-                      borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--red)'}`,
-                      padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
-                    }}
-                  >
-                    <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--red)', whiteSpace: 'nowrap' }}>✕ {f.label}</span>
-                    <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
-                    {hoverIssue === k || isIgnored ? (
-                      <button
-                        type="button"
-                        style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
-                        title={
-                          isIgnored
-                            ? 'Re-polish will try to fix this again'
-                            : 'Re-polish won’t chase this — the check itself still flags it (use Skip the checks to waive the gate)'
-                        }
-                        onClick={() => toggleIgnore(k)}
-                      >
-                        {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
-                      </button>
-                    ) : null}
-                  </div>
-                )
-              })}
-              {audit.warnings.map((f, i) => (
-                <div key={`w${i}`} style={{ borderLeft: '2px solid var(--amber)', padding: '2px 10px', fontSize: 13 }}>
-                  <span style={{ color: 'var(--amber)' }}>△ {f.label}</span>
-                  <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
-                </div>
-              ))}
+      {revs.length === 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0' }}>
+          <FeedbackButton
+            label="Write it"
+            busy={busy === 'ai'}
+            disabled={!!busy}
+            title="AI writes the first draft from your structure and World Kit — uses model credits"
+            rulesFocus="story"
+            onRun={(fb) => runAI(fb)}
+          />
+          <button
+            style={ghost}
+            onClick={() => {
+              setRevs([{ label: 'Initial draft', text: '' }])
+              setSel(0)
+              setEditing(true)
+            }}
+          >
+            or write it yourself
+          </button>
+        </div>
+      ) : null}
+
+      {revs.map((rev, i) => {
+        const selected = i === sel
+        const s = stats(rev.text)
+        if (!selected) {
+          // COLLAPSED: one quiet line; click to select (and grade) this revision.
+          return (
+            <div key={i} style={i === 0 ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => { setSel(i); setEditing(false); syncStore(rev.text) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { setSel(i); setEditing(false); syncStore(rev.text) } }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                title="Select this revision — it becomes the script the checks grade and later steps use"
+              >
+                <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>▸</span>
+                <h3 style={{ margin: 0, fontSize: 15, color: 'var(--ink-2)', fontWeight: 500 }}>{rev.label}</h3>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                  {s.words} words · ~{s.time}
+                </span>
+              </div>
             </div>
-          )}
-          {audit && audit.passed && !audit.skipped && (
-            <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
-              Checks pass — the step completes on the next status refresh.
-            </p>
-          )}
-          {draftOf('screenplay').trim() && !confirmSkip && audit && !audit.passed && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-              <FeedbackButton
-                label={ignoredBlocking.length ? 'Fix the rest' : 'Fix these'}
-                busy={busy === 'screenplay' || busy === 'listener'}
-                busyLabel={busy === 'listener' ? 'Rewriting draft…' : 'Polishing…'}
-                disabled={!!busy}
-                title="Routes each finding to the document it grades: voice findings rewrite the Draft script, then the polish runs, then the checks re-run automatically. Uses model credits."
-                rulesFocus="story"
-                onRun={async (fb) => {
-                  // VOICE findings grade the DRAFT script — fixing only the
-                  // final can never clear them. Fix the draft first, then
-                  // polish; the checks re-run automatically at the end.
-                  const voice = remainingBlocking.filter((f) => f.label === 'voice')
-                  const polishFb = composeAuditFeedback(fb)
-                  if (voice.length) {
-                    const voiceFb = [
-                      'Fix these voice-check findings:',
-                      ...voice.map((f) => `- ${f.detail}`),
-                      fb.trim(),
-                    ]
-                      .filter(Boolean)
-                      .join('\n')
-                    fixChainRef.current = polishFb // survives a rewind detour
-                    const ok = await runDraft('listener', voiceFb)
-                    if (!ok) return // the rewind prompt resumes the chain
-                    fixChainRef.current = null
-                  }
-                  await runDraft('screenplay', polishFb)
-                }}
-              />
-              <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
-                Skip the checks
-              </button>
-            </div>
-          )}
-          {confirmSkip && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-              <span style={{ color: 'var(--amber)', fontSize: 13 }}>
-                ⚠ Skipping means rule violations reach production unchecked — the storyboard and
-                narration are built from this script. The skip is recorded in the audit files.
+          )
+        }
+        const prev = i > 0 ? revs[i - 1].text : ''
+        const diff = showDiff && prev.trim() && rev.text.trim() && !editing ? diffTokens(displayBody(prev), displayBody(rev.text)) : null
+        return (
+          <div key={i} style={i === 0 ? { ...section, borderTop: 'none', paddingTop: 4 } : section}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>▾</span>
+              <h3 style={{ margin: 0, fontSize: 15 }} title="The selected revision — the script">{rev.label}</h3>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', border: '1px solid var(--line, #2a3142)', borderRadius: 99, padding: '1px 8px' }}>
+                selected · this is the script
               </span>
-              <button style={{ ...ghost, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={skipAudit}>
-                Skip anyway
-              </button>
-              <button style={ghost} onClick={() => setConfirmSkip(false)}>Cancel</button>
+              <span style={{ flex: 1 }} />
+              {rev.text.trim() && (
+                <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                  {s.words} words · ~{s.time}
+                </span>
+              )}
+              {audit && !auditStale && (
+                <button
+                  type="button"
+                  title={audit.passed || audit.skipped ? undefined : 'Jump to the issues'}
+                  onClick={() => document.getElementById(`audit-findings-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  style={{
+                    background: 'none', border: 'none', padding: 0,
+                    cursor: audit.passed || audit.skipped ? 'default' : 'pointer', fontSize: 13,
+                    color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)',
+                  }}
+                >
+                  {audit.skipped
+                    ? '△ checks skipped'
+                    : audit.passed
+                      ? audit.warnings.length
+                        ? `✓ checks passed · ${audit.warnings.length} warning(s)`
+                        : '✓ checks passed'
+                      : `✕ ${remainingBlocking.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
+                </button>
+              )}
+              {i > 0 && rev.text.trim() && (
+                <button
+                  style={{ ...ghost, color: showDiff ? 'var(--ink)' : 'var(--ink-2)' }}
+                  title="Highlight what changed from the previous revision"
+                  onClick={() => setShowDiff((v) => !v)}
+                >
+                  Changes {showDiff ? 'on' : 'off'}
+                </button>
+              )}
+              {rev.text.trim() && (
+                <button style={ghost} disabled={!!busy} title="Free — saves this revision and runs both rule checks on it" onClick={runAudit}>
+                  {busy === 'audit' ? 'Checking…' : 'Re-check'}
+                </button>
+              )}
+              <FeedbackButton
+                label={revs.length > 0 ? 'New review' : 'Write it'}
+                busy={busy === 'ai'}
+                disabled={!!busy}
+                title="AI improves the selected revision into a new one — checks run automatically. Uses model credits."
+                rulesFocus="story"
+                onRun={(fb) => runAI(fb)}
+              />
             </div>
-          )}
-        </>,
-      )}
+
+            {/* The text — dim + spinner while the AI writes the next revision. */}
+            <div style={{ position: 'relative' }}>
+              {busy === 'ai' ? (
+                <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'rgba(10,12,18,.45)', borderRadius: 8, minHeight: 80 }}>
+                  <span className="spin" />
+                  <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>AI is writing the next revision…</span>
+                </div>
+              ) : null}
+              <div style={busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+                {editing ? (
+                  <textarea
+                    autoFocus
+                    value={rev.text}
+                    placeholder="Write the narration here…"
+                    onChange={(e) => {
+                      const text = e.target.value
+                      setRevs((rs) => rs.map((r, k) => (k === i ? { ...r, text } : r)))
+                      syncStore(text)
+                    }}
+                    onBlur={() => setEditing(false)}
+                    style={{
+                      width: '100%', minHeight: 240, marginTop: 10, resize: 'vertical', background: 'transparent',
+                      color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
+                      padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
+                    }}
+                  />
+                ) : rev.text.trim() ? (
+                  diff ? (
+                    <div className="md-preview" title="Click to edit · tinted = changed from the previous revision" onClick={() => setEditing(true)} style={{ marginTop: 6, cursor: 'text' }}>
+                      {(() => {
+                        const paras: React.ReactNode[][] = [[]]
+                        diff.tokens.forEach((t, k) => {
+                          if (!diff.isWord[k]) {
+                            if (/\n\s*\n/.test(t)) paras.push([])
+                            else if (paras[paras.length - 1].length) paras[paras.length - 1].push(' ')
+                            return
+                          }
+                          paras[paras.length - 1].push(
+                            diff.marks[k] ? (
+                              <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
+                            ) : (
+                              t
+                            ),
+                          )
+                        })
+                        return paras.filter((p) => p.length).map((p, k) => <p key={k}>{p}</p>)
+                      })()}
+                    </div>
+                  ) : (
+                    <div
+                      className="md-preview"
+                      title="Click to edit"
+                      onClick={() => setEditing(true)}
+                      style={{ marginTop: 6, cursor: 'text' }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(displayBody(rev.text), { async: false }) as string) }}
+                    />
+                  )
+                ) : (
+                  <button type="button" onClick={() => setEditing(true)} style={{ background: 'none', border: 'none', padding: 0, marginTop: 10, color: 'var(--ink-3)', fontSize: 13, cursor: 'pointer' }}>
+                    ▸ write it here
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* FINDINGS — always about the text above (or marked stale). */}
+            {auditStale && audit ? (
+              <p style={{ color: 'var(--amber)', fontSize: 12, margin: '10px 0 0' }}>
+                The last check graded “{revs[auditRev!]?.label}” — hit Re-check to grade this revision.
+              </p>
+            ) : null}
+            {audit && !auditStale && (audit.blocking.length > 0 || audit.warnings.length > 0) && (
+              <>
+                <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '10px 0 0' }}>
+                  Checks ran automatically on this revision{auditAt ? ` (${auditAt})` : ''} — these findings are current.
+                </p>
+                <div id={`audit-findings-${stageId}`} style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {audit.blocking.map((f, k) => {
+                    const fk = fkey(f)
+                    const isIgnored = ignored.has(fk)
+                    return (
+                      <div
+                        key={`b${k}`}
+                        onMouseEnter={() => setHoverIssue(fk)}
+                        onMouseLeave={() => setHoverIssue(null)}
+                        style={{
+                          display: 'flex', alignItems: 'baseline', gap: 8,
+                          borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--red)'}`,
+                          padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
+                        }}
+                      >
+                        <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--red)', whiteSpace: 'nowrap' }}>✕ {f.label}</span>
+                        <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
+                        {hoverIssue === fk || isIgnored ? (
+                          <button
+                            type="button"
+                            style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                            title={isIgnored ? '“Fix these” will try to fix this again' : '“Fix these” won’t chase this — the check itself still flags it (Skip the checks waives the gate)'}
+                            onClick={() => toggleIgnore(fk)}
+                          >
+                            {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
+                          </button>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                  {audit.warnings.map((f, k) => (
+                    <div key={`w${k}`} style={{ borderLeft: '2px solid var(--amber)', padding: '2px 10px', fontSize: 13 }}>
+                      <span style={{ color: 'var(--amber)' }}>△ {f.label}</span>
+                      <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {audit && !auditStale && audit.passed && !audit.skipped && (
+              <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
+                Checks pass — the step completes on the next status refresh.
+              </p>
+            )}
+            {rev.text.trim() && !confirmSkip && audit && !auditStale && !audit.passed && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                <FeedbackButton
+                  label={ignoredBlocking.length ? 'Fix the rest' : 'Fix these'}
+                  busy={busy === 'ai'}
+                  disabled={!!busy}
+                  title="AI revises this script to address the findings (minus any you ignored) — checks re-run automatically. Uses model credits."
+                  rulesFocus="story"
+                  onRun={(fb) => runAI(composeAuditFeedback(fb))}
+                />
+                <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
+                  Skip the checks
+                </button>
+              </div>
+            )}
+            {confirmSkip && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                <span style={{ color: 'var(--amber)', fontSize: 13 }}>
+                  ⚠ Skipping means rule violations reach production unchecked — the storyboard and
+                  narration are built from this script. The skip is recorded in the audit files.
+                </span>
+                <button style={{ ...ghost, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={skipAudit}>
+                  Skip anyway
+                </button>
+                <button style={ghost} onClick={() => setConfirmSkip(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
