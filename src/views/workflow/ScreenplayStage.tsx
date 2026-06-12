@@ -143,15 +143,42 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       body: JSON.stringify({ session: SESSION, tenant: 'local', ...body }),
     })
 
-  // Persist the SELECTED revision to BOTH contract files — one document, one
-  // truth; both checks grade the same text.
-  const saveCurrent = async (): Promise<boolean> => {
-    if (!current.trim()) return true
+  // Persist a revision's text to BOTH contract files — one document, one
+  // truth; both checks must always grade the same text.
+  const saveText = async (text: string): Promise<boolean> => {
+    if (!text.trim()) return true
     for (const path of [FILE_LISTENER, FILE_SCREENPLAY]) {
-      const r = await post({ action: 'set_stage_output', stage_id: stageId, path, content: current })
+      const r = await post({ action: 'set_stage_output', stage_id: stageId, path, content: text })
       if (!r.ok) return false
     }
     return true
+  }
+  const saveCurrent = () => saveText(current)
+
+  // Grade a specific revision: save its text to both files, then run both
+  // deterministic checks on it. Used by Re-check AND after every AI revision —
+  // findings can never grade anything but the text they're attached to.
+  const gradeRevision = async (text: string, revIndex: number): Promise<void> => {
+    if (!(await saveText(text))) {
+      setErr('Could not save the script to the engine.')
+      return
+    }
+    const audits: Record<string, unknown> = {}
+    for (const stage of ['screenplay', 'narration'] as const) {
+      const r = await post({ action: 'run_audit', stage })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) {
+        setErr(out?.message || out?.error || 'A check failed to run.')
+        return
+      }
+      audits[stage] = { ok: true, ...out.data }
+    }
+    const view = readAudits(audits as Parameters<typeof readAudits>[0])
+    if (view) {
+      setAudit(view)
+      setAuditAt(new Date().toLocaleTimeString())
+      setAuditRev(revIndex)
+    }
   }
 
   const readAudits = (audits: Record<string, { ok?: boolean; passed?: boolean; message?: string; blocking?: { detail?: string; message?: string; type?: string }[]; warnings?: { detail?: string; message?: string; type?: string }[] }>): AuditView | null => {
@@ -208,16 +235,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         setSel(nextIdx)
         setEditing(false)
         syncStore(text)
-        if (out?.data?.audits) {
-          const view = readAudits(out.data.audits)
-          if (view) {
-            setAudit(view)
-            setAuditAt(new Date().toLocaleTimeString())
-            setAuditRev(nextIdx)
-          }
-        } else {
-          setAudit(null)
-        }
+        // AUTO-CHECK THE NEW REVISION: grade exactly the text that just landed
+        // (both files synced first), every time — initial draft included.
+        await gradeRevision(text, nextIdx)
       }
       return true
     } catch {
@@ -234,26 +254,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     setErr(null)
     setConfirmSkip(false)
     try {
-      if (!(await saveCurrent())) {
-        setErr('Could not save the script to the engine.')
-        return
-      }
-      const audits: Record<string, unknown> = {}
-      for (const stage of ['screenplay', 'narration'] as const) {
-        const r = await post({ action: 'run_audit', stage })
-        const out = await r.json().catch(() => null)
-        if (!r.ok || out?.ok === false) {
-          setErr(out?.message || out?.error || 'A check failed to run.')
-          return
-        }
-        audits[stage] = { ok: true, ...out.data }
-      }
-      const view = readAudits(audits as Parameters<typeof readAudits>[0])
-      if (view) {
-        setAudit(view)
-        setAuditAt(new Date().toLocaleTimeString())
-        setAuditRev(sel)
-      }
+      await gradeRevision(current, sel)
     } catch {
       setErr('Could not reach the engine.')
     } finally {
