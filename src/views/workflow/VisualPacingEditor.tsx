@@ -174,17 +174,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }, [editKey])
 
   if (!draft.trim()) {
+    // One line — if the step is blocked, the blocker card below explains.
     return (
-      <div className="stub vp-empty">
-        <span>VP</span>
-        <h3>No pacing plan yet</h3>
-        <p>
-          The pacing pass maps every narration beat to an image — what the viewer sees, why it
-          appears then, and how long it holds — before the storyboard is compiled. Use{' '}
-          <b>Draft with AI</b> above (it reads the final script and World Kit), or write the plan
-          by hand via “Review or write it yourself”.
-        </p>
-      </div>
+      <p style={{ color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
+        No pacing plan yet — this step maps every narration beat to an image (what the viewer
+        sees, when it changes, how long it holds) before the storyboard is compiled.
+      </p>
     )
   }
 

@@ -46,6 +46,18 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
+  // Engine truth: a PAID draft button must never look ready on a blocked
+  // step — only show it when this stage is current (or content exists).
+  const [stageCurrent, setStageCurrent] = useState<boolean | null>(null)
+  useEffect(() => {
+    fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        const cur = out?.data?.current_contract_stage?.id
+        if (typeof cur === 'string') setStageCurrent(cur === stageId)
+      })
+      .catch(() => {})
+  }, [stageId])
   // PROPOSAL: when the AI couldn't stay inside the user's targets after its
   // self-correct retries, the engine saves the last attempt as a *.proposed.md
   // file and the user chooses: keep the current plan, or accept it anyway
@@ -240,7 +252,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
-      {!needRewind && cfg.aiDraft ? (
+      {!needRewind && cfg.aiDraft && (stageCurrent || draft.trim()) ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <FeedbackButton
             label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
@@ -285,9 +297,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
               </>
             )}
           </span>
-          <span className="label">
-            drafts from your earlier steps · uses model credits{draft.trim() ? ' · replaces the text' : ''}
-          </span>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>uses model credits</span>
           <ThinSourceNote words={sourceWords} />
           {draftError && (
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>

@@ -80,11 +80,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setChain = (nextRevs: Rev[], nextSel: number) =>
     seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs: nextRevs, sel: nextSel }))
   const [editing, setEditing] = useState(false)
-  const [busy, setBusy] = useState<'ai' | 'audit' | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [audit, setAudit] = useState<AuditView | null>(null)
-  const [auditAt, setAuditAt] = useState<string | null>(null)
-  const [auditRev, setAuditRev] = useState<number | null>(null) // which revision the findings grade
   const [confirmSkip, setConfirmSkip] = useState(false)
   const [needRewind, setNeedRewind] = useState<{ feedback: string } | null>(null)
   const [ignored, setIgnored] = useState<Set<string>>(new Set())
@@ -96,11 +92,46 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [checkAI, setCheckAI] = useState(false)
   const [checkMenu, setCheckMenu] = useState(false)
   const [menuFeedback, setMenuFeedback] = useState('')
-  const [aiNotes, setAiNotes] = useState<{ severity: string; detail: string }[] | null>(null)
-  const [aiRev, setAiRev] = useState<number | null>(null)
-  // What the AI is doing right now — rendered IN the findings area so slow
-  // metered work is always visible where the user is looking.
-  const [aiPhase, setAiPhase] = useState<'review' | 'adjudicate' | null>(null)
+
+  // REVIEW STATE LIVES IN THE STORE, like the chain: a run started here keeps
+  // going if you switch steps, and its progress + results are waiting when
+  // you come back — navigation never cancels or forgets a review.
+  type ReviewState = {
+    busy: 'ai' | 'audit' | null
+    aiPhase: 'review' | 'adjudicate' | null
+    audit: AuditView | null
+    auditAt: string | null
+    auditRev: number | null
+    aiNotes: { severity: string; detail: string }[] | null
+    aiRev: number | null
+  }
+  const EMPTY_REVIEW: ReviewState = { busy: null, aiPhase: null, audit: null, auditAt: null, auditRev: null, aiNotes: null, aiRev: null }
+  const REVIEW_KEY = `${stageId}:reviewstate`
+  const reviewJson = useWorkflowStore((s) => s.stageDrafts[REVIEW_KEY] ?? '')
+  const rstate: ReviewState = (() => {
+    try {
+      return { ...EMPTY_REVIEW, ...(JSON.parse(reviewJson) as Partial<ReviewState>) }
+    } catch {
+      return EMPTY_REVIEW
+    }
+  })()
+  const patchReview = (p: Partial<ReviewState>) => {
+    let cur = EMPTY_REVIEW
+    try {
+      cur = { ...EMPTY_REVIEW, ...(JSON.parse(useWorkflowStore.getState().stageDrafts[REVIEW_KEY] ?? '') as Partial<ReviewState>) }
+    } catch {
+      /* fresh */
+    }
+    seedStageFileDraft(REVIEW_KEY, JSON.stringify({ ...cur, ...p }))
+  }
+  const { busy, aiPhase, audit, auditAt, auditRev, aiNotes, aiRev } = rstate
+  const setBusy = (v: ReviewState['busy']) => patchReview({ busy: v })
+  const setAiPhase = (v: ReviewState['aiPhase']) => patchReview({ aiPhase: v })
+  const setAudit = (v: AuditView | null) => patchReview({ audit: v })
+  const setAuditAt = (v: string | null) => patchReview({ auditAt: v })
+  const setAuditRev = (v: number | null) => patchReview({ auditRev: v })
+  const setAiNotes = (v: ReviewState['aiNotes']) => patchReview({ aiNotes: v })
+  const setAiRev = (v: number | null) => patchReview({ aiRev: v })
   const seededRef = useRef(false)
   const rewindRef = useRef<HTMLDivElement>(null)
   const sourceWords = useSourceWords()
