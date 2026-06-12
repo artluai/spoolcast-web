@@ -272,9 +272,17 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         }
         const r = await post({ action: 'ai_review', allow_cost: true })
         const out = await r.json().catch(() => null)
-        if (!r.ok || out?.ok === false) setErr(out?.message || out?.error || 'The AI review failed to run.')
-        else {
-          setAiNotes(out?.data?.findings ?? [])
+        // STRICT SHAPE CHECK: only a real review (advisory:true + findings
+        // array) counts. An engine that doesn't know this action answers
+        // through a legacy catch-all — that must read as an error, never as
+        // a clean review.
+        if (!r.ok || out?.ok === false || out?.data?.advisory !== true || !Array.isArray(out?.data?.findings)) {
+          setErr(
+            out?.message || out?.error ||
+              'The AI review did not run — if the engine was started before this feature, restart it (Ctrl+C, ↑, Enter).',
+          )
+        } else {
+          setAiNotes(out.data.findings)
           setAiRev(sel)
         }
       }
