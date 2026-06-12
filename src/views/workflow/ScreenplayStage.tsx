@@ -443,8 +443,29 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return null
   })()
   const locateRef = useRef<HTMLSpanElement>(null)
+  // The script panel scrolls ITSELF (like the pacing list): content-height by
+  // default, capped when it overflows, with bottom padding so end-of-script
+  // spots can still center. Hover-locate scrolls the panel, never the page —
+  // the finding you're hovering stays under your cursor.
+  const scriptBoxRef = useRef<HTMLDivElement>(null)
+  const [scriptOverflows, setScriptOverflows] = useState(false)
   useEffect(() => {
-    if (locate) locateRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const box = scriptBoxRef.current
+    if (!box) return
+    const padPx = scriptOverflows ? window.innerHeight * 0.22 : 0
+    const overflowing = box.scrollHeight - padPx > box.clientHeight + 2
+    if (overflowing !== scriptOverflows) setScriptOverflows(overflowing)
+  })
+  useEffect(() => {
+    const box = scriptBoxRef.current
+    const el = locateRef.current
+    if (!locate || !box || !el) return
+    const boxRect = box.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    box.scrollTo({
+      top: box.scrollTop + (elRect.top - boxRect.top) - box.clientHeight / 2 + elRect.height / 2,
+      behavior: 'smooth',
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoverIssue, locate?.start])
   const composeAuditFeedback = (fb: string) => {
@@ -679,7 +700,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>AI is writing the next revision…</span>
                 </div>
               ) : null}
-              <div style={busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+              <div
+                ref={scriptBoxRef}
+                style={{
+                  maxHeight: '48vh',
+                  overflowY: 'auto',
+                  paddingBottom: scriptOverflows ? '22vh' : 0,
+                  ...(busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : {}),
+                }}
+              >
                 {editing ? (
                   <textarea
                     autoFocus
@@ -718,7 +747,16 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           return (
                             <p key={k}>
                               {p.text.slice(0, s2)}
-                              <span ref={locateRef} style={{ background: 'rgba(255, 193, 94, .28)', borderRadius: 3, color: 'var(--ink)' }}>
+                              {/* Same highlight as the pacing script view (.vp-w.on). */}
+                              <span
+                                ref={locateRef}
+                                style={{
+                                  background: 'var(--accent)',
+                                  color: '#0a0c12',
+                                  borderRadius: 3,
+                                  boxShadow: '-2px 0 0 var(--accent), 2px 0 0 var(--accent)',
+                                }}
+                              >
                                 {p.text.slice(s2, e2)}
                               </span>
                               {p.text.slice(e2)}
@@ -739,7 +777,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           }
                           paras[paras.length - 1].push(
                             diff.marks[k] ? (
-                              <span key={k} style={{ background: 'rgba(143, 161, 255, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
+                              // "Changed from previous" tint — amber, so the
+                              // accent highlight stays reserved for locating.
+                              <span key={k} style={{ background: 'rgba(255, 193, 94, .18)', borderRadius: 3, color: 'var(--ink)' }}>{t}</span>
                             ) : (
                               t
                             ),
