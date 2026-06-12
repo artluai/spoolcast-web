@@ -703,8 +703,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 ref={scriptBoxRef}
                 style={{
                   maxWidth: 680,
-                  margin: '6px auto 0',
-                  padding: '10px 28px 16px',
+                  margin: '20px auto 0',
                   fontSize: 15,
                   ...(busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : {}),
                 }}
