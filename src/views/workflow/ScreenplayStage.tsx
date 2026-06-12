@@ -104,8 +104,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     auditRev: number | null
     aiNotes: { severity: string; detail: string }[] | null
     aiRev: number | null
+    aiVerdict: 'pass' | 'needs_work' | null
   }
-  const EMPTY_REVIEW: ReviewState = { busy: null, aiPhase: null, audit: null, auditAt: null, auditRev: null, aiNotes: null, aiRev: null }
+  const EMPTY_REVIEW: ReviewState = { busy: null, aiPhase: null, audit: null, auditAt: null, auditRev: null, aiNotes: null, aiRev: null, aiVerdict: null }
   const REVIEW_KEY = `${stageId}:reviewstate`
   const reviewJson = useWorkflowStore((s) => s.stageDrafts[REVIEW_KEY] ?? '')
   const rstate: ReviewState = (() => {
@@ -124,7 +125,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     }
     seedStageFileDraft(REVIEW_KEY, JSON.stringify({ ...cur, ...p }))
   }
-  const { busy, aiPhase, audit, auditAt, auditRev, aiNotes, aiRev } = rstate
+  const { busy, aiPhase, audit, auditAt, auditRev, aiNotes, aiRev, aiVerdict } = rstate
   const setBusy = (v: ReviewState['busy']) => patchReview({ busy: v })
   const setAiPhase = (v: ReviewState['aiPhase']) => patchReview({ aiPhase: v })
   const setAudit = (v: AuditView | null) => patchReview({ audit: v })
@@ -345,7 +346,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           return
         }
         setAiPhase('review')
-        const r = await post({ action: 'ai_review', allow_cost: true })
+        // CONVERGENCE MEMORY: hand the reviewer its previous notes and what
+        // the user dismissed — it reviews the changes, it doesn't start over.
+        const prevNotes = (aiNotes ?? []).map((n) => n.detail)
+        const prevDismissed = prevNotes.filter((d) => ignored.has(`ai:${d}`))
+        const r = await post({
+          action: 'ai_review',
+          allow_cost: true,
+          previous: { notes: prevNotes.filter((d) => !ignored.has(`ai:${d}`)), dismissed: prevDismissed },
+        })
         const out = await r.json().catch(() => null)
         const aiOk = r.ok && out?.ok !== false && out?.data?.advisory === true && Array.isArray(out?.data?.findings)
         if (!aiOk) {
@@ -360,8 +369,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           setAuditRev(idx)
         }
         if (aiOk) {
-          setAiNotes(out.data.findings)
-          setAiRev(idx)
+          patchReview({
+            aiNotes: out.data.findings,
+            aiRev: idx,
+            aiVerdict: out.data.verdict === 'pass' ? 'pass' : 'needs_work',
+          })
         }
       }
     } catch {
@@ -921,8 +933,12 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               </div>
             )}
             {aiRev === sel && aiNotes && aiNotes.length === 0 ? (
-              <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '8px 0 0' }}>
-                ◇ AI review: no notes — it reads cleanly to a first-time viewer.
+              <p style={{ color: 'var(--ok, #5fbf77)', fontSize: 12, margin: '8px 0 0' }}>
+                ◇ AI review: pass — a first-time viewer follows this start to finish. No further runs needed.
+              </p>
+            ) : aiRev === sel && aiVerdict === 'needs_work' && aiFindings.length > 0 ? (
+              <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '4px 0 0' }}>
+                Verdict: needs work — fix or ignore the notes above; the next review checks only what changed.
               </p>
             ) : null}
             {auditStale && audit ? (
