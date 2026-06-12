@@ -256,6 +256,47 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     }
   }
 
+  // ASK AI ABOUT THE CODE FINDINGS: the adjudicator. Confirmed findings move
+  // into the AI section with a concrete explanation; false positives are
+  // called out and auto-ignored. Metered.
+  const adjudicate = async () => {
+    if (!codeRemaining.length) return
+    setBusy('audit')
+    setErr(null)
+    try {
+      if (!(await saveText(current))) {
+        setErr('Could not save the script to the engine.')
+        return
+      }
+      const payload = codeRemaining.map((f) => `[${f.label}] ${f.detail}`)
+      const r = await post({ action: 'ai_review', allow_cost: true, findings: payload })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false || out?.data?.advisory !== true || !Array.isArray(out?.data?.adjudications)) {
+        setErr(out?.message || out?.error || 'The AI could not review the findings — restart the engine if it predates this feature.')
+        return
+      }
+      const notes = [...(aiRev === sel && aiNotes ? aiNotes : [])]
+      const nextIgnored = new Set(ignored)
+      for (const a of out.data.adjudications as { index: number; verdict: string; note: string }[]) {
+        const src = codeRemaining[a.index]
+        if (!src) continue
+        const fp = a.verdict === 'false_positive'
+        notes.push({
+          severity: 'warning',
+          detail: `${fp ? 'Likely a false positive' : 'Confirmed'} — ${a.note} (re: “${src.detail}”)`,
+        })
+        if (fp) nextIgnored.add(fkey(src)) // suggested ignore, reversible like any other
+      }
+      setAiNotes(notes)
+      setAiRev(sel)
+      setIgnored(nextIgnored)
+    } catch {
+      setErr('Could not reach the engine.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // CHECK: runs whichever checkers are ticked, on the SELECTED revision.
   const runChecks = async () => {
     setCheckMenu(false)
@@ -668,6 +709,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       <span style={{ color: 'var(--ink-2)', marginLeft: 8 }}>{f.detail}</span>
                     </div>
                   ))}
+                  {codeRemaining.length > 0 && (
+                    <div>
+                      <button
+                        type="button"
+                        style={{ ...ghost, marginTop: 4 }}
+                        disabled={!!busy}
+                        title="The AI reads the script and judges each finding: confirmed ones get a concrete explanation in the AI section; false positives are auto-ignored. Uses model credits."
+                        onClick={adjudicate}
+                      >
+                        ◇ Ask AI about these findings
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}
