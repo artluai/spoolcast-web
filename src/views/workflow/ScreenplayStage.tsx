@@ -861,6 +861,57 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             ) : null}
 
             {/* FINDINGS — always about the text above (or marked stale). */}
+            {/* AI WORK IN PROGRESS — visible right here, where the results land. */}
+            {aiPhase && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, borderLeft: '2px solid var(--accent, #8fa1ff)', padding: '6px 10px' }}>
+                <span className="spin" />
+                <span style={{ color: 'var(--ink-2)', fontSize: 13 }}>
+                  {aiPhase === 'review' ? '◇ AI is reading the script like a first-time viewer…' : '◇ AI is judging the findings against the script…'}
+                </span>
+              </div>
+            )}
+            {/* AI REVIEW NOTES — advisory judgment, never gates the step. */}
+            {aiFindings.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: 0 }}>
+                  AI review (a first-time viewer’s judgment — advisory, doesn’t block approval):
+                </p>
+                {aiFindings.map((f, k) => {
+                  const fk = fkey(f)
+                  const isIgnored = ignored.has(fk)
+                  return (
+                    <div
+                      key={`ai${k}`}
+                      onMouseEnter={() => hoverEnter(fk)}
+                      onMouseLeave={hoverLeave}
+                      style={{
+                        display: 'flex', alignItems: 'baseline', gap: 8,
+                        borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--accent, #8fa1ff)'}`,
+                        padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
+                      }}
+                    >
+                      <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--accent, #8fa1ff)', whiteSpace: 'nowrap' }}>◇ ai</span>
+                      <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
+                      {hoverIssue === fk || isIgnored ? (
+                        <button
+                          type="button"
+                          style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                          title={isIgnored ? '“Fix these” will address this again' : '“Fix these” won’t chase this note'}
+                          onClick={() => toggleIgnore(fk)}
+                        >
+                          {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
+                        </button>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {aiRev === sel && aiNotes && aiNotes.length === 0 ? (
+              <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '8px 0 0' }}>
+                ◇ AI review: no notes — it reads cleanly to a first-time viewer.
+              </p>
+            ) : null}
             {auditStale && audit ? (
               <p style={{ color: 'var(--amber)', fontSize: 12, margin: '10px 0 0' }}>
                 The last check graded “{revs[auditRev!]?.label}” — hit Re-check to grade this revision.
@@ -923,57 +974,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 </div>
               </>
             )}
-            {/* AI WORK IN PROGRESS — visible right here, where the results land. */}
-            {aiPhase && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, borderLeft: '2px solid var(--accent, #8fa1ff)', padding: '6px 10px' }}>
-                <span className="spin" />
-                <span style={{ color: 'var(--ink-2)', fontSize: 13 }}>
-                  {aiPhase === 'review' ? '◇ AI is reading the script like a first-time viewer…' : '◇ AI is judging the findings against the script…'}
-                </span>
-              </div>
-            )}
-            {/* AI REVIEW NOTES — advisory judgment, never gates the step. */}
-            {aiFindings.length > 0 && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: 0 }}>
-                  AI review (a first-time viewer’s judgment — advisory, doesn’t block approval):
-                </p>
-                {aiFindings.map((f, k) => {
-                  const fk = fkey(f)
-                  const isIgnored = ignored.has(fk)
-                  return (
-                    <div
-                      key={`ai${k}`}
-                      onMouseEnter={() => hoverEnter(fk)}
-                      onMouseLeave={hoverLeave}
-                      style={{
-                        display: 'flex', alignItems: 'baseline', gap: 8,
-                        borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--accent, #8fa1ff)'}`,
-                        padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
-                      }}
-                    >
-                      <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--accent, #8fa1ff)', whiteSpace: 'nowrap' }}>◇ ai</span>
-                      <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
-                      {hoverIssue === fk || isIgnored ? (
-                        <button
-                          type="button"
-                          style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
-                          title={isIgnored ? '“Fix these” will address this again' : '“Fix these” won’t chase this note'}
-                          onClick={() => toggleIgnore(fk)}
-                        >
-                          {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
-                        </button>
-                      ) : null}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            {aiRev === sel && aiNotes && aiNotes.length === 0 ? (
-              <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '8px 0 0' }}>
-                ◇ AI review: no notes — it reads cleanly to a first-time viewer.
-              </p>
-            ) : null}
             {audit && !auditStale && audit.passed && !audit.skipped && (
               <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
                 Checks pass — the step completes on the next status refresh.
