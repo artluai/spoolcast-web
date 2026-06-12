@@ -90,10 +90,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [ignored, setIgnored] = useState<Set<string>>(new Set())
   const [hoverIssue, setHoverIssue] = useState<string | null>(null)
   const [showDiff, setShowDiff] = useState(true)
-  // CHECKER PICKER: code rules (free law) and/or AI review (metered judgment).
+  // THE REVIEW PIPELINE — one button, configurable steps:
+  //   (1) optionally write a new revision first (AI · credits)
+  //   (2) code rules check (free law)
+  //   (3) AI reviewer (metered judgment)
+  const [optRevise, setOptRevise] = useState(false)
   const [checkCode, setCheckCode] = useState(true)
   const [checkAI, setCheckAI] = useState(false)
   const [checkMenu, setCheckMenu] = useState(false)
+  const [menuFeedback, setMenuFeedback] = useState('')
   const [aiNotes, setAiNotes] = useState<{ severity: string; detail: string }[] | null>(null)
   const [aiRev, setAiRev] = useState<number | null>(null)
   // What the AI is doing right now — rendered IN the findings area so slow
@@ -199,14 +204,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return readAudits(audits as Parameters<typeof readAudits>[0])
   }
 
-  const gradeRevision = async (text: string, revIndex: number): Promise<void> => {
-    const view = await computeCodeAudit(text)
-    if (view) {
-      setAudit(view)
-      setAuditAt(new Date().toLocaleTimeString())
-      setAuditRev(revIndex)
-    }
-  }
 
   const readAudits = (audits: Record<string, { ok?: boolean; passed?: boolean; message?: string; blocking?: { detail?: string; message?: string; type?: string }[]; warnings?: { detail?: string; message?: string; type?: string }[] }>): AuditView | null => {
     const view: AuditView = { passed: true, blocking: [], warnings: [] }
@@ -223,66 +220,117 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return view
   }
 
-  // ONE AI ACTION: write/improve. Reads the selected revision (saved to disk
-  // first), produces the next revision, and the checks run in the same
-  // operation — the findings always grade the text they arrived with.
-  const runAI = async (feedback = ''): Promise<boolean> => {
-    setBusy('ai')
+  // PIPELINE STEP 1 — write the next revision (no grading here; the caller
+  // runs whichever checkers are configured afterwards).
+  const draftRevision = async (feedback = ''): Promise<{ text: string; idx: number } | null> => {
+    const initial = revs.length === 0
+    if (!initial && !(await saveCurrent())) {
+      setErr('Could not save the script to the engine.')
+      return null
+    }
+    const r = await post({
+      action: 'draft_stage',
+      stage_id: stageId,
+      variant: initial ? 'listener' : 'screenplay',
+      allow_cost: true,
+      ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+    })
+    const out = await r.json().catch(() => null)
+    if (!r.ok || out?.ok === false) {
+      if (out?.error === 'illegal_action') {
+        setNeedRewind({ feedback })
+        return null
+      }
+      setErr(out?.message || out?.error || 'Drafting failed.')
+      return null
+    }
+    const file = initial ? FILE_LISTENER : FILE_SCREENPLAY
+    const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(file)}`)
+    const fileOut = await fr.json().catch(() => null)
+    const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
+    if (!text.trim()) {
+      setErr('The draft came back empty.')
+      return null
+    }
+    // Append to the FRESH chain from the store (awaits above may have left
+    // the closure's copy behind).
+    const fresh = (() => {
+      try {
+        const p = JSON.parse(useWorkflowStore.getState().stageDrafts[CHAIN_KEY] ?? '') as { revs?: Rev[] }
+        return Array.isArray(p.revs) ? p.revs : []
+      } catch {
+        return [] as Rev[]
+      }
+    })()
+    const label = fresh.length === 0 ? 'Initial draft' : `Review ${fresh.length}`
+    const idx = fresh.length
+    setChain([...fresh, { label, text }], idx)
+    setEditing(false)
+    syncStore(text)
+    setAiNotes(null) // AI notes graded the previous revision
+    setAiRev(null)
+    return { text, idx }
+  }
+
+  // THE ONE REVIEW ACTION: (optionally) revise, then run the configured
+  // checkers on the result — revealing all findings together.
+  const runReview = async (feedback = '', forceRevise = false): Promise<void> => {
+    setCheckMenu(false)
+    const revise = forceRevise || optRevise || revs.length === 0
+    const wantCode = checkCode || (!checkCode && !checkAI) // never run nothing
     setErr(null)
+    setConfirmSkip(false)
     try {
-      const initial = revs.length === 0
-      if (!initial && !(await saveCurrent())) {
-        setErr('Could not save the script to the engine.')
-        return false
+      let text = current
+      let idx = sel
+      if (revise) {
+        setBusy('ai')
+        const res = await draftRevision(feedback)
+        if (!res) return
+        text = res.text
+        idx = res.idx
       }
-      const r = await post({
-        action: 'draft_stage',
-        stage_id: stageId,
-        variant: initial ? 'listener' : 'screenplay',
-        allow_cost: true,
-        ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-      })
-      const out = await r.json().catch(() => null)
-      if (!r.ok || out?.ok === false) {
-        if (out?.error === 'illegal_action') {
-          setNeedRewind({ feedback })
-          return false
+      setBusy('audit')
+      let codeView: AuditView | null = null
+      if (wantCode) {
+        setAiPhase(checkAI ? 'review' : null)
+        codeView = await computeCodeAudit(text)
+        if (!checkAI && codeView) {
+          setAudit(codeView)
+          setAuditAt(new Date().toLocaleTimeString())
+          setAuditRev(idx)
         }
-        setErr(out?.message || out?.error || 'Drafting failed.')
-        return false
       }
-      const file = initial ? FILE_LISTENER : FILE_SCREENPLAY
-      const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(file)}`)
-      const fileOut = await fr.json().catch(() => null)
-      const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
-      if (text.trim()) {
-        // Append to the FRESH chain from the store (awaits above may have
-        // left the closure's copy behind).
-        const fresh = (() => {
-          try {
-            const p = JSON.parse(useWorkflowStore.getState().stageDrafts[CHAIN_KEY] ?? '') as { revs?: Rev[] }
-            return Array.isArray(p.revs) ? p.revs : []
-          } catch {
-            return [] as Rev[]
-          }
-        })()
-        const label = fresh.length === 0 ? 'Initial draft' : `Review ${fresh.length}`
-        const nextIdx = fresh.length
-        setChain([...fresh, { label, text }], nextIdx)
-        setEditing(false)
-        syncStore(text)
-        setAiNotes(null) // AI notes graded the previous revision
-        setAiRev(null)
-        // AUTO-CHECK THE NEW REVISION: grade exactly the text that just landed
-        // (both files synced first), every time — initial draft included.
-        await gradeRevision(text, nextIdx)
+      if (checkAI) {
+        if (!wantCode && !(await saveText(text))) {
+          setErr('Could not save the script to the engine.')
+          return
+        }
+        setAiPhase('review')
+        const r = await post({ action: 'ai_review', allow_cost: true })
+        const out = await r.json().catch(() => null)
+        const aiOk = r.ok && out?.ok !== false && out?.data?.advisory === true && Array.isArray(out?.data?.findings)
+        if (!aiOk) {
+          setErr(
+            out?.message || out?.error ||
+              'The AI review did not run — if the engine was started before this feature, restart it (Ctrl+C, ↑, Enter).',
+          )
+        }
+        if (codeView) {
+          setAudit(codeView)
+          setAuditAt(new Date().toLocaleTimeString())
+          setAuditRev(idx)
+        }
+        if (aiOk) {
+          setAiNotes(out.data.findings)
+          setAiRev(idx)
+        }
       }
-      return true
     } catch {
       setErr('Could not reach the engine.')
-      return false
     } finally {
       setBusy(null)
+      setAiPhase(null)
     }
   }
 
@@ -330,63 +378,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   }
 
   // CHECK: runs whichever checkers are ticked, on the SELECTED revision.
-  const runChecks = async () => {
-    setCheckMenu(false)
-    if (!checkCode && !checkAI) return
-    setBusy('audit')
-    setErr(null)
-    setConfirmSkip(false)
-    try {
-      // ONE REVEAL: when both checkers run, hold the code results until the
-      // AI finishes so everything lands together — no staged half-verdicts.
-      let codeView: AuditView | null = null
-      if (checkCode) {
-        setAiPhase(checkAI ? 'review' : null)
-        codeView = await computeCodeAudit(current)
-        if (!checkAI && codeView) {
-          setAudit(codeView)
-          setAuditAt(new Date().toLocaleTimeString())
-          setAuditRev(sel)
-        }
-      }
-      if (checkAI) {
-        if (!checkCode && !(await saveText(current))) {
-          setErr('Could not save the script to the engine.')
-          return
-        }
-        setAiPhase('review')
-        const r = await post({ action: 'ai_review', allow_cost: true })
-        const out = await r.json().catch(() => null)
-        // STRICT SHAPE CHECK: only a real review (advisory:true + findings
-        // array) counts. An engine that doesn't know this action answers
-        // through a legacy catch-all — that must read as an error, never as
-        // a clean review.
-        const aiOk = r.ok && out?.ok !== false && out?.data?.advisory === true && Array.isArray(out?.data?.findings)
-        if (!aiOk) {
-          setErr(
-            out?.message || out?.error ||
-              'The AI review did not run — if the engine was started before this feature, restart it (Ctrl+C, ↑, Enter).',
-          )
-        }
-        // Reveal together (code results land even if the AI failed).
-        if (codeView) {
-          setAudit(codeView)
-          setAuditAt(new Date().toLocaleTimeString())
-          setAuditRev(sel)
-        }
-        if (aiOk) {
-          setAiNotes(out.data.findings)
-          setAiRev(sel)
-        }
-      }
-    } catch {
-      setErr('Could not reach the engine.')
-    } finally {
-      setBusy(null)
-      setAiPhase(null)
-    }
-  }
-
   const skipAudit = async () => {
     setConfirmSkip(false)
     setBusy('audit')
@@ -520,7 +511,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     return
                   }
                   setAudit(null)
-                  await runAI(feedback)
+                  await runReview(feedback, true)
                 } catch {
                   setErr('Could not reach the engine.')
                 }
@@ -545,7 +536,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             disabled={!!busy}
             title="AI writes the first draft from your structure and World Kit — uses model credits"
             rulesFocus="story"
-            onRun={(fb) => runAI(fb)}
+            onRun={(fb) => runReview(fb, true)}
           />
           <button
             style={ghost}
@@ -600,14 +591,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   {s.words} words · ~{s.time}
                 </span>
               )}
-              <FeedbackButton
-                label={revs.length > 0 ? 'New review' : 'Write it'}
-                busy={busy === 'ai'}
-                disabled={!!busy}
-                title="AI improves the selected revision into a new one — checks run automatically. Uses model credits."
-                rulesFocus="story"
-                onRun={(fb) => runAI(fb)}
-              />
             </div>
 
             {/* The text — dim + spinner while the AI writes the next revision. */}
@@ -766,24 +749,49 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   <button
                     style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
                     disabled={!!busy}
-                    title="Choose which checkers run"
+                    title="Configure what Review does"
                     onClick={() => setCheckMenu((v) => !v)}
                   >
-                    ▾{checkAI ? ' ◇' : ''}
+                    ▾{optRevise ? ' ✦' : ''}{checkAI ? ' ◇' : ''}
                   </button>
                   <button
-                    style={{ ...ghost, borderRadius: '0 6px 6px 0', minWidth: 92 }}
+                    className="save-continue"
+                    style={{ width: 'auto', borderRadius: '0 6px 6px 0', minWidth: 100, padding: '6px 14px', fontSize: 12 }}
                     disabled={!!busy}
-                    title={`Runs the selected checkers on this revision${checkCode && checkAI ? ' — code rules + AI review' : checkAI ? ' — AI review only' : ' — code rules'}`}
-                    onClick={runChecks}
+                    title={`Runs: ${optRevise ? 'new revision (✦ credits) → ' : ''}${checkCode ? 'code rules' : ''}${checkCode && checkAI ? ' + ' : ''}${checkAI ? '◇ AI reviewer (credits)' : ''}`}
+                    onClick={() => runReview(menuFeedback)}
                   >
-                    {busy === 'audit' ? 'Checking…' : 'Check'}
+                    {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review'}
                   </button>
                   {checkMenu ? (
                     <>
                       <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
-                      <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, minWidth: 320 }}>
-                        <span className="vp-menu-h">WHAT CHECKS THE SCRIPT</span>
+                      <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 340 }}>
+                        <span className="vp-menu-h">WHAT REVIEW DOES</span>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={optRevise} onChange={(e) => setOptRevise(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
+                          <span>
+                            ✦ Write a new revision first
+                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                              AI improves the selected script into Review {revs.length} · uses credits
+                            </span>
+                          </span>
+                        </label>
+                        {optRevise ? (
+                          <textarea
+                            rows={2}
+                            value={menuFeedback}
+                            onChange={(e) => setMenuFeedback(e.target.value)}
+                            placeholder="optional: tell the AI what to change…"
+                            style={{
+                              display: 'block', width: 'calc(100% - 24px)', margin: '0 12px 6px',
+                              background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
+                              border: '1px dashed var(--line, #2a3142)', borderRadius: 6,
+                              padding: '7px 9px', fontSize: 12, resize: 'vertical',
+                            }}
+                          />
+                        ) : null}
+                        <span className="vp-menu-div" style={{ display: 'block' }} />
                         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
                           <span>
@@ -796,15 +804,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
                           <span>
-                            AI review
+                            ◇ AI reviewer
                             <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
                               reads it like a first-time viewer — judgment notes, advisory · uses credits
                             </span>
                           </span>
                         </label>
                         <span className="vp-menu-div" style={{ display: 'block' }} />
-                        <button type="button" disabled={!checkCode && !checkAI} onClick={runChecks}>
-                          Run the checks
+                        <button type="button" onClick={() => runReview(menuFeedback)}>
+                          Run
                         </button>
                       </span>
                     </>
@@ -940,7 +948,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   disabled={!!busy}
                   title="AI revises this script to address the findings (minus any you ignored) — checks re-run automatically. Uses model credits."
                   rulesFocus="story"
-                  onRun={(fb) => runAI(composeAuditFeedback(fb))}
+                  onRun={(fb) => runReview(composeAuditFeedback(fb), true)}
                 />
                 {audit && !auditStale && !audit.passed ? (
                   <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
