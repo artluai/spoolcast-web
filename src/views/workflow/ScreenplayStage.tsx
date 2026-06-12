@@ -233,7 +233,17 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   }
 
 
-  const readAudits = (audits: Record<string, { ok?: boolean; passed?: boolean; message?: string; blocking?: { detail?: string; message?: string; type?: string }[]; warnings?: { detail?: string; message?: string; type?: string }[] }>): AuditView | null => {
+  // Findings must carry their SPECIFICS: which term, which line — without
+  // them, neither the user nor the AI fixer can act, and the same finding
+  // returns forever. The quoted text also powers hover-locate.
+  type RawFinding = { detail?: string; message?: string; type?: string; term?: string; text?: string }
+  const detailOf = (f: RawFinding): string => {
+    let d = f.detail || f.message || f.type || JSON.stringify(f)
+    if (f.term) d += ` — the term: '${f.term}'`
+    if (f.text && typeof f.text === 'string') d += ` (in: '${String(f.text).slice(0, 90)}')`
+    return d
+  }
+  const readAudits = (audits: Record<string, { ok?: boolean; passed?: boolean; message?: string; blocking?: RawFinding[]; warnings?: RawFinding[] }>): AuditView | null => {
     const view: AuditView = { passed: true, blocking: [], warnings: [] }
     for (const [k, label] of [['screenplay', 'script'], ['narration', 'voice']] as const) {
       const d = audits[k]
@@ -242,8 +252,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         return null
       }
       if (!d.passed) view.passed = false
-      for (const f of d.blocking || []) view.blocking.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
-      for (const f of d.warnings || []) view.warnings.push({ label, detail: f.detail || f.message || f.type || JSON.stringify(f) })
+      for (const f of d.blocking || []) view.blocking.push({ label, detail: detailOf(f) })
+      for (const f of d.warnings || []) view.warnings.push({ label, detail: detailOf(f) })
     }
     return view
   }
@@ -500,6 +510,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     if (fb.trim()) parts.push(fb.trim())
     if (remainingBlocking.length)
       parts.push('Fix these rule-check findings:\n' + remainingBlocking.map((f) => `- ${f.detail}`).join('\n'))
+    const warnRemaining = audit ? audit.warnings.filter((w) => !ignored.has(fkey(w))) : []
+    if (warnRemaining.length)
+      parts.push('Also address these warnings where it fits naturally:\n' + warnRemaining.map((f) => `- ${f.detail}`).join('\n'))
     if (ignoredBlocking.length)
       parts.push(
         'The user chose to IGNORE these findings — do NOT rework the script for them:\n' +
