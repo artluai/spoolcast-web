@@ -580,7 +580,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>▾</span>
               <h3 style={{ margin: 0, fontSize: 15 }} title="The selected revision — the script">{rev.label}</h3>
               <span style={{ fontSize: 11, color: 'var(--ink-3)', border: '1px solid var(--line, #2a3142)', borderRadius: 99, padding: '1px 8px' }}>
-                selected · this is the script
+                current script
               </span>
               <span style={{ flex: 1 }} />
               {rev.text.trim() && (
@@ -764,7 +764,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     <>
                       <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
                       <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 350 }}>
-                        <span className="vp-menu-h">REVIEW THIS SCRIPT WITH</span>
+                        <span className="vp-menu-h">RUN REVIEWS</span>
                         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
                           <span>
@@ -783,11 +783,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                             </span>
                           </span>
                         </label>
-                        <span className="vp-menu-div" style={{ display: 'block' }} />
                         <button type="button" disabled={!checkCode && !checkAI} onClick={() => runReview('')}>
                           Run reviews
                         </button>
                         <span className="vp-menu-div" style={{ display: 'block' }} />
+                        <span className="vp-menu-h">RE-DRAFT WITH AI FIRST</span>
                         <textarea
                           rows={2}
                           value={menuFeedback}
@@ -805,7 +805,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           title="AI rewrites the script into a new revision, then the reviews above run on it — uses credits"
                           onClick={() => runReview(menuFeedback, true)}
                         >
-                          ✦ Revise with AI, then run the reviews
+                          ✦ Re-draft, then run the reviews
                         </button>
                       </span>
                     </>
