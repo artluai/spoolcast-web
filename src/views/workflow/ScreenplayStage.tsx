@@ -76,6 +76,12 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [ignored, setIgnored] = useState<Set<string>>(new Set())
   const [hoverIssue, setHoverIssue] = useState<string | null>(null)
   const [showDiff, setShowDiff] = useState(true)
+  // CHECKER PICKER: code rules (free law) and/or AI review (metered judgment).
+  const [checkCode, setCheckCode] = useState(true)
+  const [checkAI, setCheckAI] = useState(false)
+  const [checkMenu, setCheckMenu] = useState(false)
+  const [aiNotes, setAiNotes] = useState<{ severity: string; detail: string }[] | null>(null)
+  const [aiRev, setAiRev] = useState<number | null>(null)
   const seededRef = useRef(false)
   const rewindRef = useRef<HTMLDivElement>(null)
   const sourceWords = useSourceWords()
@@ -235,6 +241,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         setSel(nextIdx)
         setEditing(false)
         syncStore(text)
+        setAiNotes(null) // AI notes graded the previous revision
+        setAiRev(null)
         // AUTO-CHECK THE NEW REVISION: grade exactly the text that just landed
         // (both files synced first), every time — initial draft included.
         await gradeRevision(text, nextIdx)
@@ -248,13 +256,28 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     }
   }
 
-  // FREE RE-CHECK: grades the SELECTED revision (saved to disk first).
-  const runAudit = async () => {
+  // CHECK: runs whichever checkers are ticked, on the SELECTED revision.
+  const runChecks = async () => {
+    setCheckMenu(false)
+    if (!checkCode && !checkAI) return
     setBusy('audit')
     setErr(null)
     setConfirmSkip(false)
     try {
-      await gradeRevision(current, sel)
+      if (checkCode) await gradeRevision(current, sel)
+      if (checkAI) {
+        if (!checkCode && !(await saveText(current))) {
+          setErr('Could not save the script to the engine.')
+          return
+        }
+        const r = await post({ action: 'ai_review', allow_cost: true })
+        const out = await r.json().catch(() => null)
+        if (!r.ok || out?.ok === false) setErr(out?.message || out?.error || 'The AI review failed to run.')
+        else {
+          setAiNotes(out?.data?.findings ?? [])
+          setAiRev(sel)
+        }
+      }
     } catch {
       setErr('Could not reach the engine.')
     } finally {
@@ -295,8 +318,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       else next.add(k)
       return next
     })
-  const remainingBlocking = audit ? audit.blocking.filter((f) => !ignored.has(fkey(f))) : []
-  const ignoredBlocking = audit ? audit.blocking.filter((f) => ignored.has(fkey(f))) : []
+  const aiFindings = aiRev === sel && aiNotes ? aiNotes.map((f) => ({ label: 'ai', detail: f.detail })) : []
+  const triage = [...(audit ? audit.blocking : []), ...aiFindings]
+  const remainingBlocking = triage.filter((f) => !ignored.has(fkey(f)))
+  const ignoredBlocking = triage.filter((f) => ignored.has(fkey(f)))
+  const codeRemaining = audit ? audit.blocking.filter((f) => !ignored.has(fkey(f))) : []
   const composeAuditFeedback = (fb: string) => {
     const parts: string[] = []
     if (fb.trim()) parts.push(fb.trim())
@@ -450,7 +476,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       ? audit.warnings.length
                         ? `✓ checks passed · ${audit.warnings.length} warning(s)`
                         : '✓ checks passed'
-                      : `✕ ${remainingBlocking.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
+                      : `✕ ${codeRemaining.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
                 </button>
               )}
               {i > 0 && rev.text.trim() && (
@@ -463,9 +489,54 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 </button>
               )}
               {rev.text.trim() && (
-                <button style={ghost} disabled={!!busy} title="Free — saves this revision and runs both rule checks on it" onClick={runAudit}>
-                  {busy === 'audit' ? 'Checking…' : 'Re-check'}
-                </button>
+                <span style={{ position: 'relative', display: 'inline-flex' }}>
+                  <button
+                    style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
+                    disabled={!!busy}
+                    title="Choose which checkers run"
+                    onClick={() => setCheckMenu((v) => !v)}
+                  >
+                    ▾
+                  </button>
+                  <button
+                    style={{ ...ghost, borderRadius: '0 6px 6px 0' }}
+                    disabled={!!busy}
+                    title="Runs the selected checkers on this revision"
+                    onClick={runChecks}
+                  >
+                    {busy === 'audit' ? 'Checking…' : `Check${checkCode && checkAI ? ' (code + AI)' : checkAI ? ' (AI)' : ''}`}
+                  </button>
+                  {checkMenu ? (
+                    <>
+                      <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
+                      <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, minWidth: 320 }}>
+                        <span className="vp-menu-h">WHAT CHECKS THE SCRIPT</span>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
+                          <span>
+                            Code rules
+                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                              free & instant — structure, undefined terms, openings, lengths
+                            </span>
+                          </span>
+                        </label>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
+                          <span>
+                            AI review
+                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                              reads it like a first-time viewer — judgment notes, advisory · uses credits
+                            </span>
+                          </span>
+                        </label>
+                        <span className="vp-menu-div" style={{ display: 'block' }} />
+                        <button type="button" disabled={!checkCode && !checkAI} onClick={runChecks}>
+                          Run the checks
+                        </button>
+                      </span>
+                    </>
+                  ) : null}
+                </span>
               )}
               <FeedbackButton
                 label={revs.length > 0 ? 'New review' : 'Write it'}
@@ -592,12 +663,54 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 </div>
               </>
             )}
+            {/* AI REVIEW NOTES — advisory judgment, never gates the step. */}
+            {aiFindings.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: 0 }}>
+                  AI review (a first-time viewer’s judgment — advisory, doesn’t block approval):
+                </p>
+                {aiFindings.map((f, k) => {
+                  const fk = fkey(f)
+                  const isIgnored = ignored.has(fk)
+                  return (
+                    <div
+                      key={`ai${k}`}
+                      onMouseEnter={() => setHoverIssue(fk)}
+                      onMouseLeave={() => setHoverIssue(null)}
+                      style={{
+                        display: 'flex', alignItems: 'baseline', gap: 8,
+                        borderLeft: `2px solid ${isIgnored ? 'var(--line, #2a3142)' : 'var(--accent, #8fa1ff)'}`,
+                        padding: '2px 10px', fontSize: 13, opacity: isIgnored ? 0.5 : 1,
+                      }}
+                    >
+                      <span style={{ color: isIgnored ? 'var(--ink-3)' : 'var(--accent, #8fa1ff)', whiteSpace: 'nowrap' }}>◇ ai</span>
+                      <span style={{ color: 'var(--ink-2)', flex: 1 }}>{f.detail}</span>
+                      {hoverIssue === fk || isIgnored ? (
+                        <button
+                          type="button"
+                          style={{ ...ghost, padding: '1px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                          title={isIgnored ? '“Fix these” will address this again' : '“Fix these” won’t chase this note'}
+                          onClick={() => toggleIgnore(fk)}
+                        >
+                          {isIgnored ? 'Un-ignore' : 'Ignore this issue'}
+                        </button>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {aiRev === sel && aiNotes && aiNotes.length === 0 ? (
+              <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '8px 0 0' }}>
+                ◇ AI review: no notes — it reads cleanly to a first-time viewer.
+              </p>
+            ) : null}
             {audit && !auditStale && audit.passed && !audit.skipped && (
               <p style={{ color: 'var(--ink-3)', fontSize: 13, margin: '8px 0 0' }}>
                 Checks pass — the step completes on the next status refresh.
               </p>
             )}
-            {rev.text.trim() && !confirmSkip && audit && !auditStale && !audit.passed && (
+            {rev.text.trim() && !confirmSkip && ((audit && !auditStale && !audit.passed) || aiFindings.some((f) => !ignored.has(fkey(f)))) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                 <FeedbackButton
                   label={ignoredBlocking.length ? 'Fix the rest' : 'Fix these'}
@@ -607,9 +720,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   rulesFocus="story"
                   onRun={(fb) => runAI(composeAuditFeedback(fb))}
                 />
-                <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
-                  Skip the checks
-                </button>
+                {audit && !auditStale && !audit.passed ? (
+                  <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
+                    Skip the checks
+                  </button>
+                ) : null}
               </div>
             )}
             {confirmSkip && (
