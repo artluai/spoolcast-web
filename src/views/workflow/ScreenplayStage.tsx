@@ -82,6 +82,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [checkMenu, setCheckMenu] = useState(false)
   const [aiNotes, setAiNotes] = useState<{ severity: string; detail: string }[] | null>(null)
   const [aiRev, setAiRev] = useState<number | null>(null)
+  // What the AI is doing right now — rendered IN the findings area so slow
+  // metered work is always visible where the user is looking.
+  const [aiPhase, setAiPhase] = useState<'review' | 'adjudicate' | null>(null)
   const seededRef = useRef(false)
   const rewindRef = useRef<HTMLDivElement>(null)
   const sourceWords = useSourceWords()
@@ -98,11 +101,34 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     setStageFileDraft(stageId, `${stageId}:screenplay`, text)
   }
 
-  // Seed from the engine's real files. A legacy session where the two files
-  // differ becomes two revisions (Initial draft + Review 1).
+  // PERSIST THE CHAIN across step switches: the revision list + selection are
+  // cached in the store (in-memory; reload falls back to the on-disk files).
+  const CHAIN_KEY = `${stageId}:revchain`
+  useEffect(() => {
+    if (revs.length) seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs, sel }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revs, sel])
+
+  // Seed: prefer the cached chain (step switching keeps your revisions);
+  // otherwise read the engine's real files. A legacy session where the two
+  // files differ becomes two revisions (Initial draft + Review 1).
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
+    const cached = useWorkflowStore.getState().stageDrafts[CHAIN_KEY]
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as { revs?: Rev[]; sel?: number }
+        if (Array.isArray(parsed.revs) && parsed.revs.length) {
+          const s = Math.min(parsed.sel ?? parsed.revs.length - 1, parsed.revs.length - 1)
+          setRevs(parsed.revs)
+          setSel(s)
+          return
+        }
+      } catch {
+        /* fall through to disk seeding */
+      }
+    }
     Promise.all(
       [FILE_LISTENER, FILE_SCREENPLAY].map((p) =>
         fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(p)}`)
@@ -269,6 +295,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         return
       }
       const payload = codeRemaining.map((f) => `[${f.label}] ${f.detail}`)
+      setAiPhase('adjudicate')
       const r = await post({ action: 'ai_review', allow_cost: true, findings: payload })
       const out = await r.json().catch(() => null)
       if (!r.ok || out?.ok === false || out?.data?.advisory !== true || !Array.isArray(out?.data?.adjudications)) {
@@ -294,6 +321,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setErr('Could not reach the engine.')
     } finally {
       setBusy(null)
+      setAiPhase(null)
     }
   }
 
@@ -311,6 +339,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           setErr('Could not save the script to the engine.')
           return
         }
+        setAiPhase('review')
         const r = await post({ action: 'ai_review', allow_cost: true })
         const out = await r.json().catch(() => null)
         // STRICT SHAPE CHECK: only a real review (advisory:true + findings
@@ -331,6 +360,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setErr('Could not reach the engine.')
     } finally {
       setBusy(null)
+      setAiPhase(null)
     }
   }
 
@@ -372,6 +402,28 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const remainingBlocking = triage.filter((f) => !ignored.has(fkey(f)))
   const ignoredBlocking = triage.filter((f) => ignored.has(fkey(f)))
   const codeRemaining = audit ? audit.blocking.filter((f) => !ignored.has(fkey(f))) : []
+
+  // HOVER-LOCATE: findings usually quote the exact phrase — find it in the
+  // script, highlight it in AMBER (distinct from the violet "changed" tint),
+  // and scroll it into view so the issue shows with its surrounding context.
+  const normQ = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase()
+  const locate = (() => {
+    if (!hoverIssue) return null
+    const f = triage.find((x) => fkey(x) === hoverIssue)
+    if (!f) return null
+    const body = displayBody(current)
+    const nb = normQ(body)
+    for (const m of f.detail.matchAll(/['‘’"“”]([^'‘’"“”]{6,160})['‘’"“”]/g)) {
+      const idx = nb.indexOf(normQ(m[1]))
+      if (idx >= 0) return { start: idx, end: idx + m[1].length }
+    }
+    return null
+  })()
+  const locateRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (locate) locateRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverIssue, locate?.start])
   const composeAuditFeedback = (fb: string) => {
     const parts: string[] = []
     if (fb.trim()) parts.push(fb.trim())
@@ -624,7 +676,36 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     }}
                   />
                 ) : rev.text.trim() ? (
-                  diff ? (
+                  locate ? (
+                    // LOCATE VIEW: same paragraph typography; the hovered
+                    // finding's quoted phrase glows amber.
+                    <div className="md-preview" style={{ marginTop: 6 }}>
+                      {(() => {
+                        const body = displayBody(rev.text)
+                        const paras: { text: string; start: number }[] = []
+                        let off = 0
+                        for (const part of body.split(/(\n\s*\n)/)) {
+                          if (!/^\n\s*\n$/.test(part) && part.trim()) paras.push({ text: part, start: off })
+                          off += part.length
+                        }
+                        return paras.map((p, k) => {
+                          const pEnd = p.start + p.text.length
+                          if (locate.end <= p.start || locate.start >= pEnd) return <p key={k}>{p.text}</p>
+                          const s2 = Math.max(locate.start - p.start, 0)
+                          const e2 = Math.min(locate.end - p.start, p.text.length)
+                          return (
+                            <p key={k}>
+                              {p.text.slice(0, s2)}
+                              <span ref={locateRef} style={{ background: 'rgba(255, 193, 94, .28)', borderRadius: 3, color: 'var(--ink)' }}>
+                                {p.text.slice(s2, e2)}
+                              </span>
+                              {p.text.slice(e2)}
+                            </p>
+                          )
+                        })
+                      })()}
+                    </div>
+                  ) : diff ? (
                     <div className="md-preview" title="Click to edit · tinted = changed from the previous revision" onClick={() => setEditing(true)} style={{ marginTop: 6, cursor: 'text' }}>
                       {(() => {
                         const paras: React.ReactNode[][] = [[]]
@@ -724,6 +805,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   )}
                 </div>
               </>
+            )}
+            {/* AI WORK IN PROGRESS — visible right here, where the results land. */}
+            {aiPhase && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, borderLeft: '2px solid var(--accent, #8fa1ff)', padding: '6px 10px' }}>
+                <span className="spin" />
+                <span style={{ color: 'var(--ink-2)', fontSize: 13 }}>
+                  {aiPhase === 'review' ? '◇ AI is reading the script like a first-time viewer…' : '◇ AI is judging the findings against the script…'}
+                </span>
+              </div>
             )}
             {/* AI REVIEW NOTES — advisory judgment, never gates the step. */}
             {aiFindings.length > 0 && (

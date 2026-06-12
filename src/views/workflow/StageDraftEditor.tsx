@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
@@ -38,7 +38,6 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
-  const seededRef = useRef(false)
   const [open, setOpen] = useState(false)
   const sourceWords = useSourceWords()
   const [model, setModel] = useState(PRIMARY_MODELS[0].id)
@@ -56,11 +55,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   // the raw markdown editor; clicking away renders again.
   const [editing, setEditing] = useState(false)
 
-  // Prefill once per mount from the engine's real file — but never clobber
-  // text the user has already typed (dirty steps keep their draft).
+  // Prefill from the engine's real file — and REFETCH whenever the cached
+  // draft is empty (e.g. a background hand-off cleared it so the step reloads
+  // fresh content). Never clobber text the user has typed (dirty steps keep
+  // their draft).
   useEffect(() => {
-    if (!cfg || seededRef.current) return
-    seededRef.current = true
+    if (!cfg) return
     const store = useWorkflowStore.getState()
     if ((store.stageDrafts[stageId] ?? '').length > 0 || store.dirtySteps[stageId]) {
       setOpen(true)
@@ -82,7 +82,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       .catch(() => {
         /* engine offline: editor stays blank; the blocker/status UI explains */
       })
-  }, [cfg, stageId, seedStageDraft])
+  }, [cfg, stageId, seedStageDraft, draft])
 
   if (!cfg) return null
 
