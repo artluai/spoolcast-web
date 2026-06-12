@@ -462,28 +462,39 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     return null
   })()
   const locateRef = useRef<HTMLSpanElement>(null)
+  // The script panel scrolls ITSELF: default height shows a good chunk of
+  // script with the findings still on screen, and the bottom edge is
+  // draggable (resize) to any height you like. Hover-locate scrolls inside
+  // the panel — the page never moves, so the finding stays under the cursor
+  // while the highlighted spot centers in view.
   const scriptBoxRef = useRef<HTMLDivElement>(null)
-  // The script shows at FULL height (no inner scrollbar). Hover-locate
-  // scrolls the page to center the highlight; while that scroll animates,
-  // hover changes are suppressed so rows sliding under the cursor can't
-  // cascade-trigger new locates or clear the highlight mid-read.
-  const scrollingRef = useRef(false)
+  const [scriptOverflows, setScriptOverflows] = useState(false)
   useEffect(() => {
-    if (!locate || !locateRef.current) return
-    scrollingRef.current = true
-    locateRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    const t = window.setTimeout(() => {
-      scrollingRef.current = false
-    }, 650)
-    return () => window.clearTimeout(t)
+    const box = scriptBoxRef.current
+    if (!box) return
+    // Default panel height (only when the script is taller than ~half the
+    // screen) is set imperatively ONCE — so the user's drag-resize of the
+    // bottom edge is never stomped by re-renders. Short scripts fit as-is.
+    const cap = Math.round(window.innerHeight * 0.52)
+    if (!box.style.height && box.scrollHeight > cap) box.style.height = `${cap}px`
+    const padPx = scriptOverflows ? window.innerHeight * 0.18 : 0
+    const overflowing = box.scrollHeight - padPx > box.clientHeight + 2
+    if (overflowing !== scriptOverflows) setScriptOverflows(overflowing)
+  })
+  useEffect(() => {
+    const box = scriptBoxRef.current
+    const el = locateRef.current
+    if (!locate || !box || !el) return
+    const boxRect = box.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    box.scrollTo({
+      top: box.scrollTop + (elRect.top - boxRect.top) - box.clientHeight / 2 + elRect.height / 2,
+      behavior: 'smooth',
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoverIssue, locate?.start])
-  const hoverEnter = (k: string) => {
-    if (!scrollingRef.current) setHoverIssue(k)
-  }
-  const hoverLeave = () => {
-    if (!scrollingRef.current) setHoverIssue(null)
-  }
+  const hoverEnter = (k: string) => setHoverIssue(k)
+  const hoverLeave = () => setHoverIssue(null)
   const composeAuditFeedback = (fb: string) => {
     const parts: string[] = []
     if (fb.trim()) parts.push(fb.trim())
@@ -634,9 +645,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               <div
                 ref={scriptBoxRef}
                 style={{
-                  maxWidth: 680,
-                  margin: '20px auto 0',
+                  margin: '20px 0 0',
                   fontSize: 15,
+                  minHeight: 180,
+                  overflowY: 'auto',
+                  resize: 'vertical',
+                  paddingBottom: scriptOverflows ? '18vh' : 0,
+                  paddingRight: 10,
                   ...(busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : {}),
                 }}
               >
