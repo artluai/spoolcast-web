@@ -90,11 +90,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [ignored, setIgnored] = useState<Set<string>>(new Set())
   const [hoverIssue, setHoverIssue] = useState<string | null>(null)
   const [showDiff, setShowDiff] = useState(true)
-  // THE REVIEW PIPELINE — one button, configurable steps:
-  //   (1) optionally write a new revision first (AI · credits)
-  //   (2) code rules check (free law)
-  //   (3) AI reviewer (metered judgment)
-  const [optRevise, setOptRevise] = useState(false)
+  // THE REVIEW PIPELINE — one button: run the ticked reviews on the selected
+  // script, or (from the menu) have the AI revise it first and review that.
   const [checkCode, setCheckCode] = useState(true)
   const [checkAI, setCheckAI] = useState(false)
   const [checkMenu, setCheckMenu] = useState(false)
@@ -276,7 +273,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   // checkers on the result — revealing all findings together.
   const runReview = async (feedback = '', forceRevise = false): Promise<void> => {
     setCheckMenu(false)
-    const revise = forceRevise || optRevise || revs.length === 0
+    const revise = forceRevise || revs.length === 0
     const wantCode = checkCode || (!checkCode && !checkAI) // never run nothing
     setErr(null)
     setConfirmSkip(false)
@@ -749,70 +746,66 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   <button
                     style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
                     disabled={!!busy}
-                    title="Configure what Review does"
+                    title="Review options"
                     onClick={() => setCheckMenu((v) => !v)}
                   >
-                    ▾{optRevise ? ' ✦' : ''}{checkAI ? ' ◇' : ''}
+                    ▾
                   </button>
                   <button
                     className="save-continue"
                     style={{ width: 'auto', borderRadius: '0 6px 6px 0', minWidth: 100, padding: '6px 14px', fontSize: 12 }}
                     disabled={!!busy}
-                    title={`Runs: ${optRevise ? 'new revision (✦ credits) → ' : ''}${checkCode ? 'code rules' : ''}${checkCode && checkAI ? ' + ' : ''}${checkAI ? '◇ AI reviewer (credits)' : ''}`}
-                    onClick={() => runReview(menuFeedback)}
+                    title={`Reviews this script with: ${[checkCode && 'the rulebook check', checkAI && 'the AI reviewer'].filter(Boolean).join(' + ') || 'nothing selected'}`}
+                    onClick={() => runReview('')}
                   >
                     {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review'}
                   </button>
                   {checkMenu ? (
                     <>
                       <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
-                      <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 340 }}>
-                        <span className="vp-menu-h">WHAT REVIEW DOES</span>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-                          <input type="checkbox" checked={optRevise} onChange={(e) => setOptRevise(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
-                          <span>
-                            ✦ Write a new revision first
-                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              AI improves the selected script into Review {revs.length} · uses credits
-                            </span>
-                          </span>
-                        </label>
-                        {optRevise ? (
-                          <textarea
-                            rows={2}
-                            value={menuFeedback}
-                            onChange={(e) => setMenuFeedback(e.target.value)}
-                            placeholder="optional: tell the AI what to change…"
-                            style={{
-                              display: 'block', width: 'calc(100% - 24px)', margin: '0 12px 6px',
-                              background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
-                              border: '1px dashed var(--line, #2a3142)', borderRadius: 6,
-                              padding: '7px 9px', fontSize: 12, resize: 'vertical',
-                            }}
-                          />
-                        ) : null}
-                        <span className="vp-menu-div" style={{ display: 'block' }} />
+                      <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 350 }}>
+                        <span className="vp-menu-h">REVIEW THIS SCRIPT WITH</span>
                         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
                           <span>
-                            Code rules
+                            Rulebook check
                             <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              free & instant — structure, undefined terms, openings, lengths
+                              instant & free — checks the script against the writing rules (structure, undefined terms, opening, lengths)
                             </span>
                           </span>
                         </label>
                         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
                           <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
                           <span>
-                            ◇ AI reviewer
+                            AI reviewer
                             <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
                               reads it like a first-time viewer — judgment notes, advisory · uses credits
                             </span>
                           </span>
                         </label>
                         <span className="vp-menu-div" style={{ display: 'block' }} />
-                        <button type="button" onClick={() => runReview(menuFeedback)}>
-                          Run
+                        <button type="button" disabled={!checkCode && !checkAI} onClick={() => runReview('')}>
+                          Run reviews
+                        </button>
+                        <span className="vp-menu-div" style={{ display: 'block' }} />
+                        <textarea
+                          rows={2}
+                          value={menuFeedback}
+                          onChange={(e) => setMenuFeedback(e.target.value)}
+                          placeholder="optional: tell the AI what to change…"
+                          style={{
+                            display: 'block', width: 'calc(100% - 24px)', margin: '8px 12px 6px',
+                            background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
+                            border: '1px dashed var(--line, #2a3142)', borderRadius: 6,
+                            padding: '7px 9px', fontSize: 12, resize: 'vertical',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          title="AI rewrites the script into a new revision, then the reviews above run on it — uses credits"
+                          onClick={() => runReview(menuFeedback, true)}
+                        >
+                          ✦ Revise with AI, then run the reviews
                         </button>
                       </span>
                     </>
