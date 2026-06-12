@@ -63,8 +63,22 @@ type Rev = { label: string; text: string }
 export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setStageFileDraft = useWorkflowStore((s) => s.setStageFileDraft)
   const seedStageFileDraft = useWorkflowStore((s) => s.seedStageFileDraft)
-  const [revs, setRevs] = useState<Rev[]>([])
-  const [sel, setSel] = useState(0)
+  // THE REVISION CHAIN LIVES IN THE STORE — the component only reads it.
+  // One home, no copy, nothing to lose when you switch steps and come back.
+  const CHAIN_KEY = `${stageId}:revchain`
+  const chainJson = useWorkflowStore((s) => s.stageDrafts[CHAIN_KEY] ?? '')
+  const { revs, sel } = (() => {
+    try {
+      const p = JSON.parse(chainJson) as { revs?: Rev[]; sel?: number }
+      if (Array.isArray(p.revs) && p.revs.length)
+        return { revs: p.revs, sel: Math.min(p.sel ?? p.revs.length - 1, p.revs.length - 1) }
+    } catch {
+      /* empty or invalid → no revisions yet */
+    }
+    return { revs: [] as Rev[], sel: 0 }
+  })()
+  const setChain = (nextRevs: Rev[], nextSel: number) =>
+    seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs: nextRevs, sel: nextSel }))
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState<'ai' | 'audit' | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -101,34 +115,12 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     setStageFileDraft(stageId, `${stageId}:screenplay`, text)
   }
 
-  // PERSIST THE CHAIN across step switches: the revision list + selection are
-  // cached in the store (in-memory; reload falls back to the on-disk files).
-  const CHAIN_KEY = `${stageId}:revchain`
+  // Disk seeding only when the store has NO chain (first visit / after a
+  // reload or a start-over). A legacy session where the two files differ
+  // becomes two revisions (Initial draft + Review 1).
   useEffect(() => {
-    if (revs.length) seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs, sel }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revs, sel])
-
-  // Seed: prefer the cached chain (step switching keeps your revisions);
-  // otherwise read the engine's real files. A legacy session where the two
-  // files differ becomes two revisions (Initial draft + Review 1).
-  useEffect(() => {
-    if (seededRef.current) return
+    if (revs.length > 0 || seededRef.current) return
     seededRef.current = true
-    const cached = useWorkflowStore.getState().stageDrafts[CHAIN_KEY]
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as { revs?: Rev[]; sel?: number }
-        if (Array.isArray(parsed.revs) && parsed.revs.length) {
-          const s = Math.min(parsed.sel ?? parsed.revs.length - 1, parsed.revs.length - 1)
-          setRevs(parsed.revs)
-          setSel(s)
-          return
-        }
-      } catch {
-        /* fall through to disk seeding */
-      }
-    }
     Promise.all(
       [FILE_LISTENER, FILE_SCREENPLAY].map((p) =>
         fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(p)}`)
@@ -142,15 +134,14 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       let seeded: Rev[] = []
       if (L && S && displayBody(L) !== displayBody(S)) seeded = [{ label: 'Initial draft', text: listener }, { label: 'Review 1', text: screenplay }]
       else if (S || L) seeded = [{ label: 'Initial draft', text: S ? screenplay : listener }]
-      if (seeded.length) {
-        setRevs(seeded)
-        setSel(seeded.length - 1)
+      if (seeded.length && useWorkflowStore.getState().stageDrafts[CHAIN_KEY] === undefined) {
+        setChain(seeded, seeded.length - 1)
         seedStageFileDraft(`${stageId}:listener`, seeded[seeded.length - 1].text)
         seedStageFileDraft(`${stageId}:screenplay`, seeded[seeded.length - 1].text)
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [revs.length])
 
   const stats = (text: string) => {
     const body = text
@@ -261,10 +252,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       const fileOut = await fr.json().catch(() => null)
       const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
       if (text.trim()) {
-        const label = revs.length === 0 ? 'Initial draft' : `Review ${revs.length}`
-        const nextIdx = revs.length
-        setRevs((rs) => [...rs, { label, text }])
-        setSel(nextIdx)
+        // Append to the FRESH chain from the store (awaits above may have
+        // left the closure's copy behind).
+        const fresh = (() => {
+          try {
+            const p = JSON.parse(useWorkflowStore.getState().stageDrafts[CHAIN_KEY] ?? '') as { revs?: Rev[] }
+            return Array.isArray(p.revs) ? p.revs : []
+          } catch {
+            return [] as Rev[]
+          }
+        })()
+        const label = fresh.length === 0 ? 'Initial draft' : `Review ${fresh.length}`
+        const nextIdx = fresh.length
+        setChain([...fresh, { label, text }], nextIdx)
         setEditing(false)
         syncStore(text)
         setAiNotes(null) // AI notes graded the previous revision
@@ -509,8 +509,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           <button
             style={ghost}
             onClick={() => {
-              setRevs([{ label: 'Initial draft', text: '' }])
-              setSel(0)
+              setChain([{ label: 'Initial draft', text: '' }], 0)
               setEditing(true)
             }}
           >
@@ -529,8 +528,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => { setSel(i); setEditing(false); syncStore(rev.text) }}
-                onKeyDown={(e) => { if (e.key === 'Enter') { setSel(i); setEditing(false); syncStore(rev.text) } }}
+                onClick={() => { setChain(revs, i); setEditing(false); syncStore(rev.text) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { setChain(revs, i); setEditing(false); syncStore(rev.text) } }}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
                 title="Select this revision — it becomes the script the checks grade and later steps use"
               >
@@ -665,7 +664,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     placeholder="Write the narration here…"
                     onChange={(e) => {
                       const text = e.target.value
-                      setRevs((rs) => rs.map((r, k) => (k === i ? { ...r, text } : r)))
+                      setChain(revs.map((r, k) => (k === i ? { ...r, text } : r)), sel)
                       syncStore(text)
                     }}
                     onBlur={() => setEditing(false)}
