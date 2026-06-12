@@ -600,85 +600,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   {s.words} words · ~{s.time}
                 </span>
               )}
-              {audit && !auditStale && (
-                <button
-                  type="button"
-                  title={audit.passed || audit.skipped ? undefined : 'Jump to the issues'}
-                  onClick={() => document.getElementById(`audit-findings-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                  style={{
-                    background: 'none', border: 'none', padding: 0,
-                    cursor: audit.passed || audit.skipped ? 'default' : 'pointer', fontSize: 13,
-                    color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)',
-                  }}
-                >
-                  {audit.skipped
-                    ? '△ checks skipped'
-                    : audit.passed
-                      ? audit.warnings.length
-                        ? `✓ checks passed · ${audit.warnings.length} warning(s)`
-                        : '✓ checks passed'
-                      : `✕ ${codeRemaining.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
-                </button>
-              )}
-              {i > 0 && rev.text.trim() && (
-                <button
-                  style={{ ...ghost, color: showDiff ? 'var(--ink)' : 'var(--ink-2)' }}
-                  title="Highlight what changed from the previous revision"
-                  onClick={() => setShowDiff((v) => !v)}
-                >
-                  Changes {showDiff ? 'on' : 'off'}
-                </button>
-              )}
-              {rev.text.trim() && (
-                <span style={{ position: 'relative', display: 'inline-flex' }}>
-                  <button
-                    style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
-                    disabled={!!busy}
-                    title="Choose which checkers run"
-                    onClick={() => setCheckMenu((v) => !v)}
-                  >
-                    ▾
-                  </button>
-                  <button
-                    style={{ ...ghost, borderRadius: '0 6px 6px 0' }}
-                    disabled={!!busy}
-                    title="Runs the selected checkers on this revision"
-                    onClick={runChecks}
-                  >
-                    {busy === 'audit' ? 'Checking…' : `Check${checkCode && checkAI ? ' (code + AI)' : checkAI ? ' (AI)' : ''}`}
-                  </button>
-                  {checkMenu ? (
-                    <>
-                      <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
-                      <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, minWidth: 320 }}>
-                        <span className="vp-menu-h">WHAT CHECKS THE SCRIPT</span>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-                          <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
-                          <span>
-                            Code rules
-                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              free & instant — structure, undefined terms, openings, lengths
-                            </span>
-                          </span>
-                        </label>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-                          <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
-                          <span>
-                            AI review
-                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              reads it like a first-time viewer — judgment notes, advisory · uses credits
-                            </span>
-                          </span>
-                        </label>
-                        <span className="vp-menu-div" style={{ display: 'block' }} />
-                        <button type="button" disabled={!checkCode && !checkAI} onClick={runChecks}>
-                          Run the checks
-                        </button>
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-              )}
               <FeedbackButton
                 label={revs.length > 0 ? 'New review' : 'Write it'}
                 busy={busy === 'ai'}
@@ -803,6 +724,94 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 )}
               </div>
             </div>
+
+            {/* REVIEW BAR — the controls live next to their effect: status on
+                the left, diff toggle + checker on the right, findings below.
+                Labels are constant-width so state changes never reflow. */}
+            {rev.text.trim() ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 16, borderTop: '1px solid var(--line, #2a3142)', paddingTop: 12 }}>
+                {audit && !auditStale ? (
+                  <button
+                    type="button"
+                    title={audit.passed || audit.skipped ? undefined : 'Jump to the issues'}
+                    onClick={() => document.getElementById(`audit-findings-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                    style={{
+                      background: 'none', border: 'none', padding: 0,
+                      cursor: audit.passed || audit.skipped ? 'default' : 'pointer', fontSize: 13,
+                      color: audit.skipped ? 'var(--amber)' : audit.passed ? 'var(--green, #4ade80)' : 'var(--red)',
+                    }}
+                  >
+                    {audit.skipped
+                      ? '△ checks skipped'
+                      : audit.passed
+                        ? audit.warnings.length
+                          ? `✓ checks passed · ${audit.warnings.length} warning(s)`
+                          : '✓ checks passed'
+                        : `✕ ${codeRemaining.length} blocking issue(s)${ignoredBlocking.length ? ` · ${ignoredBlocking.length} ignored` : ''}`}
+                  </button>
+                ) : (
+                  <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>not checked yet</span>
+                )}
+                <span style={{ flex: 1 }} />
+                {i > 0 && (
+                  <button
+                    style={{ ...ghost, minWidth: 104, color: showDiff ? 'var(--ink)' : 'var(--ink-2)' }}
+                    title="Highlight what changed from the previous revision"
+                    onClick={() => setShowDiff((v) => !v)}
+                  >
+                    Changes {showDiff ? 'on' : 'off'}
+                  </button>
+                )}
+                <span style={{ position: 'relative', display: 'inline-flex' }}>
+                  <button
+                    style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
+                    disabled={!!busy}
+                    title="Choose which checkers run"
+                    onClick={() => setCheckMenu((v) => !v)}
+                  >
+                    ▾{checkAI ? ' ◇' : ''}
+                  </button>
+                  <button
+                    style={{ ...ghost, borderRadius: '0 6px 6px 0', minWidth: 92 }}
+                    disabled={!!busy}
+                    title={`Runs the selected checkers on this revision${checkCode && checkAI ? ' — code rules + AI review' : checkAI ? ' — AI review only' : ' — code rules'}`}
+                    onClick={runChecks}
+                  >
+                    {busy === 'audit' ? 'Checking…' : 'Check'}
+                  </button>
+                  {checkMenu ? (
+                    <>
+                      <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
+                      <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, minWidth: 320 }}>
+                        <span className="vp-menu-h">WHAT CHECKS THE SCRIPT</span>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
+                          <span>
+                            Code rules
+                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                              free & instant — structure, undefined terms, openings, lengths
+                            </span>
+                          </span>
+                        </label>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+                          <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
+                          <span>
+                            AI review
+                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                              reads it like a first-time viewer — judgment notes, advisory · uses credits
+                            </span>
+                          </span>
+                        </label>
+                        <span className="vp-menu-div" style={{ display: 'block' }} />
+                        <button type="button" disabled={!checkCode && !checkAI} onClick={runChecks}>
+                          Run the checks
+                        </button>
+                      </span>
+                    </>
+                  ) : null}
+                </span>
+              </div>
+            ) : null}
 
             {/* FINDINGS — always about the text above (or marked stale). */}
             {auditStale && audit ? (
