@@ -11,7 +11,7 @@ Historically, AI agents with unrestricted filesystem access would bypass protoco
 To solve this, the Web UI is being built as the **only** interface for the workflow. The backend (driven by `spoolcast_backend.py` in the engine repo) owns the state machine and enforces the rules. The AI agent is demoted to a stateless text generator with zero direct file-write access.
 
 ### How Enforcement Works
-1. The UI displays the steps defined dynamically in the active format contract (e.g., `illustration-chunk-remotion.json`).
+1. The UI displays the steps defined dynamically in the active format contract (e.g., `explainer.json`).
 2. The AI proposes a payload (e.g., a new shot-list) for the *current active stage only*.
 3. The backend receives the payload, writes it to a temporary location, and runs the deterministic audit script (e.g., `validate_shot_list.py`).
 4. **If it passes (exit 0):** The backend commits the file, records the approval, and advances the state machine.

@@ -1,5 +1,5 @@
 {
-  "adapter": "illustration-chunk-remotion",
+  "adapter": "explainer",
   "summary": "Generic Spoolcast pipeline: script and shot-list to AI scene PNGs, reveal frames, Remotion render, audits, and optional mobile variants.",
   "session_root": "../spoolcast-content/sessions/{session_id}",
   "source_of_truth": [
@@ -16,7 +16,7 @@
       "purpose": "Force the raw source package and workflow rules before source analysis or asset inventory.",
       "required_sources": [
         "rules.md",
-        "contracts/illustration-chunk-remotion.json",
+        "contracts/explainer.json",
         "PIPELINE.md",
         "STORY.md",
         "<session_root>/session.json",
@@ -39,7 +39,7 @@
       "purpose": "Force the source analysis and story rules before proposing or writing the core message.",
       "required_sources": [
         "rules.md",
-        "contracts/illustration-chunk-remotion.json",
+        "contracts/explainer.json",
         "STORY.md",
         "<session_root>/session.json",
         "<session_root>/working/source-analysis.md",
