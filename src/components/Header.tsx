@@ -114,7 +114,7 @@ export function Header({
   }
 
   return (
-    <header>
+    <header className={menuOpen ? 'menu-open' : undefined}>
       <button className="logo" type="button" onClick={onLogo}>
         <img className="mark" src="/favicon.svg" alt="" />
         <span>Spoolcast</span>

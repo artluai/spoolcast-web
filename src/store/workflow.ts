@@ -12,12 +12,22 @@ export type S1 = {
 }
 
 type Drafts = { ideaBrief: string; goal: Goal; s1: S1 }
+export type StageProcess = {
+  stageId: string
+  jobId?: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  label: string
+  error?: string | null
+  message?: string | null
+  updatedAt?: string
+}
 
 interface WorkflowStore extends Drafts {
   dirtySteps: Record<string, boolean>
   // Drafted stage-output content (structure, world kit, visual pacing, ...),
   // keyed by engine stage id. Persisted to the engine via set_stage_output.
   stageDrafts: Record<string, string>
+  stageProcesses: Record<string, StageProcess>
   setIdeaBrief: (stepId: string, v: React.SetStateAction<string>) => void
   setGoal: (stepId: string, v: React.SetStateAction<Goal>) => void
   setS1: (stepId: string, v: React.SetStateAction<S1>) => void
@@ -34,12 +44,13 @@ interface WorkflowStore extends Drafts {
   // is locked until the draft lands.
   handoff: { stageId: string; label: string } | null
   setHandoff: (h: { stageId: string; label: string } | null) => void
+  setStageProcess: (stageId: string, process: StageProcess | null) => void
   // Drop cached drafts for a stage so the editor reloads fresh engine content.
   clearStageDrafts: (stageId: string) => void
-  // A step editor can expose its undo to the step header (Undo · Previous ·
-  // Next). null = no undo available on the active step.
-  stepUndo: { count: number; run: () => void } | null
-  setStepUndo: (u: { count: number; run: () => void } | null) => void
+  // A step editor can expose its undo/redo to the step header. null = no
+  // history available on the active step.
+  stepUndo: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null
+  setStepUndo: (u: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null) => void
 }
 
 const resolve = <T,>(action: React.SetStateAction<T>, prev: T): T =>
@@ -58,6 +69,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
   dirtySteps: {},
   stageDrafts: {},
+  stageProcesses: {},
   setStageDraft: (stageId, v) =>
     set((state) => ({
       stageDrafts: { ...state.stageDrafts, [stageId]: v },
@@ -97,6 +109,13 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   isStepDirty: (stepId) => Boolean(get().dirtySteps[stepId]),
   handoff: null,
   setHandoff: (h) => set(() => ({ handoff: h })),
+  setStageProcess: (stageId, process) =>
+    set((state) => {
+      const next = { ...state.stageProcesses }
+      if (process) next[stageId] = process
+      else delete next[stageId]
+      return { stageProcesses: next }
+    }),
   stepUndo: null,
   setStepUndo: (u) => set(() => ({ stepUndo: u })),
   clearStageDrafts: (stageId) =>

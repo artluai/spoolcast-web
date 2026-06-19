@@ -329,7 +329,7 @@
       "owner": "script",
       "requires_approval": false,
       "inputs": ["shot-list/shot-list.json", "session.json", "source/external-assets/*"],
-      "outputs": ["source/generated-assets/scenes/*.png", "manifests/*.json"],
+      "outputs": ["working/generation-prompts.json", "source/generated-assets/scenes/*.png", "manifests/*.json"],
       "gate": "required generated or external visual exists for every chunk",
       "actions": ["batch_scenes", "generate_scene", "scene_batch_status"]
     },

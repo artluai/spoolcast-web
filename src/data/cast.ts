@@ -164,8 +164,8 @@ export const stepAlias: Record<string, { id: string; name: string; blurb: string
   },
   shot_list_json: {
     id: 'shots',
-    name: 'Storyboard',
-    blurb: 'Visual breakdown of the script.',
+    name: 'Compile Shot List',
+    blurb: 'Compile the pacing plan into the structured JSON render contract.',
   },
   narration_audio: {
     id: 'voice',

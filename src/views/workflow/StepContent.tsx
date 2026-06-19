@@ -9,7 +9,7 @@ import {
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
-import { VisualGallery } from './VisualPacing'
+import { VisualGenerationStage } from './VisualGenerationStage'
 import { ShotListStage } from './ShotListStage'
 import { ScreenplayStage } from './ScreenplayStage'
 import { StageDraftEditor } from './StageDraftEditor'
@@ -18,7 +18,6 @@ export function StepContent({
   step,
   setupMode,
   showName,
-  castData: _castData, // cast images now resolved inside WorldKitEditor
   blankProject,
   onOpenCast,
   onToast,
@@ -80,11 +79,11 @@ export function StepContent({
     return <StageDraftEditor stageId={stepId} />
   }
   if (step.id === 'shots') {
-    // Storyboard, made real: AI compile (validated in the same operation) +
+    // Compile Shot List, made real: AI compile (validated in the same operation) +
     // work-order editor + free re-check. Approval gates the paid image steps.
     return <ShotListStage stageId={stepId} />
   }
-  if (step.id === 'pics') return <VisualGallery />
+  if (step.id === 'pics') return <VisualGenerationStage stageId={stepId} />
   if (step.id === 'post')
     return <SaveTemplateContent step={step} origin={origin} formatDirty={formatDirty} onToast={onToast} />
   return (

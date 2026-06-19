@@ -7,13 +7,34 @@ import { useWorkflowStore } from '../../store/workflow'
 import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
 import { StepContent } from './StepContent'
 
+type WorkflowArtifact = {
+  required?: boolean
+  exists?: boolean
+  pattern?: string
+}
+
+type WorkflowNode = {
+  id: string
+  label?: string
+  status?: string
+  requires_approval?: boolean
+  artifacts?: WorkflowArtifact[]
+}
+
+type WorkflowApiStatus = {
+  data?: {
+    workflow_graph?: { nodes?: WorkflowNode[] }
+    blockers?: string[]
+  }
+}
+
 export function WorkflowView({
   steps: rawSteps,
   gates,
   seed,
   selected,
   setSelected,
-  activeStep,
+  activeStep: rawActiveStep,
   apiStatus,
   apiLoading,
   isBlocked,
@@ -36,7 +57,7 @@ export function WorkflowView({
   selected: string
   setSelected: (id: string) => void
   activeStep: Step
-  apiStatus: any
+  apiStatus: WorkflowApiStatus | null
   apiLoading: boolean
   isBlocked: boolean
   setupMode: SetupMode
@@ -79,15 +100,23 @@ export function WorkflowView({
   // "In progress" instead of "Pending" — derived here, in one place, from the
   // store's per-step dirty flags. Engine-confirmed statuses (done) win.
   const dirtyStepsMap = useWorkflowStore((s) => s.dirtySteps)
-  const steps = useMemo(
-    () =>
-      rawSteps.map((step) =>
-        step.status === 'later' && dirtyStepsMap[step.sourceId ?? step.id]
-          ? { ...step, status: 'work' as const }
-          : step,
-      ),
-    [rawSteps, dirtyStepsMap],
-  )
+  const stageProcesses = useWorkflowStore((s) => s.stageProcesses)
+  const workflowNodes = apiStatus?.data?.workflow_graph?.nodes || []
+  const firstIncompleteNode = workflowNodes.find((n) => n.status !== 'passed' && n.status !== 'approved')
+  const firstIncompleteStageId = firstIncompleteNode?.id
+  const steps = rawSteps.map((step) => {
+    const key = step.sourceId ?? step.id
+    const process = stageProcesses[key]
+    if (process && ['queued', 'running'].includes(process.status)) {
+      return { ...step, status: 'work' as const }
+    }
+    if (step.status !== 'done' && key === firstIncompleteStageId) {
+      return { ...step, status: 'work' as const }
+    }
+    if (step.status === 'later' && dirtyStepsMap[key]) return { ...step, status: 'work' as const }
+    return step
+  })
+  const activeStep = steps.find((step) => step.id === selected) ?? rawActiveStep
 
   // DIRTY STATE TRACKING: per-step dirty flags live in the zustand workflow store,
   // keyed by the engine node id (activeStep.sourceId) the approval logic compares against.
@@ -269,8 +298,10 @@ export function WorkflowView({
   // AND the stage draft editors, and never bleeds across steps.
   const isCurrentlyEditing = dirty
 
-  const engineNode = apiStatus?.data?.workflow_graph?.nodes?.find((n: any) => n.id === activeStep.sourceId)
+  const engineNode = workflowNodes.find((n) => n.id === activeStep.sourceId)
   const engineStatus = engineNode?.status || 'not_started'
+  const activeStageProcess = stageProcesses[activeStep.sourceId ?? activeStep.id]
+  const hasActiveStageProcess = !!activeStageProcess && ['queued', 'running'].includes(activeStageProcess.status)
 
   // INVALIDATION WARNING as a toast (not an inline card that displaces the
   // footer layout): fire once when the user starts editing an already-approved
@@ -287,12 +318,21 @@ export function WorkflowView({
   }, [activeApproved, dirty, activeEngineId, onToast])
 
   // Also consider it "In progress" if this is the first incomplete step and it's just waiting to be worked on
-  const nodes = apiStatus?.data?.workflow_graph?.nodes || []
-  const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+  const nodes = workflowNodes
+  const firstIncomplete = firstIncompleteNode
   const isFirstIncompleteStep = activeStep.sourceId === firstIncomplete?.id
+  const blockedStepIndex = firstIncomplete ? nodes.findIndex((n) => n.id === firstIncomplete.id) : -1
+  const currentStepIndex = nodes.findIndex((n) => n.id === activeStep.sourceId)
+  const isBeyondBlocked = firstIncomplete ? currentStepIndex > blockedStepIndex : false
+  const activeProgressIncomplete =
+    Boolean(activeStep.progress)
+    && Number(activeStep.progress?.total || 0) > 0
+    && Number(activeStep.progress?.done || 0) < Number(activeStep.progress?.total || 0)
 
   const statusLabel = 
     isCurrentlyEditing ? 'In progress' :
+    hasActiveStageProcess ? 'In progress' :
+    activeProgressIncomplete ? 'In progress' :
     engineStatus === 'passed' || engineStatus === 'approved' ? 'Complete' :
     engineStatus === 'running' ? 'In progress' :
     engineStatus === 'blocked' ? 'Blocked' :
@@ -303,7 +343,7 @@ export function WorkflowView({
   // Width should serve the content: wide is for big editors, grids, and
   // timelines. Steps that are reading columns or rows/options (setup, the
   // script's revision chain) stay at normal width.
-  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing'].includes(activeStep.id)
+  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'voice'].includes(activeStep.id)
 
   const NODE_W = 172
   const NODE_H = 88
@@ -628,34 +668,41 @@ export function WorkflowView({
               })()
             : null}
         </svg>
-        {steps.map((step) => (
-          <button
-            className={`node s-${step.status} ${selected === step.id ? 'selected' : ''} ${
-              step.optional ? 'optional' : ''
-            } ${runningId === step.id ? 'running' : ''}`}
-            key={step.id}
-            style={{ left: step.x + 24, top: step.y + 14 }}
-            onClick={() => setSelected(step.id)}
-          >
-            <span className="node-stripe" />
-            {autopilot && step.status !== 'done' ? (
-              <span className="auto-badge">AUTO</span>
-            ) : null}
-            <span className="num">
-              {`${step.num}${step.optional ? ' · OPTIONAL' : ''}`}
-            </span>
-            <span className="node-name">{step.name}</span>
-            {step.progress ? (
-              <span className="progress">
-                <i style={{ width: `${Math.round((step.progress.done / step.progress.total) * 100)}%` }} />
+        {steps.map((step) => {
+          const progressIncomplete =
+            Boolean(step.progress)
+            && Number(step.progress?.total || 0) > 0
+            && Number(step.progress?.done || 0) < Number(step.progress?.total || 0)
+          const displayStatus = progressIncomplete && step.status === 'done' ? 'work' : step.status
+          return (
+            <button
+              className={`node s-${displayStatus} ${selected === step.id ? 'selected' : ''} ${
+                step.optional ? 'optional' : ''
+              } ${runningId === step.id ? 'running' : ''} ${step.progress ? 'has-progress' : ''}`}
+              key={step.id}
+              style={{ left: step.x + 24, top: step.y + 14 }}
+              onClick={() => setSelected(step.id)}
+            >
+              <span className="node-stripe" />
+              {autopilot && displayStatus !== 'done' ? (
+                <span className="auto-badge">AUTO</span>
+              ) : null}
+              <span className="num">
+                {`${step.num}${step.optional ? ' · OPTIONAL' : ''}`}
               </span>
-            ) : null}
-            <span className="node-foot">
-              <b>{step.status === 'done' ? 'Complete' : step.status === 'work' ? 'In progress' : 'Pending'}</b>
-              {step.progress ? <small>{step.progress.done}/{step.progress.total}</small> : null}
-            </span>
-          </button>
-        ))}
+              <span className="node-name">{step.name}</span>
+              {step.progress ? (
+                <span className="progress">
+                  <i style={{ width: `${Math.round((step.progress.done / step.progress.total) * 100)}%` }} />
+                </span>
+              ) : null}
+              <span className="node-foot">
+                <b>{displayStatus === 'done' ? 'Complete' : displayStatus === 'work' ? 'In progress' : 'Pending'}</b>
+                {step.progress ? <small>{step.progress.done}/{step.progress.total}</small> : null}
+              </span>
+            </button>
+          )
+        })}
         {gates.map((gate) => (
           <GateMarker key={gate.id} gate={gate} steps={steps} />
         ))}
@@ -756,11 +803,18 @@ export function WorkflowView({
               </>
             ) : null}
             <span className="spacer" />
-            {/* Step-level undo, when the active step's editor offers one. */}
+            {/* Step-level history, when the active step's editor offers it. */}
             {stepUndo ? (
-              <button disabled={stepUndo.count === 0} onClick={() => stepUndo.run()} title="Undo the last edit on this step">
-                ↶ Undo{stepUndo.count ? ` (${stepUndo.count})` : ''}
-              </button>
+              <>
+                <button disabled={stepUndo.count === 0} onClick={() => stepUndo.run()} title="Undo the last edit on this step">
+                  ↶ Undo{stepUndo.count ? ` (${stepUndo.count})` : ''}
+                </button>
+                {stepUndo.redo ? (
+                  <button disabled={(stepUndo.redoCount ?? 0) === 0} onClick={() => stepUndo.redo?.()} title="Redo the last undone edit on this step">
+                    ↷ Redo{stepUndo.redoCount ? ` (${stepUndo.redoCount})` : ''}
+                  </button>
+                ) : null}
+              </>
             ) : null}
             <button disabled={selectableIndex <= 0} onClick={() => setSelected(orderedSteps[selectableIndex - 1].id)}>
               ‹ Previous
@@ -848,17 +902,19 @@ export function WorkflowView({
                 <span style={{ color: 'var(--ink-2)', fontSize: 14 }}>{handoff!.label}</span>
               </div>
             ) : (
-            <StepContent
-              step={activeStep}
-              setupMode={setupMode}
-              showName={showName}
-              castData={castData}
-              blankProject={blankProject}
-              onOpenCast={onOpenCast}
-              onToast={onToast}
-              origin={origin}
-              formatDirty={formatDirty}
-            />
+              isBeyondBlocked ? null : (
+                <StepContent
+                  step={activeStep}
+                  setupMode={setupMode}
+                  showName={showName}
+                  castData={castData}
+                  blankProject={blankProject}
+                  onOpenCast={onOpenCast}
+                  onToast={onToast}
+                  origin={origin}
+                  formatDirty={formatDirty}
+                />
+              )
             )}
             
             {/* SCOPED BLOCKER RULE: The single blocker card. It NEVER shows on the step the user is
@@ -866,15 +922,11 @@ export function WorkflowView({
                 Save/Approve button is the signal. It ONLY shows on steps strictly AFTER the first
                 incomplete step, telling the user which prior step must be completed first. */}
             {!apiLoading && (() => {
-              const nodes = apiStatus?.data?.workflow_graph?.nodes || []
-              const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+              const firstIncomplete = firstIncompleteNode
 
               if (!firstIncomplete) return null
 
               // SCOPE CHECK: only steps strictly downstream of the first incomplete step get the card.
-              const blockedStepIndex = nodes.findIndex((n: any) => n.id === firstIncomplete.id)
-              const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
-
               if (currentStepIndex <= blockedStepIndex) {
                 return null // On or before the step being worked on — never show the blocker here.
               }
@@ -890,12 +942,12 @@ export function WorkflowView({
               const stepName = blockedUiIndex >= 0 ? orderedSteps[blockedUiIndex].name : firstIncomplete.label
               // Detail lines only when the engine explicitly marks the stage blocked (missing artifacts etc.)
               const missingArtifacts = firstIncomplete.status === 'blocked'
-                ? (firstIncomplete.artifacts?.filter((a: any) => a.required && !a.exists) || [])
+                ? (firstIncomplete.artifacts?.filter((a) => a.required && !a.exists) || [])
                 : []
               const blockersToShow = missingArtifacts.length > 0
-                ? missingArtifacts.map((a: any) => `Missing required: ${a.pattern}`)
+                ? missingArtifacts.map((a) => `Missing required: ${a.pattern}`)
                 : firstIncomplete.status === 'blocked'
-                  ? (apiStatus.data.blockers?.slice(0, 1) || ['Unknown blocker'])
+                  ? (apiStatus?.data?.blockers?.slice(0, 1) || ['Unknown blocker'])
                   : []
 
               return (
@@ -943,8 +995,7 @@ export function WorkflowView({
 
             <div className="detail-foot">
               {(() => {
-                const nodes = apiStatus?.data?.workflow_graph?.nodes || []
-                const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
+                const nodes = workflowNodes
                 
                 // 1. STATE CALCULATOR: Pure logic, isolated from UI rendering
                 const hasStageDraft = (st: Step) =>
@@ -961,7 +1012,7 @@ export function WorkflowView({
                   if (st.id === 'script') {
                     // Screenplay completes only when the engine confirms it: all
                     // three output files exist AND the rule-gated audit passed.
-                    const n = nodes.find((x: any) => x.id === st.sourceId)
+                    const n = nodes.find((x) => x.id === st.sourceId)
                     return n?.status === 'passed' || n?.status === 'approved'
                   }
                   return false
@@ -983,17 +1034,13 @@ export function WorkflowView({
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete
                 
-                const currentNode = nodes.find((n: any) => n.id === activeStep.sourceId)
+                const currentNode = nodes.find((n) => n.id === activeStep.sourceId)
                 const isAlreadyApproved = currentNode?.status === 'passed' || currentNode?.status === 'approved'
                 const needsApproval = currentNode?.requires_approval === true
                 
-                const blockedStepIndex = firstIncomplete ? nodes.findIndex((n: any) => n.id === firstIncomplete.id) : -1
-                const currentStepIndex = nodes.findIndex((n: any) => n.id === activeStep.sourceId)
-                const isBeyondBlocked = firstIncomplete ? currentStepIndex > blockedStepIndex : false
-                
-                // PROGRESSION RULE: Can proceed only if complete, not beyond a blocker, not
-                // already approved (unless dirty), and not while an AI hand-off prepares this step.
-                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !(isAlreadyApproved && !dirty) && !handoffHere
+                // PROGRESSION RULE: complete approved stages can still move to
+                // the next card. Dirty approved stages re-run approval first.
+                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !handoffHere
                 
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
                 // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
@@ -1036,6 +1083,10 @@ export function WorkflowView({
                         disabled={!canProceed}
                         onClick={async () => {
                           if (!canProceed || advancing) return
+                          if (isAlreadyApproved && !dirty && !isLast) {
+                            setSelected(orderedSteps[selectableIndex + 1].id)
+                            return
+                          }
                           // ENGINE-FIRST RULE: only advance and clear the dirty flag if the
                           // engine actually accepted the save/approval. If it refused, stay
                           // put — the step keeps its "in progress" state and the refreshed
@@ -1060,7 +1111,7 @@ export function WorkflowView({
                         {advancing
                           ? 'Working…'
                           : isAlreadyApproved && !dirty
-                            ? 'Completed'
+                            ? (isLast ? 'Completed' : 'Save and continue →')
                             : needsApproval
                               ? (isLast ? 'Approve & finish' : 'Approve & continue →')
                               : (isLast ? 'Save and finish' : 'Save and continue →')
@@ -1070,7 +1121,7 @@ export function WorkflowView({
                         {autopilot
                           ? 'Autopilot is running — stop it to edit by hand'
                           : isAlreadyApproved && !dirty
-                            ? 'Step is complete. Edit to re-approve.'
+                            ? (isLast ? 'Step is complete.' : 'Step is complete. Go to the next step.')
                             : !stepComplete
                               ? activeStep.id === 'script'
                                 ? 'The rule checks must pass — or be skipped — before this step can be approved'

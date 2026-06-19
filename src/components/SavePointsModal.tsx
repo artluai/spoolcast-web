@@ -11,6 +11,7 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
   const [points, setPoints] = useState<SavePoint[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [reloading, setReloading] = useState(false)
 
   useEffect(() => {
     fetch('http://localhost:8000/api/save-points?session=spoolcast-dev-log-12')
@@ -35,8 +36,9 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
         onToast(`Engine: ${out?.message || out?.error || 'could not restore the save point.'}`)
         return
       }
-      onToast(`Restored ${out?.data?.restored?.length ?? ''} file(s) — step statuses update in a moment.`)
-      onClose()
+      setReloading(true)
+      onToast(`Restored ${out?.data?.restored?.length ?? ''} file(s) — reloading project.`)
+      window.setTimeout(() => window.location.reload(), 400)
     } catch {
       onToast('Could not reach the engine.')
     } finally {
@@ -51,8 +53,10 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
         <h3>Recent saves</h3>
         <p>
           Your manual saves keep the last 10. Auto-saves — every ~10 minutes of activity and
-          before every start-over — keep the last 6. Restoring puts those files and approvals back.
+          before every start-over — keep the last 6. Restoring puts those files and approvals back,
+          then reloads the project.
         </p>
+        {reloading ? <p className="label">Restore complete — reloading project…</p> : null}
         {error ? <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p> : null}
         {points === null && !error ? <p className="label">Loading…</p> : null}
         {points !== null && points.length === 0 ? (
@@ -73,17 +77,17 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
               <button
                 type="button"
                 className="vp-undo"
-                disabled={busy !== null}
+                disabled={busy !== null || reloading}
                 title="Puts these files and approvals back, replacing what's there now"
                 onClick={() => restore(p.id)}
               >
-                {busy === p.id ? 'Restoring…' : 'Restore'}
+                {reloading && busy === p.id ? 'Reloading…' : busy === p.id ? 'Restoring…' : 'Restore'}
               </button>
             </div>
           )
         })}
         <div className="actions">
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose} disabled={busy !== null || reloading}>Close</button>
         </div>
       </div>
     </div>

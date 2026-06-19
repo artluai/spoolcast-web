@@ -81,10 +81,13 @@ export function RulesView() {
   const [hoverRule, setHoverRule] = useState<string | null>(null)
   const [ruleEdit, setRuleEdit] = useState<{ si: number; bi: number; text: string } | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<{ si: number; bi: number; text: string } | null>(null)
-  // Undo: snapshots of the rulebook before each change made here (last 20).
+  // Undo/redo: snapshots of the rulebook before each change made here (last 20).
   const [history, setHistory] = useState<Record<string, string[]>>({})
-  const pushHistory = (id: string, prev: string) =>
+  const [redoHistory, setRedoHistory] = useState<Record<string, string[]>>({})
+  const pushHistory = (id: string, prev: string) => {
     setHistory((h) => ({ ...h, [id]: [...(h[id] ?? []), prev].slice(-20) }))
+    setRedoHistory((h) => ({ ...h, [id]: [] }))
+  }
   const undo = async () => {
     if (!active) return
     const stack = history[active.id] ?? []
@@ -96,8 +99,26 @@ export function RulesView() {
     if (!res.ok) setNote(res.error)
     else {
       setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+      setRedoHistory((h) => ({ ...h, [active.id]: [...(h[active.id] ?? []), active.content].slice(-20) }))
       setHistory((h) => ({ ...h, [active.id]: stack.slice(0, -1) }))
       setNote('Undid the last rule change.')
+    }
+    setSavingRule(false)
+  }
+  const redo = async () => {
+    if (!active) return
+    const stack = redoHistory[active.id] ?? []
+    const next = stack[stack.length - 1]
+    if (next == null) return
+    setSavingRule(true)
+    setNote(null)
+    const res = await saveRuleContent(active.id, next)
+    if (!res.ok) setNote(res.error)
+    else {
+      setRules((rs) => (rs ? rs.map((r) => (r.id === active.id ? { ...r, content: res.content } : r)) : rs))
+      setHistory((h) => ({ ...h, [active.id]: [...(h[active.id] ?? []), active.content].slice(-20) }))
+      setRedoHistory((h) => ({ ...h, [active.id]: stack.slice(0, -1) }))
+      setNote('Redid the last rule change.')
     }
     setSavingRule(false)
   }
@@ -393,6 +414,15 @@ export function RulesView() {
                           onClick={undo}
                         >
                           ↶ Undo
+                        </button>
+                        <button
+                          className="vp-undo"
+                          type="button"
+                          title="Redo the last undone rule change made here"
+                          disabled={savingRule || (redoHistory[active.id] ?? []).length === 0}
+                          onClick={redo}
+                        >
+                          ↷ Redo
                         </button>
                         {active.content.includes(USER_RULES_HEADER) ? (
                           <button

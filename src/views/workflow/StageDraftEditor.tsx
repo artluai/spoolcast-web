@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
-import { useWorkflowStore } from '../../store/workflow'
+import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 
@@ -13,17 +13,24 @@ import { WorldKitEditor } from './WorldKitEditor'
 // Three everyday choices up front; the rest live behind "More models".
 // `reasoning` overrides the engine default where it saves money (Opus bills
 // its thinking tokens at full output rate — medium is the sweet spot).
-type DraftModel = { id: string; label: string; desc: string; reasoning?: string }
+type DraftModel = { id: string; label: string; cost: string; desc: string; reasoning?: string }
+type DraftJob = {
+  id: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  error?: string | null
+  message?: string | null
+  result?: { ok?: boolean; error?: string; message?: string } | null
+}
 const PRIMARY_MODELS: DraftModel[] = [
-  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', desc: 'best value — the default' },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash', desc: 'cheapest, quick drafts' },
-  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', desc: 'best writing, costs the most', reasoning: 'medium' },
+  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', cost: 'Standard cost', desc: 'best value — the default' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash', cost: 'Budget cost', desc: 'quick drafts' },
+  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', cost: 'Premium cost', desc: 'best writing, highest spend', reasoning: 'medium' },
 ]
 const MORE_MODELS: DraftModel[] = [
-  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro', desc: 'strong thinker, still cheap' },
-  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini', desc: 'balanced all-rounder' },
-  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max', desc: 'stronger Qwen, mid price' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', desc: 'high quality, mid price' },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro', cost: 'Budget cost', desc: 'stronger drafts without a big spend' },
+  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini', cost: 'Standard cost', desc: 'balanced all-rounder' },
+  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max', cost: 'Premium cost', desc: 'stronger Qwen, more expensive' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', cost: 'Standard cost', desc: 'high quality, moderate spend' },
 ]
 const ALL_MODELS = [...PRIMARY_MODELS, ...MORE_MODELS]
 
@@ -38,6 +45,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
+  const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
+  const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
   const [open, setOpen] = useState(false)
   const sourceWords = useSourceWords()
   const [model, setModel] = useState(PRIMARY_MODELS[0].id)
@@ -45,10 +54,19 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [showMore, setShowMore] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [draftJob, setDraftJob] = useState<DraftJob | null>(null)
+  const pollingJobRef = useRef<string | null>(null)
+  const mountedRef = useRef(true)
   const [needRewind, setNeedRewind] = useState(false)
   // Engine truth: a PAID draft button must never look ready on a blocked
   // step — only show it when this stage is current (or content exists).
   const [stageCurrent, setStageCurrent] = useState<boolean | null>(null)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   useEffect(() => {
     fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
       .then((r) => (r.ok ? r.json() : null))
@@ -58,6 +76,14 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       })
       .catch(() => {})
   }, [stageId])
+  useEffect(() => {
+    if (!stageProcess?.jobId || !['queued', 'running'].includes(stageProcess.status)) return
+    if (pollingJobRef.current === stageProcess.jobId) return
+    setDrafting(true)
+    setDraftJob({ id: stageProcess.jobId, status: stageProcess.status, error: stageProcess.error, message: stageProcess.message })
+    void pollDraftJob(stageProcess.jobId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageProcess?.jobId, stageProcess?.status])
   // PROPOSAL: when the AI couldn't stay inside the user's targets after its
   // self-correct retries, the engine saves the last attempt as a *.proposed.md
   // file and the user chooses: keep the current plan, or accept it anyway
@@ -97,18 +123,128 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   }, [cfg, stageId, seedStageDraft, draft])
 
   if (!cfg) return null
+  const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
+  const processLabel = stageProcess?.label || 'AI is drafting…'
+  const isBusy = drafting || activeProcess
+
+  const loadFreshDraft = async () => {
+    const fr = await fetch(
+      `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
+    )
+    const fileOut = await fr.json().catch(() => null)
+    if (fileOut?.ok && fileOut.data?.exists) {
+      // setStageDraft (not seed): an AI draft awaiting review counts as an
+      // un-approved change, so the step goes dirty until approved.
+      setStageDraft(stageId, fileOut.data.content)
+      setOpen(true)
+      return true
+    }
+    return false
+  }
+
+  const handleDraftFailure = async (out: { error?: string; message?: string } | null) => {
+    if (out?.error === 'illegal_action') {
+      // Stage already approved and the engine has moved past it. Offer to
+      // invalidate (rewind) — the protocol-honest way to re-draft.
+      setNeedRewind(true)
+      return
+    }
+    const msg: string = out?.message || ''
+    if (msg.includes('PROPOSAL:')) {
+      // The draft broke the user's targets even after retries — the engine
+      // saved it as a proposal. Offer the human the explicit choice.
+      const proposedPath = cfg.path.replace(/\.md$/, '.proposed.md')
+      try {
+        const pr = await fetch(
+          `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(proposedPath)}`,
+        )
+        const pOut = await pr.json().catch(() => null)
+        if (pOut?.ok && pOut.data?.exists && typeof pOut.data.content === 'string') {
+          const issues = msg
+            .split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.startsWith('- '))
+            .map((l: string) => l.slice(2))
+          setProposal({ content: pOut.data.content, issues })
+          return
+        }
+      } catch {
+        /* fall through to the plain error */
+      }
+    }
+    setDraftError(out?.message || out?.error || 'Drafting failed.')
+  }
+
+  const updateProcess = (job: DraftJob, label = processLabel) => {
+    const next: StageProcess = {
+      stageId,
+      jobId: job.id,
+      status: job.status,
+      label,
+      error: job.error || job.result?.error || null,
+      message: job.message || job.result?.message || null,
+      updatedAt: new Date().toISOString(),
+    }
+    setStageProcess(stageId, next)
+  }
+
+  const pollDraftJob = async (jobId: string) => {
+    pollingJobRef.current = jobId
+    for (let i = 0; i < 450; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000))
+      if (!mountedRef.current) {
+        pollingJobRef.current = null
+        return
+      }
+      const jr = await fetch(`http://localhost:8000/api/jobs/${jobId}`)
+      const jout = await jr.json().catch(() => null)
+      if (!jr.ok || jout?.ok === false) {
+        setDraftError(jout?.message || jout?.error || 'Could not read draft job status.')
+        setStageProcess(stageId, {
+          stageId,
+          jobId,
+          status: 'failed',
+          label: processLabel,
+          error: jout?.error || 'job_status_failed',
+          message: jout?.message || 'Could not read draft job status.',
+          updatedAt: new Date().toISOString(),
+        })
+        pollingJobRef.current = null
+        return
+      }
+      const job = jout.data as DraftJob
+      setDraftJob(job)
+      updateProcess(job)
+      if (job.status === 'done') {
+        if (!(await loadFreshDraft())) setDraftError('Draft finished, but the output file was not found.')
+        setStageProcess(stageId, null)
+        pollingJobRef.current = null
+        return
+      }
+      if (job.status === 'failed') {
+        await handleDraftFailure(job.result || { error: job.error || undefined, message: job.message || undefined })
+        updateProcess(job)
+        pollingJobRef.current = null
+        return
+      }
+    }
+    setDraftError('Draft job is still running. You can leave this page and check back later.')
+    pollingJobRef.current = null
+  }
 
   const runDraft = async (feedback = '') => {
     setDrafting(true)
     setDraftError(null)
+    setDraftJob(null)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const useJob = stageId === 'visual_pacing'
+      const res = await fetch(useJob ? 'http://localhost:8000/api/jobs' : 'http://localhost:8000/api/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: 'spoolcast-dev-log-12',
           tenant: 'local',
-          action: 'draft_stage',
+          ...(useJob ? { kind: 'draft_stage' } : { action: 'draft_stage' }),
           stage_id: stageId,
           model,
           allow_cost: true,
@@ -120,48 +256,25 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       })
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {
-        if (out?.error === 'illegal_action') {
-          // Stage already approved and the engine has moved past it. Offer to
-          // invalidate (rewind) — the protocol-honest way to re-draft.
-          setNeedRewind(true)
-          return
-        }
-        const msg: string = out?.message || ''
-        if (msg.includes('PROPOSAL:')) {
-          // The draft broke the user's targets even after retries — the engine
-          // saved it as a proposal. Offer the human the explicit choice.
-          const proposedPath = cfg.path.replace(/\.md$/, '.proposed.md')
-          try {
-            const pr = await fetch(
-              `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(proposedPath)}`,
-            )
-            const pOut = await pr.json().catch(() => null)
-            if (pOut?.ok && pOut.data?.exists && typeof pOut.data.content === 'string') {
-              const issues = msg
-                .split('\n')
-                .map((l: string) => l.trim())
-                .filter((l: string) => l.startsWith('- '))
-                .map((l: string) => l.slice(2))
-              setProposal({ content: pOut.data.content, issues })
-              return
-            }
-          } catch {
-            /* fall through to the plain error */
-          }
-        }
-        setDraftError(out?.message || out?.error || 'Drafting failed.')
+        await handleDraftFailure(out)
         return
       }
-      // Pull the freshly written file and show it for review/editing.
-      const fr = await fetch(
-        `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
-      )
-      const fileOut = await fr.json().catch(() => null)
-      if (fileOut?.ok && fileOut.data?.exists) {
-        // setStageDraft (not seed): an AI draft awaiting review counts as an
-        // un-approved change, so the step goes dirty until approved.
-        setStageDraft(stageId, fileOut.data.content)
-        setOpen(true)
+      if (useJob) {
+        const job = out.data as DraftJob
+        setDraftJob(job)
+        setStageProcess(stageId, {
+          stageId,
+          jobId: job.id,
+          status: job.status,
+          label: 'AI is drafting the visual pacing plan…',
+          error: null,
+          message: null,
+          updatedAt: new Date().toISOString(),
+        })
+        await pollDraftJob(job.id)
+      } else {
+        // Pull the freshly written file and show it for review/editing.
+        await loadFreshDraft()
       }
     } catch {
       setDraftError('Could not reach the engine.')
@@ -256,7 +369,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <FeedbackButton
             label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
-            busy={drafting}
+            busy={isBusy}
+            busyLabel={(draftJob?.status || stageProcess?.status) === 'queued' ? 'Queued…' : 'Working…'}
             title="Runs the AI — uses model credits"
             rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
             onRun={(fb) => runDraft(fb)}
@@ -265,7 +379,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             <button
               type="button"
               className="vp-menu-btn"
-              disabled={drafting}
+              disabled={isBusy}
               onClick={() => { setModelMenu((v) => !v); setShowMore(false) }}
               style={{ fontSize: 12, padding: '8px 12px' }}
             >
@@ -284,7 +398,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
                       style={m.id === model ? { background: 'var(--bg-3)' } : undefined}
                     >
                       {m.label}
-                      <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>{m.desc}</span>
+                      <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
+                        {m.cost} — {m.desc}
+                      </span>
                     </button>
                   ))}
                   {!showMore && (
@@ -298,6 +414,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             )}
           </span>
           <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>uses model credits</span>
+          {(draftJob || stageProcess) && isBusy && (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+              job {draftJob?.status || stageProcess?.status}
+            </span>
+          )}
           <ThinSourceNote words={sourceWords} />
           {draftError && (
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
@@ -308,16 +429,25 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           AI drafting for this step isn’t wired up yet — write it below for now.
         </p>
       ) : null}
-      {needRewind ? null : cfg.structured === 'pacing' ? (
-        // STRUCTURED MODE (visual pacing): timeline/table/script views over the
-        // plan markdown — parse → edit → serialize, same draft the engine reads.
-        <VisualPacingEditor stageId={stageId} />
-      ) : cfg.structured === 'worldkit' ? (
-        // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
-        // warnings, undo, and reset-to-default — always visible when content exists.
-        <WorldKitEditor stageId={stageId} path={cfg.path} />
-      ) : (
-        <>
+      {needRewind ? null : (
+        <div style={{ position: 'relative' }}>
+          {isBusy ? (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'rgba(10,12,18,.45)', borderRadius: 8, minHeight: 120 }}>
+              <span className="spin" />
+              <span style={{ color: 'var(--ink-1)', fontSize: 13 }}>{processLabel}</span>
+            </div>
+          ) : null}
+          <div style={isBusy ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+            {cfg.structured === 'pacing' ? (
+              // STRUCTURED MODE (visual pacing): timeline/table/script views over the
+              // plan markdown — parse → edit → serialize, same draft the engine reads.
+              <VisualPacingEditor stageId={stageId} />
+            ) : cfg.structured === 'worldkit' ? (
+              // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
+              // warnings, undo, and reset-to-default — always visible when content exists.
+              <WorldKitEditor stageId={stageId} path={cfg.path} />
+            ) : (
+              <>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -386,9 +516,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             {draft.trim() && !editing ? 'Click the text to edit the raw markdown · ' : ''}
             Saved to the engine on “Approve & continue” — this is the stage’s real contract output.
           </span>
-        </>
-      )}
-        </>
+              </>
+            )}
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

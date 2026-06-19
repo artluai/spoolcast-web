@@ -1,10 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
+import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
 import type { Step } from '../../types'
+
+const VOICE_RULES_ID = 'series:spoolcast-devlog:voice'
+const WORLD_KIT_PRONUNCIATION_HEADER = '## Pronunciation / TTS Rules'
+
+function parsePronunciationLines(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\s*-\s*`?([^`=\-:>]+?)`?\s*(?:->|=>|=|:)\s*`?([^`]+?)`?\s*$/)
+    if (!match) continue
+    const word = match[1].trim()
+    const alias = match[2].trim()
+    if (word && alias) out[word] = alias
+  }
+  return out
+}
+
+function upsertWorldKitPronunciationRule(content: string, word: string, alias: string) {
+  const line = `- \`${word}\` -> \`${alias}\``
+  const trimmed = content.replace(/\s+$/, '')
+  const headerIndex = trimmed.indexOf(WORLD_KIT_PRONUNCIATION_HEADER)
+  if (headerIndex < 0) {
+    return `${trimmed}\n\n${WORLD_KIT_PRONUNCIATION_HEADER}\n${line}\n`
+  }
+  const before = trimmed.slice(0, headerIndex)
+  const section = trimmed.slice(headerIndex)
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const existing = new RegExp(`^-\\s*\`?${escaped}\`?\\s*(?:->|=>|=|:).*$`, 'm')
+  const nextSection = existing.test(section) ? section.replace(existing, line) : `${section}\n${line}`
+  return `${before}${nextSection}\n`
+}
 
 // Last step (Video output): once the video exists, offer to immortalize its setup.
 // The kind is predetermined — a brand-new/standalone video saves a NEW format
@@ -398,20 +429,831 @@ export function TemplateComponents({
 }
 
 export function NarrationContent() {
+  type AudioArtifact = {
+    stage_id?: string
+    pattern?: string
+    matches?: number
+  }
+  type AudioChunk = {
+    id: string
+    title: string
+    narration: string
+    generated: boolean
+  }
+  type ShotBeat = { id?: string; narration?: string; [key: string]: unknown }
+  type ShotChunk = { id?: string; scene_title?: string; summary?: string; beats?: ShotBeat[] }
+  const countNarratedChunks = (chunks: ShotChunk[] = []) =>
+    chunks.filter((chunk) =>
+      (chunk?.beats || []).some((beat) => String(beat?.narration || '').trim()),
+    ).length
+  const stageId = 'narration_audio'
+  const session = 'spoolcast-dev-log-12'
+  const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
+  const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const audioDemo = (path: string) => `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/${path}`
+  const defaultProvider = 'edge'
+  const defaultVoice = 'edge-andrew'
+  const defaultSpeed = 1.0
+  const minSpeed = 0.5
+  const maxSpeed = 3.0
+  const providers = [
+    {
+      id: 'google',
+      name: 'Google TTS',
+      timing: 'provider word timings',
+      detail: 'Google voices, word timings from provider',
+    },
+    {
+      id: 'edge',
+      name: 'Microsoft Edge',
+      timing: 'aligned after narration',
+      detail: 'Current explainer default engine',
+    },
+    {
+      id: 'elevenlabs',
+      name: 'ElevenLabs',
+      timing: 'provider word timings',
+      detail: 'External voice library',
+    },
+  ] as const
+  const voices = [
+    {
+      id: 'google-schedar',
+      provider: 'google',
+      name: 'Schedar',
+      value: 'schedar',
+      detail: 'Existing news-anime TTS voice',
+      demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-voice-ab/Schedar.mp3'),
+    },
+    {
+      id: 'google-puck',
+      provider: 'google',
+      name: 'Puck',
+      value: 'Puck',
+      detail: 'Found in Dev Log 03 session settings',
+      demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-puck-archive/04-cfo-magnified-invoice.mp3'),
+    },
+    {
+      id: 'edge-andrew',
+      provider: 'edge',
+      name: 'Andrew',
+      value: 'en-US-AndrewNeural',
+      detail: 'Current dev-log-12 voice',
+      demo: audioDemo('sessions/spoolcast-dev-log-11/source/audio/C001.mp3'),
+    },
+    {
+      id: 'edge-guy',
+      provider: 'edge',
+      name: 'Guy',
+      value: 'en-US-GuyNeural',
+      detail: 'Microsoft Edge voice option',
+      demo: '',
+    },
+    {
+      id: 'elevenlabs-library',
+      provider: 'elevenlabs',
+      name: 'Library voice',
+      value: 'elevenlabs-library',
+      detail: 'Connect an ElevenLabs voice ID',
+      demo: '',
+    },
+  ] as const
+  const [provider, setProvider] = useState<(typeof providers)[number]['id']>(defaultProvider)
+  const [providerMenu, setProviderMenu] = useState(false)
+  const providerMenuRef = useRef<HTMLSpanElement>(null)
+  const [speed, setSpeed] = useState(defaultSpeed)
+  const [currentDefaultSpeed, setCurrentDefaultSpeed] = useState(defaultSpeed)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [audioChunks, setAudioChunks] = useState<AudioChunk[]>([])
+  const [pronunciations, setPronunciations] = useState<Record<string, string>>({})
+  const [worldKitContent, setWorldKitContent] = useState('')
+  const [seriesPronunciationText, setSeriesPronunciationText] = useState('')
+  const [pronWord, setPronWord] = useState('')
+  const [pronAlias, setPronAlias] = useState('')
+  const [savePronToTemplate, setSavePronToTemplate] = useState(false)
+  const [pronMessage, setPronMessage] = useState<string | null>(null)
+  const [editingChunkId, setEditingChunkId] = useState<string | null>(null)
+  const [chunkDraft, setChunkDraft] = useState('')
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiBusyChunkId, setAiBusyChunkId] = useState<string | null>(null)
+  const [savingChunkId, setSavingChunkId] = useState<string | null>(null)
+  const [regeneratingChunkId, setRegeneratingChunkId] = useState<string | null>(null)
+  const [audioVersions, setAudioVersions] = useState<Record<string, number>>({})
+  const [expandedChunkIds, setExpandedChunkIds] = useState<string[]>([])
+  const audioExpandTouchedRef = useRef(false)
+  const [chunkMessages, setChunkMessages] = useState<Record<string, string>>({})
+  const [runError, setRunError] = useState<string | null>(null)
+  const visibleVoices = voices.filter((v) => v.provider === provider)
+  const [voiceId, setVoiceId] = useState<(typeof voices)[number]['id']>(defaultVoice)
+  const [currentDefaultVoice, setCurrentDefaultVoice] = useState<(typeof voices)[number]['id']>(defaultVoice)
+  const activeProvider = providers.find((p) => p.id === provider) ?? providers[0]
+  const activeVoice = voices.find((v) => v.id === voiceId && v.provider === provider) ?? visibleVoices[0]
+  const currentDefaultProvider = voices.find((v) => v.id === currentDefaultVoice)?.provider ?? defaultProvider
+  const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
+  const updateSpeed = (nextSpeed: string) => setSpeed(Number(nextSpeed))
+  const audioSrc = (chunkId: string) =>
+    `http://localhost:8000/api/download?session=${session}&path=${encodeURIComponent(`source/audio/${chunkId}.mp3`)}&v=${audioVersions[chunkId] || 0}`
+  const startChunkEdit = (chunk: AudioChunk) => {
+    setEditingChunkId(chunk.id)
+    setChunkDraft(chunk.narration)
+    setAiPrompt('')
+    setChunkMessages((prev) => ({ ...prev, [chunk.id]: '' }))
+    if (!expandedChunkIds.includes(chunk.id)) {
+      setExpandedChunkIds((prev) => [...prev, chunk.id])
+    }
+  }
+  const setChunkExpanded = (chunkId: string, open: boolean) => {
+    audioExpandTouchedRef.current = true
+    setExpandedChunkIds((prev) => (
+      open
+        ? prev.includes(chunkId) ? prev : [...prev, chunkId]
+        : prev.filter((id) => id !== chunkId)
+    ))
+  }
+  const sentenceParts = (text: string) => {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    if (!clean) return []
+    const parts = clean.match(/[^.!?]+[.!?]?/g)?.map((part) => part.trim()).filter(Boolean)
+    return parts && parts.length ? parts : [clean]
+  }
+  const distributeNarration = (text: string, beats: ShotBeat[] = []) => {
+    const baseBeats = beats.length ? beats : [{ id: 'A', narration: '' }]
+    const parts = sentenceParts(text)
+    if (!parts.length) return baseBeats.map((beat) => ({ ...beat, narration: '' }))
+    const buckets = baseBeats.map(() => [] as string[])
+    parts.forEach((part, index) => {
+      buckets[Math.min(index, buckets.length - 1)].push(part)
+    })
+    return baseBeats.map((beat, index) => ({
+      ...beat,
+      narration: buckets[index].join(' ').trim(),
+    }))
+  }
+  const saveChunkNarration = async (chunkId: string, narration: string) => {
+    const clean = narration.replace(/\s+/g, ' ').trim()
+    if (!clean) {
+      setRunError('Narration cannot be empty.')
+      return false
+    }
+    setSavingChunkId(chunkId)
+    setRunError(null)
+    try {
+      const fileRes = await fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('shot-list/shot-list.json')}`)
+      const fileOut = await fileRes.json().catch(() => null)
+      const shotList = fileOut?.data?.content ? JSON.parse(fileOut.data.content) : null
+      const chunks = Array.isArray(shotList?.chunks) ? shotList.chunks : []
+      let found = false
+      shotList.chunks = chunks.map((chunk: ShotChunk) => {
+        if (String(chunk.id) !== chunkId) return chunk
+        found = true
+        return { ...chunk, beats: distributeNarration(clean, chunk.beats) }
+      })
+      if (!found) throw new Error(`Could not find ${chunkId} in shot-list.json.`)
+      const saveRes = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session,
+          tenant: 'local',
+          action: 'set_stage_output',
+          stage_id: 'shot_list_json',
+          path: 'shot-list/shot-list.json',
+          content: JSON.stringify(shotList, null, 2) + '\n',
+        }),
+      })
+      const saveOut = await saveRes.json().catch(() => null)
+      if (!saveRes.ok || saveOut?.ok === false) {
+        throw new Error(saveOut?.message || saveOut?.error || 'Could not save shot-list.json.')
+      }
+      setEditingChunkId(null)
+      setChunkDraft('')
+      await loadProgress()
+      return true
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Could not save narration.')
+      return false
+    } finally {
+      setSavingChunkId(null)
+    }
+  }
+  const reviseChunkWithAi = async (chunk: AudioChunk) => {
+    const instruction = aiPrompt.trim()
+    if (!instruction) {
+      setChunkMessages((prev) => ({ ...prev, [chunk.id]: 'Write what you want AI to change first.' }))
+      return
+    }
+    setAiBusyChunkId(chunk.id)
+    setRunError(null)
+    setChunkMessages((prev) => ({ ...prev, [chunk.id]: '' }))
+    try {
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session,
+          tenant: 'local',
+          action: 'rewrite_chunk_narration',
+          allow_cost: true,
+          chunk_id: chunk.id,
+          current_narration: chunkDraft || chunk.narration,
+          instruction,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        throw new Error(out?.message || out?.error || 'AI rewrite failed.')
+      }
+      setChunkDraft(String(out?.data?.narration || '').trim())
+      setChunkMessages((prev) => ({ ...prev, [chunk.id]: 'AI rewrite ready. Review it, then save or regenerate audio.' }))
+    } catch (err) {
+      setChunkMessages((prev) => ({
+        ...prev,
+        [chunk.id]: err instanceof Error ? err.message : 'Could not rewrite this chunk.',
+      }))
+    } finally {
+      setAiBusyChunkId(null)
+    }
+  }
+  const loadProgress = async () => {
+    const [statusRes, shotRes] = await Promise.all([
+      fetch(`http://localhost:8000/api/status?session=${session}&tenant=local`),
+      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('shot-list/shot-list.json')}`),
+    ])
+    const statusOut = await statusRes.json().catch(() => null)
+    const shotOut = await shotRes.json().catch(() => null)
+    const audioArtifact = ((statusOut?.data?.artifacts || []) as AudioArtifact[]).find(
+      (a) => a.stage_id === stageId && a.pattern === 'source/audio/*.mp3',
+    )
+    let total: number
+    let chunks: AudioChunk[] = []
+    try {
+      const shotList = shotOut?.data?.content ? JSON.parse(shotOut.data.content) : null
+      total = countNarratedChunks(shotList?.chunks)
+      chunks = ((shotList?.chunks || []) as ShotChunk[])
+        .filter((chunk) => (chunk?.beats || []).some((beat) => String(beat?.narration || '').trim()))
+        .map((chunk, index) => ({
+          id: String(chunk.id || `C${String(index + 1).padStart(3, '0')}`),
+          title: String(chunk.scene_title || chunk.summary || chunk.id || `Chunk ${index + 1}`),
+          narration: (chunk.beats || [])
+            .map((beat) => String(beat?.narration || '').trim())
+            .filter(Boolean)
+            .join(' '),
+          generated: false,
+        }))
+    } catch {
+      total = 0
+    }
+    const done = Number(audioArtifact?.matches || 0)
+    setProgress({ done, total })
+    const nextChunks = chunks.map((chunk, index) => ({ ...chunk, generated: done >= total || index < done }))
+    setAudioChunks(nextChunks)
+    if (done > 0 && !audioExpandTouchedRef.current) {
+      setExpandedChunkIds(nextChunks.filter((chunk) => chunk.generated).map((chunk) => chunk.id))
+    }
+  }
+  const saveTtsSettings = async (nextPronunciations = pronunciations) => {
+    const res = await fetch('http://localhost:8000/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session,
+        tenant: 'local',
+        action: 'set_session_fields',
+        fields: {
+          tts_voice: activeVoice?.value,
+          tts_playback_rate: Number(speed.toFixed(1)),
+          pronunciations: nextPronunciations,
+        },
+      }),
+    })
+    const out = await res.json().catch(() => null)
+    if (!res.ok || out?.ok === false) {
+      throw new Error(out?.message || out?.error || 'Could not save TTS settings.')
+    }
+  }
+  const loadNarrationSettings = async () => {
+    const [sessionRes, worldKitRes, rulesRes] = await Promise.all([
+      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('session.json')}`),
+      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('working/world-kit.md')}`),
+      fetch(`http://localhost:8000/api/rules?session=${session}`),
+    ])
+    const sessionOut = await sessionRes.json().catch(() => null)
+    const worldKitOut = await worldKitRes.json().catch(() => null)
+    const rulesOut = await rulesRes.json().catch(() => null)
+    if (sessionOut?.data?.content) {
+      const cfg = JSON.parse(sessionOut.data.content)
+      const voice = voices.find((v) => v.value === cfg.tts_voice)
+      if (voice) {
+        setProvider(voice.provider)
+        setVoiceId(voice.id)
+        setCurrentDefaultVoice(voice.id)
+      }
+      const rate = Number(cfg.tts_playback_rate)
+      if (Number.isFinite(rate)) {
+        setSpeed(rate)
+        setCurrentDefaultSpeed(rate)
+      }
+      if (cfg.pronunciations && typeof cfg.pronunciations === 'object') {
+        setPronunciations(cfg.pronunciations)
+      }
+    }
+    const kit = String(worldKitOut?.data?.content || '')
+    if (kit) {
+      setWorldKitContent(kit)
+      const kitRules = parsePronunciationLines(kit)
+      if (Object.keys(kitRules).length) setPronunciations((prev) => ({ ...kitRules, ...prev }))
+    }
+    const voiceRule = rulesOut?.ok
+      ? (rulesOut.data?.rules || []).find((rule: { id?: string }) => rule.id === VOICE_RULES_ID)
+      : null
+    if (voiceRule?.content) {
+      const content = String(voiceRule.content)
+      const idx = content.indexOf('## Pronunciation Wording')
+      setSeriesPronunciationText((idx >= 0 ? content.slice(idx) : content).slice(0, 520))
+    }
+  }
+  useEffect(() => {
+    const initial = window.setTimeout(() => {
+      void loadProgress().catch(() => {})
+    }, 0)
+    const interval = activeProcess
+      ? window.setInterval(() => {
+          void loadProgress().catch(() => {})
+        }, 5000)
+      : null
+    return () => {
+      window.clearTimeout(initial)
+      if (interval != null) window.clearInterval(interval)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProcess])
+  useEffect(() => {
+    void loadNarrationSettings().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!providerMenu) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Node && providerMenuRef.current?.contains(target)) return
+      setProviderMenu(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [providerMenu])
+  useEffect(() => {
+    if (!stageProcess?.jobId || !activeProcess) return
+    let cancelled = false
+    const pollJob = async () => {
+      try {
+        const res = await fetch(
+          `http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent(`working/jobs/${stageProcess.jobId}.json`)}`,
+        )
+        const out = await res.json().catch(() => null)
+        const content = out?.data?.content ? JSON.parse(out.data.content) : null
+        const state = String(content?.state || '')
+        if (!cancelled && ['succeeded', 'failed', 'stopped', 'lost'].includes(state)) {
+          await loadProgress()
+          if (state === 'succeeded') {
+            const stamp = Date.now()
+            setAudioVersions((prev) => (
+              regeneratingChunkId
+                ? { ...prev, [regeneratingChunkId]: stamp }
+                : {
+                    ...prev,
+                    ...Object.fromEntries(audioChunks.map((chunk) => [chunk.id, stamp])),
+                  }
+            ))
+          }
+          setRegeneratingChunkId(null)
+          if (state === 'succeeded') {
+            setStageProcess(stageId, null)
+          } else {
+            setRunError(content?.error || `Audio job ${state}.`)
+            setStageProcess(stageId, { ...stageProcess, status: 'failed', error: content?.error || state })
+          }
+        }
+      } catch {
+        // The progress poll still runs; a missing job file should not break the panel.
+      }
+    }
+    void pollJob()
+    const timer = window.setInterval(() => {
+      void pollJob()
+    }, 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageProcess?.jobId, activeProcess])
+  const selectProvider = (nextProvider: (typeof providers)[number]['id']) => {
+    setProvider(nextProvider)
+    setProviderMenu(false)
+    const nextVoice = voices.find((v) => v.provider === nextProvider)
+    if (nextVoice) setVoiceId(nextVoice.id)
+  }
+  const speedFill = `${((speed - minSpeed) / (maxSpeed - minSpeed)) * 100}%`
+  const progressPct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0
+  const audioComplete = progress.total > 0 && progress.done >= progress.total
+  const speedChangedFromDefault = Math.abs(speed - currentDefaultSpeed) > 0.001
+  const generateAudio = async (onlyChunkId?: string) => {
+    setRunError(null)
+    const chunkLabel = onlyChunkId ? `${onlyChunkId} narration audio` : 'narration audio chunks'
+    if (onlyChunkId) setRegeneratingChunkId(onlyChunkId)
+    setStageProcess(stageId, {
+      stageId,
+      status: 'queued',
+      label: `Generating ${chunkLabel}…`,
+      updatedAt: new Date().toISOString(),
+    })
+    try {
+      await saveTtsSettings()
+      const res = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session,
+          tenant: 'local',
+          action: 'batch_tts',
+          allow_cost: true,
+          extra_args: onlyChunkId ? ['--only', onlyChunkId, '--force'] : undefined,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        const message = out?.message || out?.details || out?.error || 'Could not start narration audio generation.'
+        setRunError(message)
+        setRegeneratingChunkId(null)
+        setStageProcess(stageId, null)
+        return
+      }
+      const stdout = String(out?.data?.stdout || '')
+      const jobId = stdout.match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+      setStageProcess(stageId, {
+        stageId,
+        jobId,
+        status: 'running',
+        label: `Generating ${chunkLabel}…`,
+        updatedAt: new Date().toISOString(),
+      })
+      await loadProgress()
+    } catch {
+      setRunError('Could not reach the engine.')
+      setRegeneratingChunkId(null)
+      setStageProcess(stageId, null)
+    }
+  }
+  const addPronunciationRule = async () => {
+    const word = pronWord.trim()
+    const alias = pronAlias.trim()
+    setPronMessage(null)
+    if (!word || !alias) {
+      setPronMessage('Add the written term and how it should be spoken.')
+      return
+    }
+    if (alias.includes('.')) {
+      setPronMessage('The spoken version cannot use periods. TTS may read them as “dot”.')
+      return
+    }
+    const nextPronunciations = { ...pronunciations, [word]: alias }
+    try {
+      await saveTtsSettings(nextPronunciations)
+      const nextWorldKit = upsertWorldKitPronunciationRule(
+        worldKitContent || `# World Kit — ${session}\n`,
+        word,
+        alias,
+      )
+      const worldRes = await fetch('http://localhost:8000/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session,
+          tenant: 'local',
+          action: 'set_stage_output',
+          stage_id: 'world_kit',
+          path: 'working/world-kit.md',
+          content: nextWorldKit,
+        }),
+      })
+      const worldOut = await worldRes.json().catch(() => null)
+      if (!worldRes.ok || worldOut?.ok === false) {
+        throw new Error(worldOut?.message || worldOut?.error || 'Could not save the World Kit.')
+      }
+      if (savePronToTemplate) {
+        const result = await appendUserRule(VOICE_RULES_ID, `Pronounce ${word} as ${alias}.`)
+        if (!result.ok) throw new Error(result.error)
+      }
+      setPronunciations(nextPronunciations)
+      setWorldKitContent(nextWorldKit)
+      setPronWord('')
+      setPronAlias('')
+      setPronMessage(savePronToTemplate ? 'Saved to World Kit and the series voice rules.' : 'Saved to this episode’s World Kit.')
+    } catch (err) {
+      setPronMessage(err instanceof Error ? err.message : 'Could not save pronunciation rule.')
+    }
+  }
   return (
-    <div className="idea-v2">
-      <h3 className="idea-q">What voice narrates this video?</h3>
-      <p className="idea-sources-caption">
-        The script is read by this voice reference. Defaults to Google TTS — swap it for any voice in the library.
-      </p>
-      <div className="voice-card">
-        <span className="voice-play">▶</span>
-        <span className="voice-meta">
-          <span className="voice-name">Google TTS · Schedar</span>
-          <span className="voice-sub">English · male · default</span>
-        </span>
-        <button className="voice-change">Change voice →</button>
+    <div className="voice-panel panel-flat">
+      <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+        <h3>Narration audio</h3>
+        <span>{activeProvider.timing}</span>
       </div>
+      <div className="voice-picker-row">
+        <label className="voice-menu-field">
+          <span className="voice-control-label">Engine</span>
+          <span className="voice-menu-anchor" ref={providerMenuRef}>
+            <button type="button" className="vp-menu-btn voice-menu-btn" onClick={() => setProviderMenu((v) => !v)}>
+              {activeProvider.name}{provider === currentDefaultProvider ? ' · default' : ''} ▾
+            </button>
+            {providerMenu ? (
+              <>
+                <span className="vp-menu-backdrop" onClick={() => setProviderMenu(false)} />
+                <span
+                  className="vp-menu voice-provider-menu"
+                  style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, minWidth: 260 }}
+                >
+                  <span className="vp-menu-h">ENGINE</span>
+                  {providers.map((p) => (
+                    <button key={p.id} type="button" onClick={() => selectProvider(p.id)}>
+                      <span className="voice-provider-menu-main">
+                        {p.name}{p.id === currentDefaultProvider ? ' · default' : ''}
+                      </span>
+                      <span>{p.detail}</span>
+                    </button>
+                  ))}
+                </span>
+              </>
+            ) : null}
+          </span>
+        </label>
+        <label className="voice-speed-control">
+          <span className="voice-control-label">Speed</span>
+          <input
+            className="sleek-range"
+            type="range"
+            min={minSpeed}
+            max={maxSpeed}
+            step="0.1"
+            value={speed}
+            onInput={(e) => updateSpeed(e.currentTarget.value)}
+            onChange={(e) => updateSpeed(e.currentTarget.value)}
+            style={{ '--fill': speedFill } as CSSProperties}
+          />
+          <span className="voice-speed-value">
+            <b>{speed.toFixed(1)}x</b>
+            {speedChangedFromDefault ? (
+              <button type="button" className="vp-undo" onClick={() => setCurrentDefaultSpeed(speed)}>
+                Set as default
+              </button>
+            ) : null}
+          </span>
+        </label>
+      </div>
+      <div className="voice-list">
+        {visibleVoices.map((voice) => (
+          <div
+            key={voice.id}
+            role="button"
+            tabIndex={0}
+            className={`voice-row ${activeVoice?.id === voice.id ? 'on' : ''}`}
+            onClick={() => setVoiceId(voice.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setVoiceId(voice.id)
+              }
+            }}
+          >
+            <span className="voice-row-main">
+              <span className="voice-row-title">
+                <b>{voice.name}</b>
+                {voice.id === currentDefaultVoice ? <span className="voice-default">Default</span> : null}
+                {activeVoice?.id === voice.id && voice.id !== currentDefaultVoice ? (
+                  <button
+                    type="button"
+                    className="vp-undo"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCurrentDefaultVoice(voice.id)
+                    }}
+                  >
+                    Set as default
+                  </button>
+                ) : null}
+              </span>
+              <small>{voice.value}</small>
+            </span>
+            <span className="voice-row-detail">
+              {voice.detail}
+            </span>
+            {voice.demo ? (
+              <audio
+                controls
+                preload="none"
+                src={voice.demo}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="voice-demo-empty">demo not loaded</span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="voice-selected">
+        <span className="id">{activeVoice?.value}</span>
+        <span>{speed.toFixed(1)}x</span>
+        <span>{provider === 'edge' ? 'word timings will be aligned after audio generation' : 'word timings are expected from the provider'}</span>
+      </div>
+      <div className="voice-pron">
+        <div className="voice-pron-head">
+          <span>
+            <b>Pronunciation rules</b>
+            <small>Saved to the World Kit. Template rules are visible in Project Wiki.</small>
+          </span>
+          <a className="vp-undo" href="/p/dev-log-12/rules?focus=voice">Open voice rules →</a>
+        </div>
+        <div className="voice-pron-rules">
+          {Object.keys(pronunciations).length ? (
+            Object.entries(pronunciations).map(([word, alias]) => (
+              <span key={word} className="voice-pron-chip">
+                <b>{word}</b>
+                <small>{alias}</small>
+              </span>
+            ))
+          ) : (
+            <span className="voice-demo-empty">No episode pronunciation rules yet.</span>
+          )}
+        </div>
+        <div className="voice-pron-add">
+          <label>
+            <span>Written term</span>
+            <input value={pronWord} onChange={(e) => setPronWord(e.target.value)} placeholder="AI" />
+          </label>
+          <label>
+            <span>Spoken as</span>
+            <input value={pronAlias} onChange={(e) => setPronAlias(e.target.value)} placeholder="ay eye" />
+          </label>
+          <label className="voice-pron-check">
+            <input
+              type="checkbox"
+              checked={savePronToTemplate}
+              onChange={(e) => setSavePronToTemplate(e.target.checked)}
+            />
+            <span>Save to series voice rules too</span>
+          </label>
+          <button type="button" className="vp-undo" onClick={addPronunciationRule}>Add rule</button>
+        </div>
+        {seriesPronunciationText ? (
+          <details className="voice-pron-existing">
+            <summary>Existing template pronunciation guidance</summary>
+            <p>{seriesPronunciationText}…</p>
+          </details>
+        ) : null}
+        {pronMessage ? <p className="voice-error">{pronMessage}</p> : null}
+      </div>
+      <div className="voice-runbar">
+        <button className="save-continue" type="button" onClick={() => generateAudio()} disabled={activeProcess}>
+          {activeProcess ? (<><span className="spin" /> Generating audio…</>) : 'Generate narration audio'}
+        </button>
+        <span className="voice-run-progress">
+          <span className="voice-run-status">
+            {progress.total ? `${progress.done}/${progress.total} audio chunks generated` : 'Waiting for shot-list chunks'}
+          </span>
+          {progress.total ? (
+            <span className={`progress ${audioComplete ? 'done' : ''}`}>
+              <i style={{ width: `${progressPct}%` }} />
+            </span>
+          ) : null}
+        </span>
+      </div>
+      {audioChunks.length ? (
+        <div className="voice-audio-list">
+          <div className="voice-audio-head">
+            <b>Generated audio chunks</b>
+            <span>{progress.done}/{progress.total}</span>
+            <button
+              type="button"
+              className="vp-undo"
+              onClick={() => {
+                audioExpandTouchedRef.current = true
+                setExpandedChunkIds(
+                  expandedChunkIds.length === audioChunks.length ? [] : audioChunks.map((chunk) => chunk.id),
+                )
+              }}
+            >
+              {expandedChunkIds.length === audioChunks.length ? 'Collapse all' : 'Expand all'}
+            </button>
+          </div>
+          {audioChunks.map((chunk) => {
+            const chunkRegenerating = regeneratingChunkId === chunk.id && activeProcess
+            return (
+            <details
+              className={`voice-audio-row ${chunkRegenerating ? 'regenerating' : ''}`}
+              key={chunk.id}
+              open={expandedChunkIds.includes(chunk.id)}
+              onToggle={(event) => setChunkExpanded(chunk.id, event.currentTarget.open)}
+            >
+              <summary>
+                <span className="id">{chunk.id}</span>
+                <b>{chunk.title}</b>
+                <small>{chunkRegenerating ? 'regenerating' : chunk.generated ? 'generated' : 'pending'}</small>
+              </summary>
+              {editingChunkId === chunk.id ? (
+                <div className="vp-edit voice-chunk-edit">
+                  <label className="vp-edit-field">Narration for {chunk.id}
+                    <textarea
+                      rows={4}
+                      value={chunkDraft}
+                      onChange={(e) => setChunkDraft(e.target.value)}
+                      placeholder="Rewrite the spoken narration for this chunk…"
+                    />
+                  </label>
+                  <div className="vp-ai">
+                    <input
+                      className="vp-ai-input"
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      placeholder="Ask AI how to revise this chunk, e.g. make it more layman terms but keep it accurate"
+                    />
+                    <button
+                      type="button"
+                      className="vp-ai-btn"
+                      onClick={() => reviseChunkWithAi(chunk)}
+                      disabled={aiBusyChunkId === chunk.id}
+                    >
+                      {aiBusyChunkId === chunk.id ? 'Revising…' : '✦ AI rewrite'}
+                    </button>
+                  </div>
+                  <div className="vp-edit-actions">
+                    <button
+                      type="button"
+                      className="vp-save"
+                      disabled={savingChunkId === chunk.id}
+                      onClick={() => saveChunkNarration(chunk.id, chunkDraft)}
+                    >
+                      {savingChunkId === chunk.id ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      className="vp-save"
+                      disabled={savingChunkId === chunk.id || activeProcess}
+                      onClick={async () => {
+                        const ok = await saveChunkNarration(chunk.id, chunkDraft)
+                        if (ok) await generateAudio(chunk.id)
+                      }}
+                    >
+                      {savingChunkId === chunk.id ? 'Saving…' : chunkRegenerating ? (<><span className="spin" /> Regenerating…</>) : 'Save + regenerate audio'}
+                    </button>
+                    <button
+                      type="button"
+                      className="vp-cancel"
+                      onClick={() => {
+                        setEditingChunkId(null)
+                        setChunkDraft('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {chunkMessages[chunk.id] ? <p className="voice-chunk-note">{chunkMessages[chunk.id]}</p> : null}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="voice-audio-script"
+                  onClick={() => startChunkEdit(chunk)}
+                  title="Click to edit this chunk’s narration"
+                >
+                  “{chunk.narration}”
+                </button>
+              )}
+              <div className="voice-audio-actions">
+                {chunk.generated ? (
+                  <audio
+                    key={`${chunk.id}-${audioVersions[chunk.id] || 0}`}
+                    className={chunkRegenerating ? 'disabled' : ''}
+                    controls
+                    preload="none"
+                    src={audioSrc(chunk.id)}
+                    aria-disabled={chunkRegenerating}
+                  />
+                ) : <span className="voice-demo-empty">audio not generated yet</span>}
+                <button
+                  type="button"
+                  className="vp-undo"
+                  disabled={activeProcess}
+                  onClick={() => generateAudio(chunk.id)}
+                >
+                  {chunkRegenerating ? (<><span className="spin" /> Regenerating…</>) : 'Regenerate this chunk'}
+                </button>
+              </div>
+            </details>
+            )
+          })}
+        </div>
+      ) : null}
+      {runError ? <p className="voice-error">Engine: {runError}</p> : null}
     </div>
   )
 }
@@ -1258,7 +2100,9 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
             style={rowBtn}
             onClick={() => (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') (r.jump ? r.jump() : setOpen((o) => (o === r.id ? null : r.id)))
+              if (e.key !== 'Enter' && e.key !== ' ') return
+              if (r.jump) r.jump()
+              else setOpen((o) => (o === r.id ? null : r.id))
             }}
           >
             <span style={{ width: 150, flexShrink: 0, color: 'var(--ink-2)' }}>{r.label}</span>

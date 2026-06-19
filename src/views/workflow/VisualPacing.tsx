@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { sceneFiles, shots } from '../../data/cast'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { visualPacingPlan, type VPOverlay } from '../../data/demo-shots'
-import { asset } from '../../lib/assets'
 
 // Shot-List (step 08): read-only, hierarchical chunk → beat → image view that
 // mirrors shot-list.json (base_layer + overlay_layer). It reads the confirmed pacing plan
@@ -53,32 +51,126 @@ export function ShotListPanel() {
 }
 
 export function VisualGallery() {
-  let imageIndex = 0
-  const counts = {
-    ready: shots.filter((shot) => shot[4] === 'ok').length,
-    generating: shots.filter((shot) => shot[4] === 'work').length,
-    pending: shots.filter((shot) => shot[4] === 'pend').length,
+  type VisualPrompt = { id: string; scene: string; hold: string; prompt: string }
+  type ShotListChunk = { id: string; scene_title?: string; summary?: string }
+  type ShotListEvent = {
+    id?: string
+    pacing_image_id?: string
+    chunk_id?: string
+    duration_s?: number
+    start_s?: number
+    end_s?: number
+    visual_direction?: string
+    prompt?: string
+    image_prompt?: string
+  }
+  type ShotListJson = { chunks?: ShotListChunk[]; base_layer?: ShotListEvent[] }
+  const [prompts, setPrompts] = useState<VisualPrompt[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchSize, setBatchSize] = useState(4)
+  const [uploads, setUploads] = useState<Record<string, string>>({})
+  const [queueNotice, setQueueNotice] = useState('')
+  useEffect(() => {
+    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!out?.ok || !out.data?.content) return
+        const parsed = JSON.parse(out.data.content) as ShotListJson
+        const chunks = new Map((parsed.chunks ?? []).map((chunk) => [chunk.id, chunk]))
+        const rows = (parsed.base_layer ?? []).map((event) => {
+          const chunk = chunks.get(event.chunk_id || '')
+          const duration = Number(event.duration_s ?? Math.max(0, Number(event.end_s ?? 0) - Number(event.start_s ?? 0)))
+          return {
+            id: String(event.id || event.pacing_image_id || event.chunk_id),
+            scene: String(chunk?.scene_title || chunk?.summary || event.chunk_id || 'Visual prompt'),
+            hold: duration > 0 ? `${duration.toFixed(1)}s` : '',
+            prompt: String(event.visual_direction || event.prompt || event.image_prompt || ''),
+          }
+        }).filter((row: VisualPrompt) => row.id && row.prompt)
+        setPrompts(rows)
+        setSelected(new Set(rows.slice(0, Math.min(4, rows.length)).map((row: VisualPrompt) => row.id)))
+      })
+      .catch(() => {})
+  }, [])
+  const updatePrompt = (id: string, prompt: string) =>
+    setPrompts((prev) => prev.map((p) => (p.id === id ? { ...p, prompt } : p)))
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const selectNext = () => {
+    const nextIds = prompts.slice(0, Math.max(1, batchSize)).map((p) => p.id)
+    setSelected(new Set(nextIds))
   }
   return (
-    <div className="card">
+    <div className="visual-gen panel-flat">
       <div className="gal-bar">
-        <span><i className="dot ok" />{counts.ready} ready</span>
-        <span><i className="dot work" />{counts.generating} generating</span>
-        <span><i className="dot pend" />{counts.pending} pending</span>
-        <b>22 visuals total · anime · soft</b>
+        <span>{prompts.length} prompts from shot-list JSON</span>
+        <b>review before generation</b>
       </div>
-      <div className="gallery">
-        {shots.map(([id, scene, , , state]) => {
-          const file = state === 'ok' ? sceneFiles[imageIndex++ % sceneFiles.length] : ''
+      {!prompts.length ? (
+        <p className="vp-hint" style={{ marginBottom: 14 }}>
+          No visual prompts found yet. Compile the shot list first, then come back here.
+        </p>
+      ) : null}
+      <div className="vg-toolbar">
+        <label>
+          Generate count
+          <input
+            type="number"
+            min="1"
+            max={prompts.length}
+            value={batchSize}
+            onChange={(e) => setBatchSize(Number(e.target.value) || 1)}
+          />
+        </label>
+        <button type="button" className="vp-undo" onClick={selectNext}>Select next</button>
+        <button
+          type="button"
+          className="vp-undo"
+          disabled={selected.size === 0}
+          onClick={() => setQueueNotice(`${selected.size} prompt${selected.size === 1 ? '' : 's'} selected for generation.`)}
+        >
+          Generate selected ({selected.size})
+        </button>
+        {queueNotice ? <span className="vg-note">{queueNotice}</span> : null}
+      </div>
+      <div className="vg-list">
+        {prompts.map((item) => {
+          const { id, scene } = item
           return (
-            <div className="gcard" key={id}>
-              <div className={`img ${state}`}>
-                {file ? <img src={asset(`sessions/spoolcast-dev-log-04/source/generated-assets/scenes/${file}`)} alt="" /> : null}
-                <span className="badge">{id}</span>
-                <span className={`st ${state}`}>{state === 'ok' ? 'Ready' : state === 'work' ? 'Generating' : 'Pending'}</span>
-                <div className="scene">{scene}</div>
+            <section className={`vg-row ${selected.has(id) ? 'on' : ''}`} key={id}>
+              <label className="vg-select">
+                <input type="checkbox" checked={selected.has(id)} onChange={() => toggle(id)} />
+                <span className="id">{id}</span>
+              </label>
+              <div className="vg-prompt">
+                <div className="vg-prompt-head">
+                  <b>{scene}</b>
+                  <span>{item.hold}</span>
+                </div>
+                <textarea
+                  value={item.prompt}
+                  onChange={(e) => updatePrompt(id, e.target.value)}
+                  rows={3}
+                  spellCheck={false}
+                />
+                <div className="vg-row-actions">
+                  <label className="vp-undo">
+                    {uploads[id] ? uploads[id] : 'Upload asset'}
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={(e) => setUploads((prev) => ({ ...prev, [id]: e.target.files?.[0]?.name || '' }))}
+                    />
+                  </label>
+                  {uploads[id] ? <button type="button" className="vp-undo" onClick={() => setUploads((prev) => ({ ...prev, [id]: '' }))}>Clear upload</button> : null}
+                </div>
               </div>
-            </div>
+            </section>
           )
         })}
       </div>
@@ -108,6 +200,7 @@ type VPEditDraft = {
 export function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
   const [plan, setPlan] = useState<VPPlan>(() => structuredClone(visualPacingPlan))
   const [history, setHistory] = useState<VPPlan[]>([])
+  const [redoHistory, setRedoHistory] = useState<VPPlan[]>([])
   const [menu, setMenu] = useState<{ x: number; y: number; chunkId: string; imageId?: string } | null>(null)
   const [editing, setEditing] = useState<VPEditDraft | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
@@ -124,18 +217,24 @@ export function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
   // Flatten to a timeline: each image laid end-to-end, width ∝ its hold time, so
   // every block boundary is a visual change. Each block carries its chunk + beat
   // context so hovering it can scrub the full moment into the detail strip.
-  let cursor = 0
-  const images = plan.chunks.flatMap((chunk) =>
-    chunk.beats.flatMap((beat) =>
-      beat.images.map((img) => {
-        const holdSec = parseInt(img.hold, 10) || 0
-        const start = cursor
-        cursor += holdSec
-        return { ...img, chunk: chunk.id, chunkTitle: chunk.title, narration: beat.narration, beatRange: beat.range, holdSec, start }
+  const { images, totalSec } = useMemo(() => {
+    const flatImages = plan.chunks.flatMap((chunk) =>
+      chunk.beats.flatMap((beat) =>
+        beat.images.map((img) => {
+          const holdSec = parseInt(img.hold, 10) || 0
+          return { ...img, chunk: chunk.id, chunkTitle: chunk.title, narration: beat.narration, beatRange: beat.range, holdSec }
+        }),
+      ),
+    )
+    const timeline = flatImages.reduce(
+      (acc, img) => ({
+        images: [...acc.images, { ...img, start: acc.total }],
+        total: acc.total + img.holdSec,
       }),
-    ),
-  )
-  const totalSec = cursor || 1
+      { images: [] as ((typeof flatImages)[number] & { start: number })[], total: 0 },
+    )
+    return { images: timeline.images, totalSec: timeline.total || 1 }
+  }, [plan])
   const [activeId, setActiveId] = useState(images[0]?.id ?? '')
 
   if (blankProject) {
@@ -184,12 +283,22 @@ export function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
   // Every mutation snapshots the prior plan so Undo can step back through edits.
   const mutate = (updater: (p: VPPlan) => VPPlan) => {
     setHistory((h) => [...h, plan].slice(-50))
+    setRedoHistory([])
     setPlan(updater(plan))
   }
   const undo = () => {
     if (history.length === 0) return
+    setRedoHistory((h) => [...h, plan].slice(-50))
     setPlan(history[history.length - 1])
     setHistory((h) => h.slice(0, -1))
+    setEditing(null)
+    setMenu(null)
+  }
+  const redo = () => {
+    if (redoHistory.length === 0) return
+    setHistory((h) => [...h, plan].slice(-50))
+    setPlan(redoHistory[redoHistory.length - 1])
+    setRedoHistory((h) => h.slice(0, -1))
     setEditing(null)
     setMenu(null)
   }
@@ -403,6 +512,9 @@ export function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
         <p className="vp-hint">Hover a block to inspect · right-click a block or chunk to edit, add, or remove</p>
         <button type="button" className="vp-undo" onClick={undo} disabled={history.length === 0}>
           ↶ Undo{history.length ? ` (${history.length})` : ''}
+        </button>
+        <button type="button" className="vp-undo" onClick={redo} disabled={redoHistory.length === 0}>
+          ↷ Redo{redoHistory.length ? ` (${redoHistory.length})` : ''}
         </button>
       </div>
 

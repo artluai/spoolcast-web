@@ -6,9 +6,9 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
   const stages = (explainerContract as { stages: StageContract[] }).stages
   // Node positions, in final main-line order. World Kit (05) sits between
   // Structure outline (04) and Screenplay (06); Visual pacing (07) sits between
-  // Screenplay and Storyboard (08). Both are real contract stages now, so the
+  // Screenplay and Compile Shot List (08). Both are real contract stages now, so the
   // graph comes straight from the contract — narration_voice_check is the only
-  // stage folded out of the visual map (its audit runs inside Storyboard).
+  // stage folded out of the visual map (its audit runs inside Compile Shot List).
   const positions = [
     [30, 110], // 01 Project setup
     [288, 110], // 02 Video idea
@@ -17,7 +17,7 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
     [1014, 110], // 05 World Kit
     [1272, 110], // 06 Screenplay
     [1530, 110], // 07 Visual pacing
-    [1788, 110], // 08 Storyboard
+    [1788, 110], // 08 Compile Shot List
     [2046, 60], // 09 Narration audio
     [2046, 160], // 10 Visual generation
     [2304, 160], // 11 Visual review
@@ -48,7 +48,20 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
       } else if (blank) {
         status = 'later'
       }
-      const progress = alias.id === 'pics' && !blank ? { done: 14, total: 22 } : undefined
+      const progress =
+        alias.id === 'voice' && apiStatusData?.uiProgress?.narrationAudio
+          ? apiStatusData.uiProgress.narrationAudio
+          : alias.id === 'pics' && apiStatusData?.uiProgress?.visualAssets
+            ? apiStatusData.uiProgress.visualAssets
+            : undefined
+      if (
+        progress
+        && Number(progress.total || 0) > 0
+        && Number(progress.done || 0) < Number(progress.total || 0)
+        && status === 'done'
+      ) {
+        status = Number(progress.done || 0) > 0 ? 'work' : 'later'
+      }
       const [x, y] = positions[index]
       return {
         id: alias.id,

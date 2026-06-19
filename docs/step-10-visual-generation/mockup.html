@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Step 10 — Visual generation (design mockup)</title>
+<style>
+  :root{
+    --bg:#0a0c12; --bg-2:#0e1118; --panel:#11151f; --line:#222838; --line-2:#2b3346;
+    --ink:#e6e9f0; --ink-2:#9aa3b5; --ink-3:#6b7385; --ink-4:#566075;
+    --accent:#7aa2ff; --accent-ink:#cdd9ff; --accent-bg:rgba(122,162,255,.10);
+    --green:#36c98c; --teal:#9fe1cb; --amber:#e0a338;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-2);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:28px 16px}
+  .wrap{max-width:760px;margin:0 auto}
+  .note{color:var(--ink-3);font-size:12px;margin:0 2px 8px;font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+  .panel{background:var(--bg);border:.5px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:30px}
+  .ch{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .ch h3{margin:0;font-size:16px;font-weight:500}
+  .ch .src{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+  .bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:11px 0;border-bottom:1px solid var(--line)}
+  .cb{width:14px;height:14px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+  .cb.on{background:var(--accent);color:#071021}
+  .cb.off{border:1px solid #36506a}
+  .sel{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;color:var(--ink-2);cursor:pointer}
+  .mono{font-family:var(--mono)}
+  .btn{display:inline-flex;align-items:center;gap:6px;border-radius:7px;cursor:pointer;white-space:nowrap;font-family:var(--mono);font-size:11px}
+  .btn.ghost{background:#161a24;border:1px solid var(--line-2);color:var(--ink-2);padding:6px 11px}
+  .btn.mini{background:#161a24;border:1px solid var(--line-2);color:var(--ink-2);padding:5px 11px;font-size:10px}
+  .btn.primary{border:1px solid var(--accent);background:var(--accent);color:#071021;font-weight:500;font-size:12px;font-family:inherit;padding:7px 13px}
+  .btn.image{border:1px solid var(--accent);background:var(--accent-bg);color:var(--accent-ink);padding:6px 12px}
+  .btn.video{border:1px solid var(--teal);background:rgba(159,225,203,.08);color:#cfeee0;padding:6px 12px}
+  .btn.regen{background:#1b2030;border:1px solid var(--accent);color:var(--accent-ink);padding:7px 11px}
+  .divider{width:1px;height:16px;background:var(--line-2)}
+  .pill{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;border-radius:5px;padding:2px 8px;border:1px solid var(--line-2);color:var(--ink-3)}
+  .pill.green{color:var(--green);border-color:rgba(54,201,140,.3);background:rgba(54,201,140,.08)}
+  .pill.teal{color:var(--teal);border-color:#2b5e4c;background:rgba(159,225,203,.08)}
+  .pill.amber{color:var(--amber);border-color:rgba(224,163,56,.3);background:rgba(224,163,56,.08);display:inline-flex;align-items:center;gap:7px}
+  .type{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:3px 7px}
+  .type.image{color:var(--accent);border:1px solid #2b3a5e}
+  .type.video{color:var(--teal);border:1px solid #2b5e4c}
+  .meta{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+  .row{padding:14px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .row.sel-on{background:linear-gradient(90deg,rgba(122,162,255,.07),transparent 55%)}
+  .rhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .rid{font-family:var(--mono);font-size:12px}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:12px}
+  .prompt{flex:1;border:1px solid var(--line-2);border-radius:8px;background:var(--panel);padding:10px 11px;font-family:var(--mono);font-size:11px;line-height:1.55;color:var(--ink-2);max-height:118px;overflow:auto}
+  .col{display:flex;flex-direction:column}
+  .acts{display:flex;gap:8px;margin-top:9px}
+  .prev{aspect-ratio:9/16;max-height:118px;border-radius:8px;border:.5px solid var(--line);display:flex;align-items:center;justify-content:center}
+  .prev.empty{background:#10131c;border:1px dashed var(--line-2);color:var(--ink-4);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+  .prev.busy{background:#10131c;color:var(--amber);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;gap:7px}
+  .refs{display:flex;gap:6px}
+  .ref{flex:1}
+  .ref .thumb{aspect-ratio:1;border-radius:6px;border:.5px solid var(--line-2)}
+  .ref .add{aspect-ratio:1;border-radius:6px;border:1px dashed #36506a;display:flex;align-items:center;justify-content:center;color:var(--ink-4);cursor:pointer}
+  .ref .cap{margin-top:3px;text-align:center;font-family:var(--mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+  .ref .cap.frame{color:var(--teal)}
+  .ref .cap.muted{color:var(--ink-4)}
+  .spin{width:10px;height:10px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;display:inline-block;animation:sp 1s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .menuwrap{position:relative;display:inline-block}
+  .menu{position:absolute;top:calc(100% + 5px);left:0;width:300px;background:var(--panel);border:1px solid var(--line-2);border-radius:9px;padding:5px;z-index:5}
+  .menu-h{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);padding:6px 9px 5px}
+  .menu button{display:flex;width:100%;align-items:center;gap:8px;text-align:left;background:transparent;border:none;color:var(--ink);border-radius:6px;padding:8px 9px;font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit}
+  .menu button:hover{background:#161a24}
+  .menu .lbl{flex:1}
+  .menu .tag{flex:none;font-family:var(--mono);font-size:9px;color:var(--ink-3)}
+  .menu .tag.switch{color:var(--teal);border:1px solid #2b5e4c;border-radius:4px;padding:2px 6px}
+  .menu .sep{display:block;height:1px;background:var(--line);margin:5px 4px}
+  .empty{text-align:center;padding:26px 10px 22px}
+  .empty .badge{display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:12px;background:var(--panel);border:.5px solid var(--line);margin-bottom:14px;font-size:22px;color:var(--accent)}
+  .empty .t{margin:0 0 4px;font-size:15px}
+  .empty .s{margin:0 auto 16px;max-width:440px;font-size:12.5px;line-height:1.55;color:var(--ink-3)}
+  .empty .credits{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin:7px 0 18px}
+  .seg{display:inline-flex;background:var(--panel);border:1px solid var(--line-2);border-radius:9px;padding:3px}
+  .seg span,.seg button{display:inline-flex;align-items:center;gap:6px;border-radius:7px;padding:6px 13px;font-family:var(--mono);font-size:11px;cursor:pointer;background:transparent;border:1px solid transparent;color:var(--ink-2)}
+  .seg .active{background:var(--accent-bg);border:1px solid var(--accent);color:var(--accent-ink)}
+  .seg .ttag{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);border:1px solid #2b3a5e;border-radius:4px;padding:1px 5px;margin-left:2px}
+  .lock{margin:16px auto 0;max-width:440px;font-size:12px;line-height:1.55;color:var(--ink-4)}
+  .skel{opacity:.4}
+  .skel .sk{height:96px;border:1px dashed var(--line);border-radius:8px;background:#0d111a}
+  .progress{display:inline-flex;align-items:center;gap:8px}
+  .progress .track{width:84px;height:5px;border-radius:3px;background:#1b2030;overflow:hidden;display:inline-block}
+  .progress .track i{display:block;height:100%;background:var(--green)}
+  .viewtoggle{display:inline-flex;background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:3px}
+  .viewtoggle button{background:transparent;border:1px solid transparent;color:var(--ink-2);border-radius:6px;padding:5px 13px;font-family:var(--mono);font-size:11px;cursor:pointer}
+  .viewtoggle .active{background:var(--accent-bg);border:1px solid var(--accent);color:var(--accent-ink)}
+  .gal{display:grid;gap:12px;margin-top:14px}
+  .gal.v{grid-template-columns:repeat(3,1fr)}
+  .gal.w{grid-template-columns:repeat(2,1fr)}
+  .tile{position:relative;border:1px solid var(--line-2);border-radius:10px;overflow:hidden;background:var(--panel)}
+  .tile.sel{border-color:var(--accent)}
+  .tile.todo{border:1px dashed var(--line-2);background:#10131c}
+  .tid{position:absolute;top:7px;left:8px;font-family:var(--mono);font-size:10px;color:var(--ink);text-shadow:0 1px 2px #000}
+  .tcheck{position:absolute;top:7px;right:8px;width:16px;height:16px;border-radius:4px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#071021;font-size:11px}
+  .tvid{position:absolute;top:7px;right:8px;font-family:var(--mono);font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);background:rgba(10,12,18,.66);border-radius:4px;padding:2px 6px}
+  .tcap{position:absolute;left:0;right:0;bottom:0;padding:7px 9px;background:linear-gradient(transparent,rgba(10,12,18,.82));font-family:var(--mono);font-size:9px;color:var(--ink-2)}
+  .tbusy{display:flex;align-items:center;justify-content:center;gap:7px;color:var(--amber);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+  .ttodo{display:flex;align-items:center;justify-content:center;color:var(--ink-4);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+  .play{width:36px;height:36px;border-radius:50%;background:rgba(10,12,18,.55);border:1px solid var(--teal);display:flex;align-items:center;justify-content:center;color:#cfeee0;font-size:15px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="note">State A — empty start (type default comes from the format template)</p>
+  <section class="panel">
+    <div class="ch"><h3>Visual generation</h3><span class="src">no prompts yet</span></div>
+    <div class="empty">
+      <div class="badge">✦</div>
+      <p class="t">Turn the shot list into generation prompts</p>
+      <p class="s">AI writes one full prompt per shot. Your format template already sets the default — just generate, or change it below.</p>
+      <div><button class="btn primary" style="padding:10px 20px;font-size:13px">✦ Generate prompts as images</button></div>
+      <div class="credits">uses model credits · 14 shots</div>
+      <div class="seg" role="group" aria-label="Default prompt type">
+        <span class="mono" style="color:var(--ink-3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding-right:4px;background:none;border:none">Default</span>
+        <span class="active">Images <span class="ttag">template</span></span>
+        <button>Videos</button>
+        <button>Let AI choose</button>
+      </div>
+      <p class="lock">ⓘ Not locked in — switch any prompt's type afterward, or animate images into video later. Change the default here to update it for every new project on this template.</p>
+    </div>
+    <div class="skel" style="border-top:1px solid var(--line)">
+      <div class="row"><div class="rhead"><span class="cb off"></span><span style="width:30px;height:9px;border-radius:3px;background:#1b2030"></span><span style="width:54px;height:14px;border-radius:4px;background:#1b2030"></span></div><div class="grid"><div class="sk"></div><div class="sk"></div></div></div>
+      <div class="row" style="border-bottom:none"><div class="rhead"><span class="cb off"></span><span style="width:30px;height:9px;border-radius:3px;background:#1b2030"></span><span style="width:54px;height:14px;border-radius:4px;background:#1b2030"></span></div><div class="grid"><div class="sk"></div><div class="sk"></div></div></div>
+    </div>
+  </section>
+
+  <p class="note">State B — working panel (all generation states across rows)</p>
+  <section class="panel">
+    <div class="ch"><h3>Visual generation — 14 prompts · 9 images · 2 videos</h3>
+      <span style="display:flex;align-items:center;gap:12px">
+        <span class="viewtoggle"><button class="active">Prompts</button><button>Gallery</button></span>
+        <span class="src">generation-prompts.json</span>
+      </span>
+    </div>
+
+    <div class="bar">
+      <label class="sel"><span class="cb on">✓</span> 4 selected</label>
+      <button class="btn mini">Select all</button>
+      <span class="divider"></span>
+      <button class="btn primary">▶ Generate selected</button>
+      <div class="menuwrap">
+        <button class="btn regen">✦ Regenerate prompts ▾</button>
+      </div>
+      <span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px">
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="meta" style="text-transform:uppercase;letter-spacing:.08em">Image</span><button class="btn mini">Nano Banana 2 ▾</button></span>
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="meta" style="text-transform:uppercase;letter-spacing:.08em">Video</span><button class="btn mini">Veo 3.1 ▾</button></span>
+      </span>
+    </div>
+
+    <div class="row sel-on">
+      <div class="rhead"><span class="cb on">✓</span><span class="rid">I01</span><span class="type image">Image</span><span class="meta">9:16 · 720p</span><span class="pill" style="margin-left:auto">Not run</span></div>
+      <div class="grid">
+        <div class="col">
+          <div class="prompt">{"duration":7,"aspect_ratio":"9:16","prompt":"Modern high-energy shonen anime, vertical 9:16. Crisp linework, hard cel shadows, single continuous shot. The founder hurls glowing money-bricks into a roaring furnace…","resolution":"720p","reference_image_urls":["char-musk.png","bg-ai-furnace-chamber.png"]}</div>
+          <div class="acts"><button class="btn image">Generate image</button><button class="btn ghost">✦ Regenerate prompt ▾</button></div>
+        </div>
+        <div class="col" style="gap:7px">
+          <div class="prev empty">no image</div>
+          <div class="refs">
+            <div class="ref"><div class="thumb" style="background:linear-gradient(135deg,#2a2440,#42345e)"></div><div class="cap">Ref ▾</div></div>
+            <div class="ref"><div class="thumb" style="background:linear-gradient(135deg,#16263a,#1f4a5e)"></div><div class="cap">Ref ▾</div></div>
+            <div class="ref"><div class="add">+</div><div class="cap muted">Add</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rhead"><span class="cb off"></span><span class="rid">I02</span><span class="type image">Image</span><span class="meta">9:16 · 720p</span><span class="pill green" style="margin-left:auto">Image ready</span></div>
+      <div class="grid">
+        <div class="col">
+          <div class="prompt">{"duration":5,"aspect_ratio":"9:16","prompt":"Same shonen style. Tight close-up of the CFO doing a double-take at a magnified invoice, exaggerated brow, sweat-drop, one clean focal point…","resolution":"720p","reference_image_urls":["char-cfo.png"]}</div>
+          <div class="acts"><button class="btn ghost">↻ Regenerate image</button><button class="btn video">▶ Video from image</button></div>
+        </div>
+        <div class="col" style="gap:7px">
+          <div class="prev" style="background:linear-gradient(150deg,#3a2433,#7a3a22)"></div>
+          <div class="refs">
+            <div class="ref"><div class="thumb" style="background:linear-gradient(135deg,#3a2a16,#5e431f)"></div><div class="cap">Ref ▾</div></div>
+            <div class="ref"><div class="add">+</div><div class="cap muted">Add</div></div>
+            <div class="ref"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rhead"><span class="cb off"></span><span class="rid">I03</span><span class="type image">Image</span><span class="meta">9:16 · 720p</span><span class="pill amber" style="margin-left:auto"><span class="spin"></span> Generating</span></div>
+      <div class="grid">
+        <div class="col" style="opacity:.5">
+          <div class="prompt" style="max-height:90px">{"duration":5,"aspect_ratio":"9:16","prompt":"Slow reveal of a glowing metrics dashboard, numbers climbing, cool blue UI glow against a dim room…","resolution":"720p"}</div>
+        </div>
+        <div class="prev busy" style="display:flex;align-items:center;justify-content:center"><span class="spin"></span> Rendering</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rhead"><span class="cb on">✓</span><span class="rid">I04</span><span class="type video">Video</span><span class="meta">9:16 · 720p · 7s</span><span class="pill" style="margin-left:auto">Not run</span></div>
+      <div class="grid">
+        <div class="col">
+          <div class="prompt">{"duration":7,"aspect_ratio":"9:16","generate_audio":false,"prompt":"Single continuous shot, one location, hold one camera. His repeated heaving throws and recoil from the heat are the foreground action; furnace roars in front, restrained embers…","resolution":"720p","reference_image_urls":["char-musk.png","bg-ai-furnace-chamber.png"]}</div>
+          <div class="acts"><button class="btn video">▶ Generate video</button><button class="btn ghost">✦ Regenerate prompt ▾</button></div>
+        </div>
+        <div class="col" style="gap:7px">
+          <div class="prev empty">no video</div>
+          <div class="refs">
+            <div class="ref"><div class="thumb" style="background:linear-gradient(135deg,#2a2440,#42345e)"></div><div class="cap">Ref ▾</div></div>
+            <div class="ref"><div class="thumb" style="background:linear-gradient(135deg,#16263a,#1f4a5e);border:1px solid var(--teal)"></div><div class="cap frame">Frame 1 ▾</div></div>
+            <div class="ref"><div class="add">+</div><div class="cap muted">Add</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="rhead"><span class="cb off"></span><span class="rid">I05</span><span class="type video">Video</span><span class="meta">9:16 · 720p · 4.5s · from image</span><span class="pill teal" style="margin-left:auto">Video ready</span></div>
+      <div class="grid">
+        <div class="col">
+          <div class="prompt">{"duration":4.5,"aspect_ratio":"9:16","prompt":"Animate the CFO double-take still — subtle head recoil, blinking, sweat-drop slides; hold the framing, no camera move…","resolution":"720p","first_frame":"I02.png"}</div>
+          <div class="acts"><button class="btn ghost">↻ Regenerate video</button><button class="btn ghost">↓ Download</button></div>
+        </div>
+        <div class="prev" style="background:linear-gradient(150deg,#3a2433,#5e2f44)"><span style="width:34px;height:34px;border-radius:50%;background:rgba(10,12,18,.55);border:1px solid var(--teal);display:flex;align-items:center;justify-content:center;color:#cfeee0;font-size:14px">▶</span></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="note">State C — batch "Regenerate prompts ▾" menu (type switch lives here)</p>
+  <section class="panel">
+    <div class="bar" style="border-top:none;border-bottom:none;padding-bottom:0">
+      <label class="sel"><span class="cb on">✓</span> All 14 selected</label>
+      <button class="btn mini">Clear</button>
+      <span class="divider"></span>
+      <button class="btn primary">Generate 14 images</button>
+      <div class="menuwrap">
+        <button class="btn regen">✦ Regenerate prompts ▾</button>
+        <div class="menu">
+          <span class="menu-h">Regenerate prompts</span>
+          <button><span style="color:var(--accent);flex:none">✦</span><span class="lbl">Rewrite as image prompts</span><span class="tag">current</span></button>
+          <button><span style="color:var(--teal);flex:none">✦</span><span class="lbl">Rewrite as <span style="color:var(--teal)">video</span> prompts</span><span class="tag switch">switch type</span></button>
+          <span class="sep"></span>
+          <button><span style="flex:none;width:13px">&nbsp;</span><span class="lbl">Regenerate with a note…</span></button>
+        </div>
+      </div>
+    </div>
+    <div style="height:150px"></div>
+  </section>
+
+  <p class="note">State D — gallery view (visuals dominate; toggled from prompts). Tiles render at the project canvas aspect: 16:9 → 2-up · 9:16 → 3-up · 1:1 → 3–4-up</p>
+  <section class="panel">
+    <div class="ch"><h3>Visual generation — 9 images · 2 videos <span class="mono" style="font-size:11px;color:var(--ink-3);font-weight:400;">· 9:16</span></h3>
+      <span class="viewtoggle"><button>Prompts</button><button class="active">Gallery</button></span>
+    </div>
+    <div class="bar">
+      <label class="sel"><span class="cb on">✓</span> 3 selected</label>
+      <button class="btn mini">Select all</button>
+      <span class="divider"></span>
+      <button class="btn video">▶ Animate 3 selected</button>
+      <span class="progress" style="margin-left:auto"><span class="track"><i style="width:78%"></i></span><span class="mono" style="font-size:10px;color:var(--ink-2)">11/14</span></span>
+    </div>
+    <div class="gal v">
+      <div class="tile sel">
+        <div style="aspect-ratio:9/16;background:linear-gradient(150deg,#3a2433,#7a3a22)"></div>
+        <span class="tid">I01</span><span class="tcheck">✓</span><div class="tcap">Builder at desk</div>
+      </div>
+      <div class="tile">
+        <div style="aspect-ratio:9/16;background:linear-gradient(150deg,#3a2433,#5e2f44);display:flex;align-items:center;justify-content:center"><span class="play">▶</span></div>
+        <span class="tid">I05</span><span class="tvid">▶ Video</span><div class="tcap">CFO reaction</div>
+      </div>
+      <div class="tile">
+        <div class="tbusy" style="aspect-ratio:9/16;background:#10131c"><span class="spin"></span> Rendering</div>
+        <span class="tid">I03</span>
+      </div>
+      <div class="tile">
+        <div style="aspect-ratio:9/16;background:linear-gradient(150deg,#16263a,#1f4a5e)"></div>
+        <span class="tid">I06</span><div class="tcap">Dashboard zoom</div>
+      </div>
+      <div class="tile sel">
+        <div style="aspect-ratio:9/16;background:linear-gradient(150deg,#2a2440,#42345e)"></div>
+        <span class="tid">I07</span><span class="tcheck">✓</span><div class="tcap">City skyline</div>
+      </div>
+      <div class="tile todo">
+        <div class="ttodo" style="aspect-ratio:9/16">not run</div>
+        <span class="tid">I08</span>
+        <button class="btn" style="position:absolute;left:8px;right:8px;bottom:8px;justify-content:center;background:rgba(20,24,34,.92);border:1px solid var(--accent);color:var(--accent-ink);padding:6px 0;font-size:10px;">Generate image</button>
+      </div>
+    </div>
+    <p style="margin:13px 0 0;font-size:11.5px;line-height:1.5;color:var(--ink-4)">Hover a tile for quick actions (animate · regenerate · download). ✓ = selected · ▶ = finished video · spinner = rendering. Click a tile to jump to its prompt. Widescreen (16:9) projects lay out 2-up.</p>
+  </section>
+
+</div>
+</body>
+</html>

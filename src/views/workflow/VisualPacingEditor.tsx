@@ -23,6 +23,7 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { useWorkflowStore } from '../../store/workflow'
+import { TimelineScroller } from './TimelineScroller'
 
 // The Visual Pacing panel, made real: the timeline/table/script views are a
 // VIEW over working/visual-pacing-plan.md (the engine's contract output for
@@ -41,6 +42,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const [history, setHistory] = useState<string[]>([])
+  const [redoHistory, setRedoHistory] = useState<string[]>([])
   const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; chunkId: string; beatCode?: string; imageId?: string } | null>(null)
   const [editing, setEditing] = useState<EditDraft | null>(null)
@@ -50,10 +52,16 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // editor registers its undo there instead of drawing its own button.
   const setStepUndo = useWorkflowStore((s) => s.setStepUndo)
   const undoRef = useRef<() => void>(() => {})
+  const redoRef = useRef<() => void>(() => {})
   useEffect(() => {
-    setStepUndo({ count: history.length, run: () => undoRef.current() })
+    setStepUndo({
+      count: history.length,
+      run: () => undoRef.current(),
+      redoCount: redoHistory.length,
+      redo: () => redoRef.current(),
+    })
     return () => setStepUndo(null)
-  }, [history.length, setStepUndo])
+  }, [history.length, redoHistory.length, setStepUndo])
   // TIMELINE EDGE DRAG: live hold overrides while dragging the boundary
   // between two images of the same beat (zero-sum — the words own the total).
   const [dragHolds, setDragHolds] = useState<Record<string, number> | null>(null)
@@ -124,7 +132,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const padPx = listOverflows ? window.innerHeight * 0.24 : 0
     const overflowing = box.scrollHeight - padPx > box.clientHeight + 2
     if (overflowing !== listOverflows) setListOverflows(overflowing)
-  })
+  }, [draft, listOverflows, view])
   const setActiveFromTimeline = (id: string) => {
     followRef.current = true
     setActiveId(id)
@@ -178,7 +186,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     return (
       <p style={{ color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
         No pacing plan yet — this step maps every narration beat to an image (what the viewer
-        sees, when it changes, how long it holds) before the storyboard is compiled.
+        sees, when it changes, how long it holds) before the shot list is compiled.
       </p>
     )
   }
@@ -191,16 +199,32 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }
   const wellFormed = plan != null && planIsWellFormed(plan)
 
-  const snapshot = () => setHistory((h) => [...h, draft].slice(-50))
+  const snapshot = () => {
+    setHistory((h) => [...h, draft].slice(-50))
+    setRedoHistory([])
+  }
   const undo = () => {
     if (history.length === 0) return
     const prev = history[history.length - 1]
+    setRedoHistory((h) => [...h, draft].slice(-50))
     setHistory((h) => h.slice(0, -1))
     setStageDraft(stageId, prev)
     setEditing(null)
     setMenu(null)
   }
+  // eslint-disable-next-line react-hooks/refs
   undoRef.current = undo
+  const redo = () => {
+    if (redoHistory.length === 0) return
+    const next = redoHistory[redoHistory.length - 1]
+    setHistory((h) => [...h, draft].slice(-50))
+    setRedoHistory((h) => h.slice(0, -1))
+    setStageDraft(stageId, next)
+    setEditing(null)
+    setMenu(null)
+  }
+  // eslint-disable-next-line react-hooks/refs
+  redoRef.current = redo
   const apply = (p: PacingPlan) => {
     snapshot()
     setStageDraft(stageId, serializePacingPlan(p))
@@ -445,6 +469,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setEditing(null)
   }
   // Latest-save ref for the document-level click-out listener.
+  // eslint-disable-next-line react-hooks/refs
   applyOrDiscardRef.current = () => {
     const d = editing
     if (!d) return
@@ -486,7 +511,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
   // --- sections (dimension lines): write resolved bounds back into the plan.
   // The last section's end is always written as 'end' so it follows runtime.
-  const writeSections = (resolved: ResolvedSection[]) => {
+  function writeSections(resolved: ResolvedSection[]) {
     const next = clone()
     const runtime = planDurationS(next)
     next.sections = resolved.map(
@@ -657,8 +682,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <span>working/visual-pacing-plan.md</span>
       </div>
 
-      <div className="vp-timeline" style={zoom > 1 ? { overflowX: 'auto', paddingBottom: 4 } : undefined}>
-       <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
+      <TimelineScroller
+        zoom={zoom}
+        setZoom={setZoom}
+        hint="Hover to inspect · right-click to edit, add, or remove · drag the edge between two blocks to rebalance their time · drag the timeline to pan when zoomed"
+      >
         {/* Row order follows video-editor convention: overlays on top, then
             the visual track, the audio (chunks), sections, and the clock. */}
         <div className="vp-tl-row">
@@ -704,6 +732,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
               return (
                 <div
                   key={`h-${img.id}`}
+                  data-no-pan
                   title={`Drag to rebalance ${img.id} ↔ ${nxt.id} (total stays ${(img.holdS + nxt.holdS).toFixed(1)}s)`}
                   onPointerDown={(e) => startHoldDrag(e, img, nxt)}
                   style={{
@@ -778,6 +807,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             {secs.slice(0, -1).map((s, k) => (
               <div
                 key={`sb-${k}`}
+                data-no-pan
                 title={`Drag to move the ${s.name} boundary (${fmtClock(s.toS)})`}
                 onPointerDown={(e) => startSecDrag(e, k)}
                 style={{
@@ -799,20 +829,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
           </div>
         </div>
-       </div>
-      </div>
-
-      <div className="vp-hintbar">
-        <p className="vp-hint">
-          Hover to inspect · right-click to edit, add, or remove · drag the edge between two
-          blocks to rebalance their time · timings are estimates until narration audio exists
-        </p>
-        <span style={{ display: 'inline-flex', gap: 8 }}>
-          <button type="button" className="vp-undo" title="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>−</button>
-          <button type="button" className="vp-undo" title="Zoom in (timeline scrolls sideways)" onClick={() => setZoom((z) => Math.min(8, z * 1.5))}>+</button>
-          <button type="button" className="vp-undo" title="Fit the whole video in view" disabled={zoom <= 1} onClick={() => setZoom(1)}>Fit</button>
-        </span>
-      </div>
+      </TimelineScroller>
 
       {editing ? (
         <div
@@ -905,7 +922,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 </div>
               ) : (
                 <p className="vp-hint" style={{ margin: '6px 0 0' }}>
-                  No file attached yet — the storyboard step requires every overlay to have a file
+                  No file attached yet — the Compile Shot List step requires every overlay to have a file
                   or an explicit skip.
                 </p>
               )}

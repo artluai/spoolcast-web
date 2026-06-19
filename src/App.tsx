@@ -27,6 +27,32 @@ import { WorkflowView } from './views/workflow/WorkflowView'
 import { WorldKitView } from './views/workflow/WorldKit'
 import { RulesView } from './views/RulesView'
 
+type ApiArtifact = {
+  stage_id?: string
+  pattern?: string
+  matches?: number
+}
+
+type ShotListBeat = { narration?: string }
+type ShotListChunk = { beats?: ShotListBeat[] }
+type ShotListData = { chunks?: ShotListChunk[] }
+type ApiStatusPayload = {
+  data?: {
+    artifacts?: ApiArtifact[]
+    uiProgress?: Record<string, unknown>
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+const countNarratedChunks = (shotList: ShotListData | null) =>
+  (shotList?.chunks || []).filter((chunk) =>
+    (chunk?.beats || []).some((beat) => String(beat?.narration || '').trim()),
+  ).length
+
+const countBaseVisuals = (shotList: { base_layer?: unknown[] } | null) =>
+  Array.isArray(shotList?.base_layer) ? shotList.base_layer.length : 0
+
 function App() {
   return (
     <BrowserRouter>
@@ -73,11 +99,52 @@ function SpoolcastApp() {
 
   // Fetch real status from local API on mount
   useEffect(() => {
+    const withUiProgress = async (statusPayload: ApiStatusPayload) => {
+      const data = statusPayload?.data
+      if (!data) return statusPayload
+      const audioArtifact = (data.artifacts || []).find(
+        (artifact) => artifact.stage_id === 'narration_audio' && artifact.pattern === 'source/audio/*.mp3',
+      )
+      const visualArtifact = (data.artifacts || []).find(
+        (artifact) => artifact.stage_id === 'visual_assets' && artifact.pattern === 'source/generated-assets/scenes/*.png',
+      )
+      let narrationTotal: number
+      let visualTotal: number
+      try {
+        const shotRes = await fetch(
+          'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json',
+        )
+        const shotOut = await shotRes.json().catch(() => null)
+        const shotList = shotOut?.data?.content ? JSON.parse(shotOut.data.content) : null
+        narrationTotal = countNarratedChunks(shotList)
+        visualTotal = countBaseVisuals(shotList)
+      } catch {
+        narrationTotal = 0
+        visualTotal = 0
+      }
+      return {
+        ...statusPayload,
+        data: {
+          ...data,
+          uiProgress: {
+            ...(data.uiProgress || {}),
+            narrationAudio: {
+              done: Number(audioArtifact?.matches || 0),
+              total: narrationTotal,
+            },
+            visualAssets: {
+              done: Number(visualArtifact?.matches || 0),
+              total: visualTotal,
+            },
+          },
+        },
+      }
+    }
     const fetchStatus = async () => {
       try {
         const response = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
         if (response.ok) {
-          const data = await response.json()
+          const data = await withUiProgress(await response.json())
           setApiStatus(data)
           // Update steps and gates with live API data to remove fake mock statuses
           setSteps(buildStepsFromContract(initialStandalone, data.data))
@@ -631,7 +698,7 @@ function SpoolcastApp() {
                             ? { stage_id: 'screenplay_plan', variant: 'listener' as string | undefined, busy: 'AI is writing the draft script from the kit…', done: 'Draft script ready.', fail: 'Script drafting failed' }
                             : sourceId === 'screenplay_plan'
                               ? { stage_id: 'visual_pacing', variant: undefined, busy: 'AI is planning the visuals from the final script…', done: 'Visual pacing plan ready.', fail: 'Visual pacing draft failed' }
-                              : { stage_id: 'shot_list_json', variant: undefined, busy: 'AI is compiling the storyboard from the pacing plan…', done: 'Storyboard built and validated.', fail: 'Storyboard build failed' }
+                              : { stage_id: 'shot_list_json', variant: undefined, busy: 'AI is compiling the shot list from the pacing plan…', done: 'Shot list built and validated.', fail: 'Shot-list build failed' }
                       useWorkflowStore.getState().setHandoff({ stageId: handoff.stage_id, label: handoff.busy })
                       ;(async () => {
                         try {

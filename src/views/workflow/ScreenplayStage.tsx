@@ -50,6 +50,8 @@ type AuditView = {
 }
 
 type Rev = { label: string; text: string }
+type ReviewNote = { severity: string; detail: string; locateDetail?: string }
+type TriageFinding = { label: string; detail: string; locateDetail?: string }
 
 /**
  * Step 6 — Screenplay as a REVISION CHAIN:
@@ -102,7 +104,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     audit: AuditView | null
     auditAt: string | null
     auditRev: number | null
-    aiNotes: { severity: string; detail: string }[] | null
+    aiNotes: ReviewNote[] | null
     aiRev: number | null
     aiVerdict: 'pass' | 'needs_work' | null
   }
@@ -406,13 +408,20 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       }
       const notes = [...(aiRev === sel && aiNotes ? aiNotes : [])]
       const nextIgnored = new Set(ignored)
-      for (const a of out.data.adjudications as { index: number; verdict: string; note: string }[]) {
+      for (const a of out.data.adjudications as { index: number; verdict: string; note?: string; summary?: string; action?: string }[]) {
         const src = codeRemaining[a.index]
         if (!src) continue
         const fp = a.verdict === 'false_positive'
+        const summary = (a.summary || a.note || '').trim()
+        const action = (a.action || '').trim()
         notes.push({
           severity: 'warning',
-          detail: `${fp ? 'Likely a false positive' : 'Confirmed'} — ${a.note} (re: “${src.detail}”)`,
+          detail: [
+            fp ? 'Likely a false alarm.' : 'Confirmed issue.',
+            summary,
+            action ? `Next step: ${action}` : '',
+          ].filter(Boolean).join(' '),
+          locateDetail: src.detail,
         })
         if (fp) nextIgnored.add(fkey(src)) // suggested ignore, reversible like any other
       }
@@ -461,7 +470,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       else next.add(k)
       return next
     })
-  const aiFindings = aiRev === sel && aiNotes ? aiNotes.map((f) => ({ label: 'ai', detail: f.detail })) : []
+  const aiFindings = aiRev === sel && aiNotes ? aiNotes.map((f) => ({ label: 'ai', detail: f.detail, locateDetail: f.locateDetail })) : []
   const triage = [...(audit ? audit.blocking : []), ...aiFindings]
   const remainingBlocking = triage.filter((f) => !ignored.has(fkey(f)))
   const ignoredBlocking = triage.filter((f) => ignored.has(fkey(f)))
@@ -473,11 +482,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const normQ = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase()
   const locate = (() => {
     if (!hoverIssue) return null
-    const f = triage.find((x) => fkey(x) === hoverIssue)
+    const f = (triage as TriageFinding[]).find((x) => fkey(x) === hoverIssue)
     if (!f) return null
     const body = displayBody(current)
     const nb = normQ(body)
-    for (const m of f.detail.matchAll(/['‘’"“”]([^'‘’"“”]{6,160})['‘’"“”]/g)) {
+    for (const m of (f.locateDetail || f.detail).matchAll(/['‘’"“”]([^'‘’"“”]{6,160})['‘’"“”]/g)) {
       const idx = nb.indexOf(normQ(m[1]))
       if (idx >= 0) return { start: idx, end: idx + m[1].length }
     }
@@ -486,9 +495,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const locateRef = useRef<HTMLSpanElement>(null)
   // The script panel scrolls ITSELF: default height shows a good chunk of
   // script with the findings still on screen, and the bottom edge is
-  // draggable (resize) to any height you like. Hover-locate scrolls inside
-  // the panel — the page never moves, so the finding stays under the cursor
-  // while the highlighted spot centers in view.
+  // draggable (resize) to any height you like. Hover-locate scrolls only
+  // inside the panel, using the currently visible slice of the panel as the
+  // target area so the page itself never jumps.
   const scriptBoxRef = useRef<HTMLDivElement>(null)
   const [scriptOverflows, setScriptOverflows] = useState(false)
   useEffect(() => {
@@ -507,12 +516,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     const box = scriptBoxRef.current
     const el = locateRef.current
     if (!locate || !box || !el) return
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
     const boxRect = box.getBoundingClientRect()
     const elRect = el.getBoundingClientRect()
-    box.scrollTo({
-      top: box.scrollTop + (elRect.top - boxRect.top) - box.clientHeight / 2 + elRect.height / 2,
-      behavior: 'smooth',
-    })
+    const visibleTop = Math.max(boxRect.top, 72)
+    const visibleBottom = Math.min(boxRect.bottom, viewportHeight - 24)
+    const visibleCenter = visibleBottom > visibleTop
+      ? visibleTop + (visibleBottom - visibleTop) / 2
+      : boxRect.top + box.clientHeight / 2
+
+    box.scrollTop = Math.max(
+      0,
+      box.scrollTop + (elRect.top + elRect.height / 2) - visibleCenter,
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoverIssue, locate?.start])
   const hoverEnter = (k: string) => setHoverIssue(k)

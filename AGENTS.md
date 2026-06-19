@@ -2,25 +2,53 @@
 
 Guidance for AI agents (Codex, Claude, etc.) working in this repo.
 
-`spoolcast-web` is a **frontend-only React mockup** of the Spoolcast AI
-video-generation pipeline (login → onboarding → projects picker → workflow →
-Library). It is a design artifact, **not a working product** — there is no
-backend; auth, generation, and data are all mocked locally.
+`spoolcast-web` is the React Web UI for the Spoolcast AI video-generation
+pipeline (login → onboarding → projects picker → workflow → Library). It began
+as a prototype, but the workflow now talks to the local Spoolcast engine API at
+`http://localhost:8000/api` (`/Users/ralphxu/Documents/Projects/spoolcast/local_api.py`).
 
 ## Hard constraints
 
-- **Frontend only.** Never add a real backend.
-- **Never modify the engine / protocol repo** at
-  `/Users/ralphxu/Documents/Projects/spoolcast` — it is read-only and owned by
-  Codex. The contracts under `src/contracts/` are local copies; changing the UI
-  does not mean editing the engine.
+- **Engine API boundary.** The Web UI may call the local engine API, but should
+  not duplicate engine/protocol logic in React. Engine behavior belongs in
+  `/Users/ralphxu/Documents/Projects/spoolcast`.
+- **Cross-repo changes are allowed only when requested.** If a UI change needs an
+  engine change, make that explicit and keep the edits scoped.
 - **Stack:** Vite + React 19 + TypeScript + React Router. The whole app lives in
   `src/App.tsx`; styles in `src/index.css` (design tokens are CSS custom
   properties on `:root`).
-- After any change, run `npm run lint` **and** `npm run build` — both must pass
-  clean before you're done.
+- After code changes, run `npm run build`. Run `npm run lint` when the change
+  touches lint-sensitive code, but note the repo may contain pre-existing lint
+  debt; report unrelated lint failures instead of rewriting unrelated files.
 - **Scope changes to exactly what was asked.** Don't change desktop styling when
   asked for a mobile fix (or vice versa).
+
+## Stage processes and jobs
+
+Long-running, paid, or external work must be modeled as a stage process.
+
+- Use `/api/jobs` for long work instead of holding one long `/api/action`
+  request open.
+- Store running process state outside component-local state so it survives step
+  navigation and refresh-like remounts.
+- Key process state by engine stage id, not by visible step number, so the same
+  behavior works across format templates.
+- Reuse the existing loading UI: `span className="spin"`, greyed-out content
+  (`opacity: 0.4`), and disabled pointer interactions. Do not invent new loading
+  symbols or animation styles.
+- If a process is running for a step, the main step content should visibly show
+  that state and should not allow conflicting edits.
+- Normal typing, menu opens, tab switches, hover highlights, and local view
+  changes are not stage processes.
+
+Current worker-backed examples:
+
+- `visual_pacing` drafts via `/api/jobs`.
+- `shot_list_json` builds the storyboard via `/api/jobs`.
+
+Future long-running steps should follow the same pattern: screenplay drafting or
+review when long, narration audio, visual generation, final render, captions,
+cover art, vertical cut, export, and publish/upload work.
 
 ## Domain model — do NOT conflate these
 

@@ -33,7 +33,9 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const historyRef = useRef<string[]>([])
+  const redoRef = useRef<string[]>([])
   const [historyLen, setHistoryLen] = useState(0)
+  const [redoLen, setRedoLen] = useState(0)
   const [raw, setRaw] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null) // `${si}:${ri}`
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
@@ -77,12 +79,29 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
   const snapshot = () => {
     historyRef.current.push(draft)
     if (historyRef.current.length > 50) historyRef.current.shift()
+    redoRef.current = []
     setHistoryLen(historyRef.current.length)
+    setRedoLen(0)
   }
   const undo = () => {
     const prev = historyRef.current.pop()
+    if (prev != null) {
+      redoRef.current.push(draft)
+      if (redoRef.current.length > 50) redoRef.current.shift()
+      setStageDraft(stageId, prev)
+    }
     setHistoryLen(historyRef.current.length)
-    if (prev != null) setStageDraft(stageId, prev)
+    setRedoLen(redoRef.current.length)
+  }
+  const redo = () => {
+    const next = redoRef.current.pop()
+    if (next != null) {
+      historyRef.current.push(draft)
+      if (historyRef.current.length > 50) historyRef.current.shift()
+      setStageDraft(stageId, next)
+    }
+    setHistoryLen(historyRef.current.length)
+    setRedoLen(redoRef.current.length)
   }
   const reset = async () => {
     // Reset to default = re-import the inherited kit (shared items only),
@@ -135,6 +154,9 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
         <span style={{ flex: 1 }} />
         <button style={{ ...btn, opacity: historyLen ? 1 : 0.4 }} disabled={!historyLen} onClick={undo}>
           ↩ Undo
+        </button>
+        <button style={{ ...btn, opacity: redoLen ? 1 : 0.4 }} disabled={!redoLen} onClick={redo}>
+          ↪ Redo
         </button>
         <button style={btn} onClick={reset} title="Discard all edits and re-import the show's shared items">
           Reset to default
