@@ -4,12 +4,13 @@ import {
   CoreMessageContent,
   IdeaBriefContent,
   NarrationContent,
-  SaveTemplateContent,
   SeriesSetup,
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
+import { PackagePublishStage } from './PackagePublishStage'
 import { VisualGenerationStage } from './VisualGenerationStage'
+import { VisualReviewStage, type VisualReviewLayoutCommand } from './VisualReviewStage'
 import { ShotListStage } from './ShotListStage'
 import { ScreenplayStage } from './ScreenplayStage'
 import { StageDraftEditor } from './StageDraftEditor'
@@ -21,8 +22,7 @@ export function StepContent({
   blankProject,
   onOpenCast,
   onToast,
-  origin,
-  formatDirty,
+  visualReviewLayoutCommand,
 }: {
   step: Step
   setupMode: SetupMode
@@ -31,8 +31,10 @@ export function StepContent({
   blankProject: boolean
   onOpenCast: () => void
   onToast: (message: string) => void
+  // Kept in the contract for the hidden save-as-template card's return.
   origin: 'blank' | 'template' | 'series'
   formatDirty: boolean
+  visualReviewLayoutCommand?: VisualReviewLayoutCommand | null
 }) {
   // engine node id — the SAME id the WorkflowView dirty checks use (activeStep.sourceId ?? activeStep.id)
   const stepId = step.sourceId ?? step.id
@@ -84,8 +86,13 @@ export function StepContent({
     return <ShotListStage stageId={stepId} />
   }
   if (step.id === 'pics') return <VisualGenerationStage stageId={stepId} />
-  if (step.id === 'post')
-    return <SaveTemplateContent step={step} origin={origin} formatDirty={formatDirty} onToast={onToast} />
+  if (step.id === 'check') return <VisualReviewStage layoutCommand={visualReviewLayoutCommand} onToast={onToast} />
+  if (step.id === 'build') {
+    // Package & publish — the collapsed tail (captions, cover, editor export).
+    // The save-as-template card is HIDDEN for now: its save was pure mock and
+    // the engine has no template storage yet (bring back with that backend).
+    return <PackagePublishStage onToast={onToast} />
+  }
   return (
     <div className="stub">
       <p>{step.blurb}</p>

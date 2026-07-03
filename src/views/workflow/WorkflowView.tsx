@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import explainerContract from '../../contracts/explainer.json'
+import { postAction } from '../../lib/api'
 import newsContract from '../../contracts/news-anime-bot.json'
 import { castByShow } from '../../data/cast'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
 import { StepContent } from './StepContent'
+import type { VisualReviewLayoutCommand } from './VisualReviewStage'
 
 type WorkflowArtifact = {
   required?: boolean
@@ -21,12 +23,37 @@ type WorkflowNode = {
   artifacts?: WorkflowArtifact[]
 }
 
+type CheckFinding = {
+  kind: string
+  message: string
+  severity: 'stale' | 'editorial' | 'mechanical'
+  waivable: boolean
+  waived: boolean
+  key: string
+}
+type CheckStageHealth = { stage_id: string; state: string; findings: CheckFinding[] }
+type CheckHealth = { stages?: CheckStageHealth[]; needs_recheck?: boolean; failing?: boolean }
+
 type WorkflowApiStatus = {
   data?: {
     workflow_graph?: { nodes?: WorkflowNode[] }
     blockers?: string[]
+    check_health?: CheckHealth
   }
 }
+
+// Which UI step owns each health-checked engine stage — where "Go to step" lands.
+const HEALTH_OWNER_STEP: Record<string, { id: string; label: string }> = {
+  screenplay_plan: { id: 'script', label: 'Screenplay' },
+  narration_voice_check: { id: 'script', label: 'Screenplay' },
+  shot_list_json: { id: 'shots', label: 'Compile Shot List' },
+  asset_audit: { id: 'check', label: 'Final cut' },
+}
+
+type CardSize = { w: number | null; h: number | null }
+// Stable "automatic" fallback so reading an unsized step's entry never mints a
+// fresh object (the measure effect depends on the size by identity).
+const AUTO_CARD_SIZE: CardSize = { w: null, h: null }
 
 export function WorkflowView({
   steps: rawSteps,
@@ -74,6 +101,7 @@ export function WorkflowView({
   origin: 'blank' | 'template' | 'series'
 }) {
   const [full, setFull] = useState(false)
+  const [visualReviewLayoutCommand, setVisualReviewLayoutCommand] = useState<VisualReviewLayoutCommand | null>(null)
   // Step 4 → 5 hand-off: after approving the structure, AI refreshes the World
   // Kit with what the new structure needs. On by default; the checkbox is the
   // user's spend consent.
@@ -95,6 +123,9 @@ export function WorkflowView({
     }
   }, [])
   const fullView = full || isMobile
+  const sendVisualReviewLayoutCommand = (action: VisualReviewLayoutCommand['action']) => {
+    setVisualReviewLayoutCommand((command) => ({ id: (command?.id ?? 0) + 1, action }))
+  }
 
   // IN-PROGRESS RULE: a step the user has started typing in (dirty) shows as
   // "In progress" instead of "Pending" — derived here, in one place, from the
@@ -104,10 +135,17 @@ export function WorkflowView({
   const workflowNodes = apiStatus?.data?.workflow_graph?.nodes || []
   const firstIncompleteNode = workflowNodes.find((n) => n.status !== 'passed' && n.status !== 'approved')
   const firstIncompleteStageId = firstIncompleteNode?.id
+  const finalRender = useWorkflowStore((s) => s.finalRender)
   const steps = rawSteps.map((step) => {
     const key = step.sourceId ?? step.id
     const process = stageProcesses[key]
     if (process && ['queued', 'running'].includes(process.status)) {
+      return { ...step, status: 'work' as const }
+    }
+    // Final cut's node reflects the RENDER truth: the engine's audit stage can
+    // be approved while no compiled video exists (or the last one went stale/
+    // failed) — the map must not show COMPLETE then.
+    if (step.id === 'check' && step.status === 'done' && finalRender !== 'done') {
       return { ...step, status: 'work' as const }
     }
     if (step.status !== 'done' && key === firstIncompleteStageId) {
@@ -233,8 +271,15 @@ export function WorkflowView({
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [cardBox, setCardBox] = useState<{ left: number; top: number; width: number } | null>(null)
   // USER-SIZED CARD: edge/corner handles set an explicit size the layout
-  // respects (null = automatic). Double-click a handle to reset.
-  const [userSize, setUserSize] = useState<{ w: number | null; h: number | null }>({ w: null, h: null })
+  // respects (null = automatic), remembered PER STEP — sizing one step's card
+  // must never change another step's. Double-click a handle to reset.
+  const [userSizes, setUserSizes] = useState<Record<string, CardSize>>({})
+  const userSize = userSizes[activeStep.id] ?? AUTO_CARD_SIZE
+  const setUserSize = (action: CardSize | ((s: CardSize) => CardSize)) =>
+    setUserSizes((all) => {
+      const current = all[activeStep.id] ?? AUTO_CARD_SIZE
+      return { ...all, [activeStep.id]: typeof action === 'function' ? action(current) : action }
+    })
   const startCardResize = (e: React.PointerEvent, dir: 'e' | 's' | 'se') => {
     e.preventDefault()
     e.stopPropagation()
@@ -281,12 +326,8 @@ export function WorkflowView({
       ['shots', 'voice'],
       ['shots', 'pics'],
       ['pics', 'check'],
+      ['voice', 'check'],
       ['check', 'build'],
-      ['voice', 'build'],
-      ['build', 'caps'],
-      ['caps', 'post'],
-      ['caps', 'phone'],
-      ['phone', 'post'],
     ] as const
   }, [])
 
@@ -317,6 +358,33 @@ export function WorkflowView({
     if (!dirty) warnedRef.current[activeEngineId] = false
   }, [activeApproved, dirty, activeEngineId, onToast])
 
+  // CHECK-HEALTH AUTO-HEAL (ROADMAP item 11): when the engine reports stale
+  // receipts/sentinels, the fix is re-running free deterministic checks — so
+  // do it automatically (rate-limited; the recheck job is idempotent). Only
+  // findings that need a human (fix or bypass) ever surface as a card.
+  const checkHealth = apiStatus?.data?.check_health
+  const recheckFiredAtRef = useRef(0)
+  useEffect(() => {
+    if (!checkHealth?.needs_recheck) return
+    const now = Date.now()
+    if (now - recheckFiredAtRef.current < 90_000) return
+    recheckFiredAtRef.current = now
+    void postAction({ action: 'recheck' })
+    onToast('Some earlier checks went out of date — re-running them automatically.')
+  }, [checkHealth, onToast])
+
+  const bypassFinding = async (stageId: string, key: string) => {
+    const out = await postAction({
+      action: 'record_waiver',
+      stage_id: stageId,
+      key,
+      note: `Bypassed from ${activeStep.name} (step ${activeStep.num})`,
+    })
+    onToast(out?.ok
+      ? 'Bypassed — recorded as an accepted exception.'
+      : 'Could not record the bypass — is the engine running?')
+  }
+
   // Also consider it "In progress" if this is the first incomplete step and it's just waiting to be worked on
   const nodes = workflowNodes
   const firstIncomplete = firstIncompleteNode
@@ -329,10 +397,12 @@ export function WorkflowView({
     && Number(activeStep.progress?.total || 0) > 0
     && Number(activeStep.progress?.done || 0) < Number(activeStep.progress?.total || 0)
 
-  const statusLabel = 
+  const statusLabel =
     isCurrentlyEditing ? 'In progress' :
     hasActiveStageProcess ? 'In progress' :
     activeProgressIncomplete ? 'In progress' :
+    // Final cut is only Complete when the compiled video actually exists.
+    activeStep.id === 'check' && finalRender !== 'done' ? (finalRender === 'failed' ? 'Blocked' : 'In progress') :
     engineStatus === 'passed' || engineStatus === 'approved' ? 'Complete' :
     engineStatus === 'running' ? 'In progress' :
     engineStatus === 'blocked' ? 'Blocked' :
@@ -343,7 +413,8 @@ export function WorkflowView({
   // Width should serve the content: wide is for big editors, grids, and
   // timelines. Steps that are reading columns or rows/options (setup, the
   // script's revision chain) stay at normal width.
-  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'voice'].includes(activeStep.id)
+  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'voice', 'check'].includes(activeStep.id)
+  const mediaFitPanel = ['check', 'build'].includes(activeStep.id)
 
   const NODE_W = 172
   const NODE_H = 88
@@ -404,10 +475,10 @@ export function WorkflowView({
     const measure = () => {
       if (!card) return
       const isLanding = Boolean(view) && !fullView && !dragPos && landedStepRef.current !== activeStep.id
-      // during AUTOPILOT, pan the canvas so the active node stays centered/visible.
-      // on a manual click we leave the view where it is — the card just centers
-      // in whatever the user is currently looking at.
-      if (isLanding && view && runningId) {
+      // When the detail card lands on a step, pan the canvas so the active node
+      // is centered too. This keeps refresh/auto-selected steps from showing a
+      // Step 11 card while the viewport is still parked near Step 1.
+      if (isLanding && view) {
         const nodeCenterX = activeStep.x + NODE_OFF_X + NODE_W / 2
         const maxLeft = Math.max(0, view.scrollWidth - view.clientWidth)
         view.scrollLeft = Math.max(0, Math.min(nodeCenterX - view.clientWidth / 2, maxLeft))
@@ -417,23 +488,37 @@ export function WorkflowView({
       if (view && !fullView) {
         const pinned = document.body.classList.contains('chat-pinned')
         const maxW = showWide ? (pinned ? 1120 : 1280) : 760
+        const viewportW = Math.max(420, view.clientWidth - 48)
+        const autoW = (() => {
+          if (!mediaFitPanel) return Math.min(maxW, Math.max(280, viewportW))
+          const viewRect = view.getBoundingClientRect()
+          const cardRect = card.getBoundingClientRect()
+          const cardTopInView = Math.max(0, cardRect.top - viewRect.top)
+          const availableFromCardTop = Math.max(360, view.clientHeight - cardTopInView - 28)
+          // Media review panels are driven by a 16:9 player. Reserve vertical
+          // room for the card header, script, timeline, footer, and normal
+          // spacing; derive width from the remaining player height.
+          const reservedHeight = activeStep.id === 'check' ? 430 : 480
+          const playerH = Math.max(activeStep.id === 'check' ? 220 : 250, availableFromCardTop - reservedHeight)
+          const bodyHorizontalPadding = activeStep.id === 'check' ? 48 : 84
+          const fitW = Math.round(playerH * (16 / 9) + bodyHorizontalPadding)
+          const viewportFloor = activeStep.id === 'check' ? Math.round(viewportW * 0.78) : 640
+          return Math.min(maxW, viewportW, Math.max(viewportFloor, fitW))
+        })()
         // A user-set size wins over the automatic width (clamped to the view).
         const targetW =
           userSize.w != null
             ? Math.min(Math.max(420, userSize.w), Math.max(420, view.clientWidth - 32))
-            : Math.min(maxW, Math.max(280, view.clientWidth - 48))
+            : autoW
         card.style.width = `${targetW}px`
-        if (userSize.h != null) {
-          card.style.height = `${Math.max(320, userSize.h)}px`
-          card.style.overflowY = 'auto'
-        } else {
-          card.style.height = ''
-          card.style.overflowY = ''
-        }
+        // Height applies to the card BOX only — scrolling happens inside
+        // .detail-body (via the h-sized class), never on the card itself: a
+        // scrolling card put its scrollbar over the right resize handle and
+        // dragged the bottom handles down with the content.
+        card.style.height = userSize.h != null ? `${Math.max(320, userSize.h)}px` : ''
       } else if (fullView) {
         card.style.width = ''
         card.style.height = ''
-        card.style.overflowY = ''
       }
       const cw = card.offsetWidth
       // center the card horizontally in the visible viewport so it never runs
@@ -487,7 +572,7 @@ export function WorkflowView({
       window.removeEventListener('resize', measure)
       ro.disconnect()
     }
-  }, [activeStep.id, activeStep.x, showWide, fullView, dragPos, s1, runningId, userSize])
+  }, [activeStep.id, activeStep.x, showWide, mediaFitPanel, fullView, dragPos, s1, runningId, userSize])
 
   // reset the header-float state when the workflow mounts (always starts at top)
   useEffect(() => {
@@ -554,13 +639,12 @@ export function WorkflowView({
             if (!from || !to) return null
             const anchors = edgeAnchors(from, to)
             const { x1, y1, x2, y2, vertical } = anchors
-            const optional = a === 'caps' && b === 'phone'
             const active = from.status === 'done' && to.status === 'work'
-            const color = optional ? '#323849' : active ? '#7aa2ff' : '#414866'
-            const dash = optional ? '6 6' : active ? '4 6' : undefined
-            const marker = optional ? 'aropt' : active ? 'aract' : 'ar'
+            const color = active ? '#7aa2ff' : '#414866'
+            const dash = active ? '4 6' : undefined
+            const marker = active ? 'aract' : 'ar'
             const drawSeg = vertical ? vSeg : seg
-            const gate = optional || vertical ? null : gateOnEdge(a, b)
+            const gate = vertical ? null : gateOnEdge(a, b)
             if (gate) {
               const gp = gatePos(gate)
               if (gp) {
@@ -715,7 +799,7 @@ export function WorkflowView({
         </div>
         <div
           ref={cardRef}
-          className={`detail-card ${showWide ? 'wide' : ''} ${fullView ? 'full' : ''}`}
+          className={`detail-card step-${activeStep.id} ${showWide ? 'wide' : ''} ${fullView ? 'full' : ''} ${!fullView && userSize.h != null ? 'h-sized' : ''}`}
           style={
             fullView
               ? undefined
@@ -863,6 +947,26 @@ export function WorkflowView({
                 </>
               ) : null}
             </span>
+            {activeStep.id === 'check' ? (
+              <span className="detail-layout-actions">
+                <button
+                  type="button"
+                  className="layout-mini-btn"
+                  title="Save the current Step 11 layout"
+                  onClick={() => sendVisualReviewLayoutCommand('save')}
+                >
+                  Save layout
+                </button>
+                <button
+                  type="button"
+                  className="layout-mini-btn"
+                  title="Reset to saved layout"
+                  onClick={() => sendVisualReviewLayoutCommand('reset')}
+                >
+                  Reset
+                </button>
+              </span>
+            ) : null}
             <button className="icon-btn expand-btn" onClick={() => setFull((value) => !value)}>
               {fullView ? '⤡' : '⤢'}
             </button>
@@ -913,6 +1017,7 @@ export function WorkflowView({
                   onToast={onToast}
                   origin={origin}
                   formatDirty={formatDirty}
+                  visualReviewLayoutCommand={visualReviewLayoutCommand}
                 />
               )
             )}
@@ -967,6 +1072,53 @@ export function WorkflowView({
               )
             })()}
 
+            {/* CHECK-HEALTH FINDINGS (ROADMAP item 11): earlier-step check
+                failures that need a human, surfaced BEFORE compile with the
+                two doors — go fix at the source, or bypass (recorded waiver).
+                Stale-only items never appear here; they auto-heal above. */}
+            {(() => {
+              const findings = (checkHealth?.stages ?? []).flatMap((stage) =>
+                (stage.findings || [])
+                  .filter((f) => !f.waived && f.severity !== 'stale')
+                  .map((f) => ({ ...f, stageId: stage.stage_id })),
+              )
+              if (!findings.length) return null
+              const showHere =
+                activeStep.id === 'check'
+                || findings.some((f) => HEALTH_OWNER_STEP[f.stageId]?.id === activeStep.id)
+              if (!showHere) return null
+              return (
+                <div className="card" style={{ marginTop: 24, borderColor: 'var(--red)', background: 'rgba(233,106,106,.06)' }}>
+                  <div className="ch" style={{ marginBottom: 12 }}>
+                    <h3 style={{ color: 'var(--red)' }}>
+                      Earlier checks found {findings.length} issue{findings.length === 1 ? '' : 's'}
+                    </h3>
+                    <span className="label">Fix at the source, or bypass</span>
+                  </div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {findings.map((f) => {
+                      const owner = HEALTH_OWNER_STEP[f.stageId]
+                      return (
+                        <div key={`${f.stageId}:${f.key}`} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                          <span style={{ flex: 1, color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.5 }}>{f.message}</span>
+                          {owner && owner.id !== activeStep.id ? (
+                            <button type="button" className="vp-undo" onClick={() => setSelected(owner.id)}>
+                              Go to {owner.label}
+                            </button>
+                          ) : null}
+                          {f.waivable ? (
+                            <button type="button" className="vp-undo" onClick={() => void bypassFinding(f.stageId, f.key)}>
+                              Bypass
+                            </button>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* AI HAND-OFF option (content area — the standard button block below
                 stays untouched): after approving this step, AI prepares the next. */}
             {(activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script' || activeStep.id === 'pacing') && (
@@ -1004,6 +1156,11 @@ export function WorkflowView({
                   st.sourceId != null && st.sourceId in STAGE_DRAFT_OUTPUTS
 
                 const isComplete = (st: Step) => {
+                  // Final cut FIRST, before the engine-status short-circuit: its
+                  // backing stage (the visual audits) can be approved while no
+                  // video exists. "Complete" here means the compiled, audited
+                  // video is actually on disk (the store tracks its sentinel).
+                  if (st.id === 'check') return finalRender === 'done'
                   if (st.status === 'done') return true
                   if (st.id === 'setup') return blankProject ? Boolean(s1.narrator && s1.style && s1.output) : true
                   if (st.id === 'idea') return ideaBrief.trim().length > 0
@@ -1027,7 +1184,7 @@ export function WorkflowView({
                         ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                         : isDraftStage(activeStep)
                           ? hasStageDraft(activeStep)
-                          : activeStep.id === 'script'
+                          : activeStep.id === 'script' || activeStep.id === 'check'
                             ? isComplete(activeStep)
                             : true
                         
@@ -1043,9 +1200,9 @@ export function WorkflowView({
                 const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !handoffHere
                 
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
-                // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
-                const canAutopilot = !autopilot && goalIndex >= 0 && selectableIndex >= goalIndex && activeStep.id !== 'post'
                 const isLast = selectableIndex >= orderedSteps.length - 1
+                // Autopilot stays VISIBLE on blocked-downstream steps — just disabled, like the save button.
+                const canAutopilot = !autopilot && goalIndex >= 0 && selectableIndex >= goalIndex && !isLast
 
                 // 2. UI RENDERER: Dumb display based on calculator outputs
                 return (
@@ -1057,7 +1214,7 @@ export function WorkflowView({
                           <button
                             className="autopilot-btn"
                             disabled={!stepComplete || isBeyondBlocked}
-                            title={isBeyondBlocked ? 'Complete the earlier steps first' : !stepComplete ? (!priorsComplete ? 'Complete the earlier steps first' : 'Make a choice for this step first') : undefined}
+                            title={isBeyondBlocked ? 'Complete the earlier steps first' : !stepComplete ? (!priorsComplete ? 'Complete the earlier steps first' : activeStep.id === 'check' ? (finalRender === 'stale' ? 'Visuals changed — compile the final video again' : 'Compile the final video first') : 'Make a choice for this step first') : undefined}
                             onClick={() => {
                               if (!stepComplete || isBeyondBlocked) return
                               onAutopilot()
@@ -1083,8 +1240,12 @@ export function WorkflowView({
                         disabled={!canProceed}
                         onClick={async () => {
                           if (!canProceed || advancing) return
-                          if (isAlreadyApproved && !dirty && !isLast) {
-                            setSelected(orderedSteps[selectableIndex + 1].id)
+                          // Approved-and-clean is a TERMINAL click state: navigate on,
+                          // or (on the last step) do nothing. It must NEVER fall
+                          // through to onAdvance — that path starts with the
+                          // invalidation rewind and would revoke a good approval.
+                          if (isAlreadyApproved && !dirty) {
+                            if (!isLast) setSelected(orderedSteps[selectableIndex + 1].id)
                             return
                           }
                           // ENGINE-FIRST RULE: only advance and clear the dirty flag if the
@@ -1110,7 +1271,7 @@ export function WorkflowView({
                       >
                         {advancing
                           ? 'Working…'
-                          : isAlreadyApproved && !dirty
+                          : isAlreadyApproved && !dirty && stepComplete
                             ? (isLast ? 'Completed' : 'Save and continue →')
                             : needsApproval
                               ? (isLast ? 'Approve & finish' : 'Approve & continue →')
@@ -1120,12 +1281,16 @@ export function WorkflowView({
                       <span className="foot-sub">
                         {autopilot
                           ? 'Autopilot is running — stop it to edit by hand'
-                          : isAlreadyApproved && !dirty
+                          : isAlreadyApproved && !dirty && stepComplete
                             ? (isLast ? 'Step is complete.' : 'Step is complete. Go to the next step.')
                             : !stepComplete
                               ? activeStep.id === 'script'
                                 ? 'The rule checks must pass — or be skipped — before this step can be approved'
-                                : 'Finish this step’s sections first'
+                                : activeStep.id === 'check'
+                                  ? (finalRender === 'stale'
+                                    ? 'Visuals changed — compile the final video again'
+                                    : 'Compile the final video first')
+                                  : 'Finish this step’s sections first'
                               : isBeyondBlocked
                                 ? 'Resolve the blocker above before continuing'
                                 : needsApproval

@@ -5,6 +5,7 @@ const API = 'http://localhost:8000/api'
 const SESSION = 'spoolcast-dev-log-12'
 const PROMPTS_PATH = 'working/generation-prompts.json'
 const SCENE_STATUS_PATH = 'working/batch-scenes-status.json'
+const SCENE_MANIFEST_PATH = 'manifests/scenes.manifest.json'
 const DEFAULT_IMAGE_MODEL = 'gpt-image-2-text-to-image'
 const DEFAULT_VIDEO_MODEL = 'seedance-2-fast'
 
@@ -26,6 +27,7 @@ type GenerationPromptItem = {
   duration_s?: number
   visual_direction?: string
   prompt?: string
+  prompt_variants?: Partial<Record<'image' | 'video', { prompt?: string }>>
   references?: PromptReference[]
   reference_image_policy?: string
   first_frame_removed?: boolean
@@ -59,13 +61,29 @@ type GenerationPromptsDoc = {
 }
 
 type BatchScenesStatus = {
+  media_type?: 'image' | 'video'
   state?: string
   total?: number
   completed_count?: number
   failed_count?: number
   updated_at?: string
+  only?: string[]
   completed?: string[]
   failed?: Record<string, string>
+}
+
+type SceneManifestItem = {
+  id?: string
+  chunk_id?: string
+  role?: string
+  status?: string
+  local_path?: string
+  mime_type?: string
+  prompt?: string
+}
+
+type SceneManifest = {
+  items?: SceneManifestItem[]
 }
 
 type PromptRow = {
@@ -85,6 +103,11 @@ type PromptRow = {
   parseError?: string
 }
 
+type PreviewMedia = {
+  kind: 'image' | 'video'
+  src: string
+}
+
 const imageModels = [
   { id: 'nano-banana-2', label: 'Nano Banana 2', note: 'image · fast draft quality' },
   { id: 'nano-banana-pro', label: 'Nano Banana Pro', note: 'image · higher quality' },
@@ -94,11 +117,6 @@ const imageModels = [
 const videoModels = [
   { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 10s', maxSeconds: 10 },
   { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 10s', maxSeconds: 10 },
-  { id: 'kling-v3-turbo-text-to-video', label: 'Kling V3 Turbo T2V', note: 'video · text to video · max 10s', maxSeconds: 10 },
-  { id: 'kling-v3-turbo-image-to-video', label: 'Kling V3 Turbo I2V', note: 'video · image to video · max 10s', maxSeconds: 10 },
-  { id: 'kling-3-0', label: 'Kling 3.0', note: 'video · premium motion · max 10s', maxSeconds: 10 },
-  { id: 'veo-3.1', label: 'Veo 3.1', note: 'video · premium generation · max 8s', maxSeconds: 8 },
-  { id: 'grok-imagine-1.5-preview', label: 'Grok Imagine 1.5 Preview', note: 'video · preview model · max 15s', maxSeconds: 15 },
 ]
 
 function modelLabel(models: { id: string; label: string }[], id: string) {
@@ -133,6 +151,56 @@ function promptParts(item: GenerationPromptItem, doc: GenerationPromptsDoc) {
   }
 }
 
+function activeOutputType(item: GenerationPromptItem, fallback: OutputType): 'image' | 'video' {
+  const type = item.output_type || fallback
+  return type === 'video' ? 'video' : 'image'
+}
+
+function itemPromptForType(item: GenerationPromptItem, type: 'image' | 'video') {
+  const variantPrompt = item.prompt_variants?.[type]?.prompt
+  if (variantPrompt) return variantPrompt
+  const currentPrompt = String(item.prompt || item.kie_request_preview?.input?.prompt || '')
+  if (!item.output_type || item.output_type === type) return currentPrompt
+  return currentPrompt
+}
+
+function withPromptForType(item: GenerationPromptItem, type: 'image' | 'video', prompt: string): GenerationPromptItem {
+  const input = { ...(item.kie_request_preview?.input ?? {}) }
+  if (prompt) input.prompt = prompt
+  return {
+    ...item,
+    prompt,
+    output_type: type,
+    prompt_variants: {
+      ...(item.prompt_variants ?? {}),
+      [type]: {
+        ...(item.prompt_variants?.[type] ?? {}),
+        prompt,
+      },
+    },
+    kie_request_preview: {
+      ...(item.kie_request_preview ?? {}),
+      input,
+    },
+  }
+}
+
+function rememberCurrentPrompt(item: GenerationPromptItem, fallback: OutputType): GenerationPromptItem {
+  const currentType = activeOutputType(item, fallback)
+  const prompt = String(item.prompt || item.kie_request_preview?.input?.prompt || '')
+  if (!prompt) return item
+  return {
+    ...item,
+    prompt_variants: {
+      ...(item.prompt_variants ?? {}),
+      [currentType]: {
+        ...(item.prompt_variants?.[currentType] ?? {}),
+        prompt,
+      },
+    },
+  }
+}
+
 function generatedSceneRel(id: string) {
   return `source/generated-assets/scenes/${id}.png`
 }
@@ -151,16 +219,90 @@ function hasFirstFrameReference(refs: PromptReference[], relPath: string) {
   return refs.some((ref) => ref.role === 'first_frame' || String(ref.local_path || '') === relPath)
 }
 
-function withDefaultFirstFrameRefs(
+function mediaReadyMap(manifest: SceneManifest | null) {
+  const ready = new Map<string, 'image' | 'video'>()
+  for (const item of manifest?.items ?? []) {
+    if (item.status && item.status !== 'success') continue
+    const id = String(item.id || item.chunk_id || '').trim()
+    const chunkId = String(item.chunk_id || item.id || '').trim()
+    const role = String(item.role || '').trim()
+    const mime = String(item.mime_type || '').trim()
+    const path = String(item.local_path || '').trim().toLowerCase()
+    const type: 'image' | 'video' | '' = role === 'scene-video' || mime.startsWith('video/') || path.endsWith('.mp4') || path.endsWith('.mov') || path.endsWith('.webm')
+      ? 'video'
+      : role === 'scene' || mime.startsWith('image/') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.webp')
+        ? 'image'
+        : ''
+    if (!type) continue
+    if (id) ready.set(id, type)
+    if (chunkId) ready.set(chunkId, type)
+  }
+  return ready
+}
+
+function mediaManifestItem(manifest: SceneManifest | null, id: string, type: 'image' | 'video') {
+  return (manifest?.items ?? []).find((item) => {
+    if (item.status && item.status !== 'success') return false
+    const itemId = String(item.id || item.chunk_id || '').trim()
+    const chunkId = String(item.chunk_id || item.id || '').trim()
+    if (itemId !== id && chunkId !== id) return false
+    const role = String(item.role || '')
+    const mime = String(item.mime_type || '')
+    const path = String(item.local_path || '').toLowerCase()
+    if (type === 'video') return role === 'scene-video' || mime.startsWith('video/') || path.endsWith('.mp4') || path.endsWith('.mov') || path.endsWith('.webm')
+    return role === 'scene' || mime.startsWith('image/') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.webp')
+  })
+}
+
+function manifestContentPath(item: SceneManifestItem | undefined) {
+  const value = String(item?.local_path || '').trim()
+  if (!value) return ''
+  const contentMarker = '/spoolcast-content/'
+  const contentIndex = value.indexOf(contentMarker)
+  return contentIndex >= 0 ? value.slice(contentIndex + contentMarker.length) : value.replace(/^\/+/, '')
+}
+
+function withManifestPromptVariants(
   doc: GenerationPromptsDoc | null,
-  status: BatchScenesStatus | null,
+  manifest: SceneManifest | null,
 ): { doc: GenerationPromptsDoc | null; changed: boolean } {
-  if (!doc?.items?.length) return { doc, changed: false }
-  const completed = new Set(status?.completed ?? [])
+  if (!doc?.items?.length || !manifest?.items?.length) return { doc, changed: false }
   let changed = false
   const items = doc.items.map((item) => {
     const id = String(item.id || item.chunk_id || '').trim()
-    if (!id || item.output_type !== 'video' || item.first_frame_removed || !completed.has(id)) return item
+    if (!id) return item
+    const imagePrompt = String(mediaManifestItem(manifest, id, 'image')?.prompt || '').trim()
+    const videoPrompt = String(mediaManifestItem(manifest, id, 'video')?.prompt || '').trim()
+    if (!imagePrompt && !videoPrompt) return item
+    const variants = { ...(item.prompt_variants ?? {}) }
+    let itemChanged = false
+    if (imagePrompt && !variants.image?.prompt) {
+      variants.image = { ...(variants.image ?? {}), prompt: imagePrompt }
+      itemChanged = true
+    }
+    if (videoPrompt && !variants.video?.prompt) {
+      variants.video = { ...(variants.video ?? {}), prompt: videoPrompt }
+      itemChanged = true
+    }
+    if (!itemChanged) return item
+    changed = true
+    return { ...item, prompt_variants: variants }
+  })
+  return changed ? { doc: { ...doc, items }, changed } : { doc, changed: false }
+}
+
+function withDefaultFirstFrameRefs(
+  doc: GenerationPromptsDoc | null,
+  status: BatchScenesStatus | null,
+  manifest: SceneManifest | null,
+): { doc: GenerationPromptsDoc | null; changed: boolean } {
+  if (!doc?.items?.length) return { doc, changed: false }
+  const completed = new Set(status?.media_type === 'image' ? status?.completed ?? [] : [])
+  const manifestReady = mediaReadyMap(manifest)
+  let changed = false
+  const items = doc.items.map((item) => {
+    const id = String(item.id || item.chunk_id || '').trim()
+    if (!id || item.output_type !== 'video' || item.first_frame_removed || (!completed.has(id) && manifestReady.get(id) !== 'image')) return item
     const relPath = generatedSceneRel(id)
     const refs = Array.isArray(item.references) ? item.references : []
     if (hasFirstFrameReference(refs, relPath)) return item
@@ -176,6 +318,7 @@ function withDefaultFirstFrameRefs(
 function normalizeRows(
   doc: GenerationPromptsDoc | null,
   status: BatchScenesStatus | null,
+  manifest: SceneManifest | null,
   defaultType: OutputType,
   imageModel: string,
   videoModel: string,
@@ -188,16 +331,21 @@ function normalizeRows(
   const state = String(status?.state || '')
   const running = state === 'running'
   const doneIds = completed
+  const targetIds = new Set(status?.only ?? [])
+  const ready = mediaReadyMap(manifest)
   return doc.items.map((item) => {
     const id = String(item.id || item.chunk_id || '')
     const type = item.output_type || defaultType
+    const mediaType = type === 'video' ? 'video' : 'image'
     const payload = promptParts(item, doc)
-    const prompt = String(payload.prompt || '')
+    const prompt = itemPromptForType(item, mediaType)
     const mediaModel = type === 'video' ? videoModel : imageModel
     let rowStatus: RowStatus = 'not_run'
     if (failed[id]) rowStatus = 'failed'
-    else if (running && !doneIds.has(id)) rowStatus = 'generating'
-    else if (doneIds.has(id)) rowStatus = 'image_ready'
+    else if (running && (!targetIds.size || targetIds.has(id)) && !doneIds.has(id)) rowStatus = 'generating'
+    else if (ready.get(id) === 'video' && type === 'video') rowStatus = 'video_ready'
+    else if (ready.get(id) === 'image' && type !== 'video') rowStatus = 'image_ready'
+    else if (doneIds.has(id)) rowStatus = type === 'video' ? 'video_ready' : 'image_ready'
     return {
       item,
       id,
@@ -223,16 +371,7 @@ function updateDocItemFromDraft(doc: GenerationPromptsDoc, id: string, draftText
     ...doc,
     items: (doc.items ?? []).map((item) => {
       if (String(item.id || item.chunk_id || '') !== id) return item
-      const input = { ...(item.kie_request_preview?.input ?? {}) }
-      if (prompt) input.prompt = prompt
-      return {
-        ...item,
-        prompt: prompt || item.prompt,
-        kie_request_preview: {
-          ...(item.kie_request_preview ?? {}),
-          input,
-        },
-      }
+      return withPromptForType(item, activeOutputType(item, doc.default_output_type || 'image'), prompt || String(item.prompt || ''))
     }),
   }
 }
@@ -265,6 +404,7 @@ async function savePromptDoc(doc: GenerationPromptsDoc) {
 export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [doc, setDoc] = useState<GenerationPromptsDoc | null>(null)
   const [batchStatus, setBatchStatus] = useState<BatchScenesStatus | null>(null)
+  const [sceneManifest, setSceneManifest] = useState<SceneManifest | null>(null)
   const [loading, setLoading] = useState(true)
   const [buildError, setBuildError] = useState('')
   const [defaultType, setDefaultType] = useState<OutputType>('image')
@@ -280,19 +420,29 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [regenNoteOpen, setRegenNoteOpen] = useState(false)
   const [regenNote, setRegenNote] = useState('')
   const [promptBusyIds, setPromptBusyIds] = useState<Set<string>>(new Set())
+  const [timingSyncing, setTimingSyncing] = useState(false)
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL)
   const [videoModel, setVideoModel] = useState(DEFAULT_VIDEO_MODEL)
   const [history, setHistory] = useState<GenerationPromptsDoc[]>([])
   const [redoHistory, setRedoHistory] = useState<GenerationPromptsDoc[]>([])
   const [previewRef, setPreviewRef] = useState<{ src: string; name: string; rowId: string; refIndex: number; role: 'first_frame' | 'reference' } | null>(null)
   const pollingRef = useRef('')
+  const savePromptChainRef = useRef<Promise<void>>(Promise.resolve())
   const undoRef = useRef<() => void>(() => {})
   const redoRef = useRef<() => void>(() => {})
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
   const setStepUndo = useWorkflowStore((s) => s.setStepUndo)
+  // Regenerating visuals or re-syncing timing invalidates a compiled final video.
+  const staleFinalRender = useWorkflowStore((s) => s.staleFinalRender)
 
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
+
+  const queueSavePromptDoc = (nextDoc: GenerationPromptsDoc) => {
+    const save = savePromptChainRef.current.catch(() => undefined).then(() => savePromptDoc(nextDoc))
+    savePromptChainRef.current = save.catch(() => undefined)
+    return save
+  }
 
   const snapshotDoc = () => {
     if (!doc) return
@@ -304,7 +454,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     const prev = history[history.length - 1]
     if (!prev || !doc) return
     try {
-      await savePromptDoc(prev)
+      await queueSavePromptDoc(prev)
       setRedoHistory((stack) => [...stack.slice(-49), doc])
       setDoc(prev)
       setDrafts({})
@@ -321,7 +471,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     const next = redoHistory[redoHistory.length - 1]
     if (!next || !doc) return
     try {
-      await savePromptDoc(next)
+      await queueSavePromptDoc(next)
       setHistory((stack) => [...stack.slice(-49), doc])
       setDoc(next)
       setDrafts({})
@@ -347,21 +497,26 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const load = async () => {
     setLoading(true)
     try {
-      const [promptDoc, statusDoc] = await Promise.all([
+      const [promptDoc, statusDoc, manifestDoc] = await Promise.all([
         readJsonFile<GenerationPromptsDoc>(PROMPTS_PATH).catch(() => null),
         readJsonFile<BatchScenesStatus>(SCENE_STATUS_PATH).catch(() => null),
+        readJsonFile<SceneManifest>(SCENE_MANIFEST_PATH).catch(() => null),
       ])
-      const migrated = withDefaultFirstFrameRefs(promptDoc, statusDoc)
+      const promptVariantMigrated = withManifestPromptVariants(promptDoc, manifestDoc)
+      const migrated = withDefaultFirstFrameRefs(promptVariantMigrated.doc, statusDoc, manifestDoc)
       const nextPromptDoc = migrated.doc
-      if (migrated.changed && nextPromptDoc) void savePromptDoc(nextPromptDoc).catch(() => {})
+      if ((promptVariantMigrated.changed || migrated.changed) && nextPromptDoc) void queueSavePromptDoc(nextPromptDoc).catch(() => {})
       if (nextPromptDoc?.preferred_image_model) setImageModel(nextPromptDoc.preferred_image_model)
-      if (nextPromptDoc?.preferred_video_model) setVideoModel(nextPromptDoc.preferred_video_model)
+      if (nextPromptDoc?.preferred_video_model && videoModels.some((model) => model.id === nextPromptDoc.preferred_video_model)) {
+        setVideoModel(nextPromptDoc.preferred_video_model)
+      }
       if (!generateModeTouched) {
         const defaultOutput = nextPromptDoc?.default_output_type || nextPromptDoc?.template_output_type || defaultType
         setGenerateMode(defaultOutput === 'video' ? 'video' : 'image')
       }
       setDoc(nextPromptDoc)
       setBatchStatus(statusDoc)
+      setSceneManifest(manifestDoc)
     } finally {
       setLoading(false)
     }
@@ -378,18 +533,21 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     let cancelled = false
     const poll = async () => {
       try {
-        const [job, statusDoc] = await Promise.all([
+        const [job, statusDoc, manifestDoc] = await Promise.all([
           readJsonFile<{ state?: string; error?: string; job?: string }>(`working/jobs/${stageProcess.jobId}.json`).catch(() => null),
           readJsonFile<BatchScenesStatus>(SCENE_STATUS_PATH).catch(() => null),
+          readJsonFile<SceneManifest>(SCENE_MANIFEST_PATH).catch(() => null),
         ])
         if (cancelled) return
         if (statusDoc) setBatchStatus(statusDoc)
+        if (manifestDoc) setSceneManifest(manifestDoc)
         const state = String(job?.state || '')
         if (['succeeded', 'failed', 'stopped', 'lost'].includes(state)) {
           await load()
           pollingRef.current = ''
           if (state === 'succeeded') {
-            setSaveNote(job?.job === 'batch_scenes' ? 'Image generation completed' : 'Prompt regeneration completed')
+            const media = statusDoc?.media_type === 'video' ? 'Video' : 'Image'
+            setSaveNote(job?.job === 'batch_scenes' ? `${media} generation completed` : 'Prompt regeneration completed')
             if (job?.job !== 'batch_scenes') setPromptBusyIds(new Set())
             setStageProcess(stageId, null)
           }
@@ -415,15 +573,16 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }, [stageProcess?.jobId, activeProcess])
 
   const rows = useMemo(
-    () => normalizeRows(doc, batchStatus, defaultType, imageModel, videoModel, drafts, errors),
-    [doc, batchStatus, defaultType, imageModel, videoModel, drafts, errors],
+    () => normalizeRows(doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors),
+    [doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors],
   )
 
   const progress = useMemo(() => {
-    const total = batchStatus?.total || rows.length
-    const done = batchStatus?.completed_count || rows.filter((row) => row.status === 'image_ready' || row.status === 'video_ready').length
+    const total = rows.length
+    const ready = mediaReadyMap(sceneManifest)
+    const done = rows.filter((row) => ready.has(row.id) || row.status === 'image_ready' || row.status === 'video_ready').length
     return { total, done, pct: total ? Math.round((done / total) * 100) : 0 }
-  }, [batchStatus, rows])
+  }, [rows, sceneManifest])
   const showProgressBar = activeProcess || progress.done > 0
 
   const selectedRows = rows.filter((row) => selected.has(row.id))
@@ -436,10 +595,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const selectedEligibleVideoRows = selectedVideoRows.filter((row) => !videoTooLong(row))
   const generateCount = generateMode === 'image' ? selectedImageRows.length : selectedEligibleVideoRows.length
   const generateLabel = generateMode === 'image' ? 'Generate selected images' : 'Generate selected videos'
-  const generateDisabled = activeProcess || generateCount === 0
+  const selectedVideoTooLong = selectedVideoRows.some(videoTooLong)
+  const generateDisabled = activeProcess || generateCount === 0 || (generateMode === 'video' && selectedVideoTooLong)
   const regenCurrentDisabled = activeProcess || selectedRows.length === 0
   const regenImageDisabled = activeProcess || selectedRows.length === 0 || selectedVideoRows.length === 0
   const regenVideoDisabled = activeProcess || selectedRows.length === 0 || selectedImageRows.length === 0
+  const failedImageRows = failedRows.filter((row) => row.type !== 'video')
   const hasPrompts = rows.length > 0
   const defaultImageModel = doc?.default_image_model || DEFAULT_IMAGE_MODEL
   const defaultVideoModel = doc?.default_video_model || DEFAULT_VIDEO_MODEL
@@ -483,6 +644,32 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
   }
 
+  const syncAudioTiming = async () => {
+    setBuildError('')
+    setTimingSyncing(true)
+    try {
+      const res = await fetch(`${API}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: SESSION,
+          tenant: 'local',
+          action: 'sync_audio_timing',
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) throw new Error(out?.message || out?.error || 'Could not sync timing from narration audio.')
+      await load()
+      const data = out?.data ?? {}
+      setSaveNote(`Synced ${data.events_updated ?? 0} visual timings from Step 09 audio`)
+      staleFinalRender()
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'Could not sync timing from narration audio.')
+    } finally {
+      setTimingSyncing(false)
+    }
+  }
+
   const persistDraft = async (id: string) => {
     if (!doc) return
     try {
@@ -490,7 +677,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       if (!draftText) return
       const nextDoc = updateDocItemFromDraft(doc, id, draftText)
       snapshotDoc()
-      await savePromptDoc(nextDoc)
+      await queueSavePromptDoc(nextDoc)
       setDoc(nextDoc)
       setSaveNote(`${id} saved`)
       setErrors((prev) => {
@@ -516,7 +703,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
     snapshotDoc()
     setDoc(nextDoc)
-    void savePromptDoc(nextDoc)
+    void queueSavePromptDoc(nextDoc)
       .then(() => setSaveNote(`${kind === 'image' ? 'Image' : 'Video'} model saved`))
       .catch((err) => setBuildError(err instanceof Error ? err.message : 'Could not save media model.'))
   }
@@ -599,18 +786,25 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     })
     try {
       let approvedDoc = doc
+      if (approvedDoc && approvedDoc.preferred_image_model !== imageModel) {
+        approvedDoc = { ...approvedDoc, preferred_image_model: imageModel }
+      }
       const draftIds = ids.filter((id) => drafts[id]?.trim())
       if (approvedDoc && draftIds.length) {
         for (const id of draftIds) {
           approvedDoc = updateDocItemFromDraft(approvedDoc, id, drafts[id])
         }
-        await savePromptDoc(approvedDoc)
+      }
+      if (approvedDoc) {
+        await queueSavePromptDoc(approvedDoc)
         setDoc(approvedDoc)
-        setDrafts((prev) => {
-          const next = { ...prev }
-          for (const id of draftIds) delete next[id]
-          return next
-        })
+        if (draftIds.length) {
+          setDrafts((prev) => {
+            const next = { ...prev }
+            for (const id of draftIds) delete next[id]
+            return next
+          })
+        }
       }
 
       const approvalRes = await fetch(`${API}/action`, {
@@ -653,6 +847,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         label: `Generating ${ids.length} image${ids.length === 1 ? '' : 's'}…`,
         updatedAt: new Date().toISOString(),
       })
+      staleFinalRender()
       await load()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not start image generation.'
@@ -661,9 +856,91 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
   }
 
-  const generateVideos = async () => {
-    if (!selectedEligibleVideoRows.length) return
-    setBuildError('Video generation from Step 10 is not wired yet. The selected rows are valid for the chosen model duration, but the backend video action still needs to be added.')
+  const generateVideos = async (onlyIds?: string[], force = false) => {
+    const sourceRows = onlyIds ? rows.filter((row) => onlyIds.includes(row.id)) : selectedVideoRows
+    if (sourceRows.some(videoTooLong)) {
+      setBuildError(`Video generation disabled: one selected row exceeds ${modelLabel(videoModels, videoModel)} max ${videoMaxSeconds}s.`)
+      return
+    }
+    const ids = sourceRows.filter((row) => row.type === 'video').map((row) => row.id)
+    if (!ids.length) return
+    setBuildError('')
+    setStageProcess(stageId, {
+      stageId,
+      status: 'queued',
+      label: `Generating ${ids.length} video${ids.length === 1 ? '' : 's'}…`,
+      updatedAt: new Date().toISOString(),
+    })
+    try {
+      let approvedDoc = doc
+      if (approvedDoc && approvedDoc.preferred_video_model !== videoModel) {
+        approvedDoc = { ...approvedDoc, preferred_video_model: videoModel }
+      }
+      const draftIds = ids.filter((id) => drafts[id]?.trim())
+      if (approvedDoc && draftIds.length) {
+        for (const id of draftIds) {
+          approvedDoc = updateDocItemFromDraft(approvedDoc, id, drafts[id])
+        }
+      }
+      if (approvedDoc) {
+        await queueSavePromptDoc(approvedDoc)
+        setDoc(approvedDoc)
+        if (draftIds.length) {
+          setDrafts((prev) => {
+            const next = { ...prev }
+            for (const id of draftIds) delete next[id]
+            return next
+          })
+        }
+      }
+
+      const approvalRes = await fetch(`${API}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: SESSION,
+          tenant: 'local',
+          action: 'approve_generation_prompts',
+          allow_cost: true,
+          ids,
+          media_type: 'video',
+        }),
+      })
+      const approvalOut = await approvalRes.json().catch(() => null)
+      if (!approvalRes.ok || approvalOut?.ok === false) {
+        throw new Error(approvalOut?.message || approvalOut?.error || 'Could not approve selected prompts.')
+      }
+
+      const extraArgs = ['--media-type', 'video', '--only', ids.join(',')]
+      if (force) extraArgs.push('--force')
+      const res = await fetch(`${API}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: SESSION,
+          tenant: 'local',
+          action: 'batch_scenes',
+          allow_cost: true,
+          extra_args: extraArgs,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) throw new Error(out?.details || out?.message || out?.error || 'Could not start video generation.')
+      const jobId = String(out?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+      setStageProcess(stageId, {
+        stageId,
+        jobId,
+        status: 'running',
+        label: `Generating ${ids.length} video${ids.length === 1 ? '' : 's'}…`,
+        updatedAt: new Date().toISOString(),
+      })
+      staleFinalRender()
+      await load()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not start video generation.'
+      setBuildError(message)
+      setStageProcess(stageId, null)
+    }
   }
 
   const runSelectedGeneration = () => {
@@ -676,40 +953,43 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     const idSet = new Set(ids)
     const completed = new Set(batchStatus?.completed ?? [])
     let changed = 0
-    let skipped = 0
+    const targetType = type === 'video' ? 'video' : 'image'
     const nextDoc = {
       ...doc,
       items: (doc.items ?? []).map((item) => {
         const itemId = String(item.id || item.chunk_id || '').trim()
         if (!idSet.has(itemId)) return item
-        const row = rows.find((candidate) => candidate.id === itemId)
-        if (type === 'video' && row && videoTooLong(row)) {
-          skipped += 1
-          return item
-        }
         if (item.output_type === type) return item
         changed += 1
+        const remembered = rememberCurrentPrompt(item, defaultType)
+        const targetPrompt = itemPromptForType(remembered, targetType)
+        const withTargetPrompt = withPromptForType(remembered, targetType, targetPrompt)
         if (type === 'video') {
-          const refs = Array.isArray(item.references) ? item.references : []
+          const refs = Array.isArray(withTargetPrompt.references) ? withTargetPrompt.references : []
           const relPath = generatedSceneRel(itemId)
           const nextRefs = completed.has(itemId) && !hasFirstFrameReference(refs, relPath)
             ? [defaultFirstFrameReference(itemId), ...refs]
             : refs
-          return { ...item, output_type: type, first_frame_removed: false, references: nextRefs }
+          return { ...withTargetPrompt, output_type: type, first_frame_removed: false, references: nextRefs }
         }
         return {
-          ...item,
+          ...withTargetPrompt,
           output_type: type,
-          references: (item.references ?? []).filter((ref) => ref.role !== 'first_frame'),
+          references: (withTargetPrompt.references ?? []).filter((ref) => ref.role !== 'first_frame'),
         }
       }),
     }
     if (changed) {
       snapshotDoc()
       setDoc(nextDoc)
-      void savePromptDoc(nextDoc).catch((err) => setBuildError(err instanceof Error ? err.message : 'Could not save type.'))
+      setDrafts((prev) => {
+        const next = { ...prev }
+        for (const id of ids) delete next[id]
+        return next
+      })
+      void queueSavePromptDoc(nextDoc).catch((err) => setBuildError(err instanceof Error ? err.message : 'Could not save type.'))
     }
-    return { changed, skipped }
+    return { changed, skipped: 0 }
   }
 
   const selectGenerateMode = (mode: 'image' | 'video') => {
@@ -743,9 +1023,17 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
 
   const sceneImageSrc = (id: string) => {
-    const path = `sessions/${SESSION}/source/generated-assets/scenes/${id}.png`
+    const manifestPath = manifestContentPath(mediaManifestItem(sceneManifest, id, 'image'))
+    const path = manifestPath || `sessions/${SESSION}/source/generated-assets/scenes/${id}.png`
     const version = encodeURIComponent(batchStatus?.updated_at || '')
     return `${API}/content?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ''}`
+  }
+
+  const sceneVideoSrc = (id: string) => {
+    const manifestPath = manifestContentPath(mediaManifestItem(sceneManifest, id, 'video'))
+    if (!manifestPath) return ''
+    const version = encodeURIComponent(batchStatus?.updated_at || '')
+    return `${API}/content?path=${encodeURIComponent(manifestPath)}${version ? `&v=${version}` : ''}`
   }
 
   const referenceValue = (ref: PromptReference) => String(ref.local_path || ref.image_url || '').trim()
@@ -754,11 +1042,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     row.references.find((ref) => ref.role === 'first_frame' && referenceValue(ref))
   )
 
-  const rowPreviewSrc = (row: PromptRow) => {
+  const rowPreviewMedia = (row: PromptRow): PreviewMedia | null => {
+    if (row.type === 'video' && row.status === 'video_ready') {
+      const videoSrc = sceneVideoSrc(row.id)
+      if (videoSrc) return { kind: 'video', src: videoSrc }
+    }
     const firstFrame = firstFrameReference(row)
-    if (firstFrame) return referenceSrc(referenceValue(firstFrame))
-    if (row.status === 'image_ready') return sceneImageSrc(row.id)
-    return ''
+    if (row.type === 'video' && firstFrame) return { kind: 'image', src: referenceSrc(referenceValue(firstFrame)) }
+    if (row.status === 'image_ready') return { kind: 'image', src: sceneImageSrc(row.id) }
+    return null
   }
 
   const removeReferenceAsset = async (rowId: string, refIndex: number) => {
@@ -777,7 +1069,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
     try {
       snapshotDoc()
-      await savePromptDoc(nextDoc)
+      await queueSavePromptDoc(nextDoc)
       setDoc(nextDoc)
       setPreviewRef(null)
       setSaveNote(`${rowId} reference asset removed`)
@@ -805,7 +1097,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
     try {
       snapshotDoc()
-      await savePromptDoc(nextDoc)
+      await queueSavePromptDoc(nextDoc)
       setDoc(nextDoc)
       setPreviewRef(null)
       setSaveNote(`${rowId} first frame moved to reference images`)
@@ -867,7 +1159,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         }),
       }
       snapshotDoc()
-      await savePromptDoc(nextDoc)
+      await queueSavePromptDoc(nextDoc)
       setDoc(nextDoc)
       setPreviewRef(null)
       setSaveNote(role === 'first_frame' ? `${rowId} first frame uploaded` : `${rowId} reference image uploaded`)
@@ -916,7 +1208,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 className="save-continue"
                 disabled={generateDisabled}
                 onClick={runSelectedGeneration}
-                title={generateMode === 'video' && selectedVideoRows.length !== selectedEligibleVideoRows.length ? `Some selected rows exceed ${modelLabel(videoModels, videoModel)} max ${videoMaxSeconds}s.` : undefined}
+                title={generateMode === 'video' && selectedVideoTooLong ? `Some selected rows exceed ${modelLabel(videoModels, videoModel)} max ${videoMaxSeconds}s.` : undefined}
               >
                 <span aria-hidden="true">{generateMode === 'image' ? '▧' : '▶'}</span>
                 {generateLabel}
@@ -1006,6 +1298,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 <div className="vg-advanced-section wide">
                   <span className="vp-menu-h">PROMPT ACTIONS</span>
                   <div className="vg-advanced-actions">
+                    <button type="button" className="vp-undo vg-action-btn" disabled={activeProcess || timingSyncing} onClick={syncAudioTiming}>
+                      {timingSyncing ? 'Syncing timing…' : 'Sync timing from narration audio'}
+                    </button>
                     <span className={`vg-split-action ${regenNoteOpen ? 'open' : ''}`}>
                       <button
                         type="button"
@@ -1020,12 +1315,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         Regenerate prompts
                       </button>
                     </span>
-                    {failedRows.length ? (
+                    {failedImageRows.length ? (
                       <button
                         type="button"
                         className="vp-undo vg-action-btn"
                         disabled={activeProcess}
-                        onClick={() => generateImages(failedRows.map((row) => row.id), true)}
+                        onClick={() => generateImages(failedImageRows.map((row) => row.id), true)}
                       >
                         Retry failed images
                       </button>
@@ -1085,7 +1380,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               {saveNote ? <span className="vg-save-note">{saveNote}</span> : null}
             </div>
             {rows.map((row) => {
-              const previewSrc = rowPreviewSrc(row)
+              const previewMedia = rowPreviewMedia(row)
               const firstFrameEntries = row.references
                 .map((ref, index) => ({ ref, index }))
                 .filter(({ ref }) => ref.role === 'first_frame' && referenceValue(ref))
@@ -1134,8 +1429,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     <button
                       type="button"
                       className={row.type === 'video' ? 'on' : ''}
-                      disabled={videoTooLong(row)}
-                      title={videoTooLong(row) ? videoDisabledTitle(row) : `Use ${modelLabel(videoModels, videoModel)} for this row`}
+                      title={videoTooLong(row) ? `${videoDisabledTitle(row)} Generation stays disabled until the model/duration fits.` : `Use ${modelLabel(videoModels, videoModel)} for this row`}
                       onClick={() => changeRowType(row.id, 'video')}
                     >
                       Video
@@ -1148,8 +1442,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 <div className="vg-body">
                   <div className="vg-media-col">
                     <div className="vg-preview">
-                      {previewSrc ? (
-                        <img src={previewSrc} alt="" />
+                      {previewMedia?.kind === 'video' ? (
+                        <video src={previewMedia.src} muted playsInline autoPlay controls />
+                      ) : previewMedia?.kind === 'image' ? (
+                        <img src={previewMedia.src} alt="" />
                       ) : (
                         <span>{row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
@@ -1182,6 +1478,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         spellCheck={false}
                       />
                       <div className="vg-row-actions">
+                        {row.status === 'generating' ? (
+                          <span className="vg-row-run">
+                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
+                          </span>
+                        ) : null}
                         <label className="vp-undo">
                           Upload reference image
                           <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
@@ -1194,11 +1495,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           <button
                             type="button"
                             className="vp-undo"
-                            disabled={videoTooLong(row)}
-                            title={videoTooLong(row) ? videoDisabledTitle(row) : 'Video generation adapters still need to be wired.'}
-                            onClick={() => setBuildError('Video generation from Step 10 is not wired yet. The row is ready for it, but the backend action still needs to be added.')}
+                            disabled={activeProcess || videoTooLong(row)}
+                            title={videoTooLong(row) ? videoDisabledTitle(row) : `Use ${modelLabel(videoModels, videoModel)} for this row`}
+                            onClick={() => generateVideos([row.id], row.status === 'video_ready')}
                           >
-                            Generate video
+                            {row.status === 'video_ready' ? 'Regenerate video' : 'Generate video'}
                           </button>
                         )}
                       </div>
@@ -1220,17 +1521,43 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
         {hasPrompts && view === 'gallery' ? (
           <div className="vg-gallery">
-            {rows.map((row) => (
-              <button type="button" className={`vg-tile ${selected.has(row.id) ? 'on' : ''}`} key={row.id} onClick={() => { toggle(row.id); setView('prompts') }}>
-                {row.status === 'image_ready' ? (
-                  <img src={sceneImageSrc(row.id)} alt="" />
-                ) : (
-                  <span>{row.id}</span>
-                )}
-                <b>{row.title}</b>
-                <small>{row.status.replace('_', ' ')}</small>
-              </button>
-            ))}
+            {rows.map((row) => {
+              const previewMedia = rowPreviewMedia(row)
+              return (
+                <button type="button" className={`vg-tile ${selected.has(row.id) ? 'on' : ''}`} key={row.id} onClick={() => { toggle(row.id); setView('prompts') }}>
+                  {previewMedia?.kind === 'video' ? (
+                    <video
+                      src={previewMedia.src}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      onMouseEnter={(event) => {
+                        event.currentTarget.currentTime = 0
+                        void event.currentTarget.play()
+                      }}
+                      onMouseLeave={(event) => {
+                        event.currentTarget.pause()
+                        event.currentTarget.currentTime = 0
+                      }}
+                      onFocus={(event) => {
+                        event.currentTarget.currentTime = 0
+                        void event.currentTarget.play()
+                      }}
+                      onBlur={(event) => {
+                        event.currentTarget.pause()
+                        event.currentTarget.currentTime = 0
+                      }}
+                    />
+                  ) : previewMedia?.kind === 'image' ? (
+                    <img src={previewMedia.src} alt="" />
+                  ) : (
+                    <span>{row.id}</span>
+                  )}
+                  <b>{row.title}</b>
+                  <small>{row.status.replace('_', ' ')}</small>
+                </button>
+              )
+            })}
           </div>
         ) : null}
 

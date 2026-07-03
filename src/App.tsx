@@ -31,11 +31,24 @@ type ApiArtifact = {
   stage_id?: string
   pattern?: string
   matches?: number
+  path?: string
+  exists?: boolean
 }
 
 type ShotListBeat = { narration?: string }
-type ShotListChunk = { beats?: ShotListBeat[] }
-type ShotListData = { chunks?: ShotListChunk[] }
+type ShotListChunk = { beats?: ShotListBeat[]; id?: string; image_source?: string; boundary_kind?: string }
+type ShotListBaseLayerEvent = { id?: string; role?: string; image_source?: string }
+type ShotListData = { chunks?: ShotListChunk[]; base_layer?: ShotListBaseLayerEvent[] }
+type SceneManifestData = {
+  items?: {
+    id?: string
+    chunk_id?: string
+    role?: string
+    status?: string
+    local_path?: string
+    mime_type?: string
+  }[]
+}
 type ApiStatusPayload = {
   data?: {
     artifacts?: ApiArtifact[]
@@ -50,8 +63,40 @@ const countNarratedChunks = (shotList: ShotListData | null) =>
     (chunk?.beats || []).some((beat) => String(beat?.narration || '').trim()),
   ).length
 
-const countBaseVisuals = (shotList: { base_layer?: unknown[] } | null) =>
-  Array.isArray(shotList?.base_layer) ? shotList.base_layer.length : 0
+const countBaseVisuals = (shotList: ShotListData | null) =>
+  Array.isArray(shotList?.base_layer)
+    ? shotList.base_layer.filter((event) => (event?.role || 'base_visual') === 'base_visual').length
+    : 0
+
+const sceneManifestMediaIds = (manifest: SceneManifestData | null) => {
+  const ids = new Set<string>()
+  for (const item of manifest?.items || []) {
+    if (item.status && item.status !== 'success') continue
+    const id = String(item.id || item.chunk_id || '').trim()
+    if (!id) continue
+    const role = String(item.role || '').trim()
+    const mime = String(item.mime_type || '').trim()
+    const path = String(item.local_path || '').trim().toLowerCase()
+    const isMedia =
+      role === 'scene'
+      || role === 'scene-video'
+      || mime.startsWith('image/')
+      || mime.startsWith('video/')
+      || /\.(png|jpe?g|webp|mp4|mov|webm)$/.test(path)
+    if (isMedia) ids.add(id)
+  }
+  return ids
+}
+
+const countVisualCoverage = (shotList: ShotListData | null, manifest: SceneManifestData | null, fallback: number) => {
+  const coveredIds = sceneManifestMediaIds(manifest)
+  if (!shotList?.base_layer?.length || !coveredIds.size) return fallback
+  return shotList.base_layer.filter((event) => {
+    if ((event?.role || 'base_visual') !== 'base_visual') return false
+    const id = String(event.id || '').trim()
+    return id && coveredIds.has(id)
+  }).length
+}
 
 function App() {
   return (
@@ -96,6 +141,9 @@ function SpoolcastApp() {
   // Live API State: Fetches real engine status to enforce gates
   const [apiStatus, setApiStatus] = useState<any>(null)
   const [apiLoading, setApiLoading] = useState(true)
+  // Last observed presence of the render-audit sentinel (null = not yet polled) —
+  // 'done' is derived from load-seed or absent→present edges, never plain presence.
+  const renderSentinelRef = useRef<boolean | null>(null)
 
   // Fetch real status from local API on mount
   useEffect(() => {
@@ -110,14 +158,21 @@ function SpoolcastApp() {
       )
       let narrationTotal: number
       let visualTotal: number
+      let visualDone = Number(visualArtifact?.matches || 0)
       try {
-        const shotRes = await fetch(
-          'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json',
-        )
-        const shotOut = await shotRes.json().catch(() => null)
+        const [shotRes, manifestRes] = await Promise.all([
+          fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json'),
+          fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=manifests%2Fscenes.manifest.json').catch(() => null),
+        ])
+        const [shotOut, manifestOut] = await Promise.all([
+          shotRes.json().catch(() => null),
+          manifestRes?.ok ? manifestRes.json().catch(() => null) : Promise.resolve(null),
+        ])
         const shotList = shotOut?.data?.content ? JSON.parse(shotOut.data.content) : null
+        const manifest = manifestOut?.data?.content ? JSON.parse(manifestOut.data.content) : null
         narrationTotal = countNarratedChunks(shotList)
         visualTotal = countBaseVisuals(shotList)
+        visualDone = countVisualCoverage(shotList, manifest, visualDone)
       } catch {
         narrationTotal = 0
         visualTotal = 0
@@ -133,7 +188,7 @@ function SpoolcastApp() {
               total: narrationTotal,
             },
             visualAssets: {
-              done: Number(visualArtifact?.matches || 0),
+              done: visualDone,
               total: visualTotal,
             },
           },
@@ -149,6 +204,30 @@ function SpoolcastApp() {
           // Update steps and gates with live API data to remove fake mock statuses
           setSteps(buildStepsFromContract(initialStandalone, data.data))
           setGates(buildGates(initialStandalone, data.data))
+          // FINAL RENDER TRUTH: the render audit's sentinel file. The render
+          // script deletes it when a compile starts and the audit re-writes it
+          // on pass — so only two observations mean "done": the sentinel already
+          // exists on page load, or it re-appears after being absent (a running
+          // compile passed). A plain "exists" check would race a fresh compile
+          // against the PREVIOUS render's sentinel. Never overrides 'stale'/'failed'.
+          const renderPassed = (data.data?.artifacts || []).some(
+            (a) => (a.pattern === 'working/render-audit.passed' || a.path?.includes('render-audit.passed')) && a.exists === true,
+          )
+          const prevRenderPassed = renderSentinelRef.current
+          renderSentinelRef.current = renderPassed
+          if (renderPassed) {
+            const fr = useWorkflowStore.getState().finalRender
+            // 'idle'/'failed' with the sentinel present can only mean the store
+            // missed (or lost) the truth: a REAL render deletes the sentinel at
+            // start and only a passing audit rewrites it, so its presence IS a
+            // finished, audited video. Heal to 'done' whenever observed — not
+            // just on first load. 'rendering' flips only on the absent→present
+            // edge (plain presence would race a fresh compile against the
+            // previous render's sentinel); 'stale' is never overridden.
+            const missedTruth = fr === 'idle' || fr === 'failed'
+            const completionEdge = prevRenderPassed === false && fr === 'rendering'
+            if (missedTruth || completionEdge) useWorkflowStore.getState().setFinalRender('done')
+          }
         }
       } catch (error) {
         console.error('Failed to fetch Spoolcast API status:', error)
@@ -188,9 +267,11 @@ function SpoolcastApp() {
         'visual_assets': 'pics',
         'asset_audit': 'check',
         'preprocess_review_render': 'build',
-        'package_widescreen': 'caps',
-        'mobile_variant': 'phone',
-        'publish': 'post'
+        // The tail stages are folded into the single Package & publish step, so
+        // sessions the engine reports as mid-packaging/publish land there.
+        'package_widescreen': 'build',
+        'mobile_variant': 'build',
+        'publish': 'build'
       }
       
       if (firstIncomplete && stepMap[firstIncomplete.id]) {
@@ -481,7 +562,12 @@ function SpoolcastApp() {
                     //    promise), making this stage current again so the engine will
                     //    accept the new input. Must happen BEFORE persisting, since the
                     //    rewind clears this stage's regenerable outputs.
-                    if (wasAlreadyPassed) {
+                    //    ONLY when the user actually CHANGED something (dirty): a clean
+                    //    re-click on an approved step must never destroy its outputs —
+                    //    a rewind deletes artifacts (e.g. the render-audit sentinel)
+                    //    that a re-approve cannot bring back.
+                    const isDirtyNow = Boolean(useWorkflowStore.getState().dirtySteps[sourceId])
+                    if (wasAlreadyPassed && isDirtyNow) {
                       const rw = await fetch('http://localhost:8000/api/action', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

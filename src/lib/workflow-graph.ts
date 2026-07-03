@@ -7,8 +7,17 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
   // Node positions, in final main-line order. World Kit (05) sits between
   // Structure outline (04) and Screenplay (06); Visual pacing (07) sits between
   // Screenplay and Compile Shot List (08). Both are real contract stages now, so the
-  // graph comes straight from the contract — narration_voice_check is the only
-  // stage folded out of the visual map (its audit runs inside Compile Shot List).
+  // graph comes straight from the contract — but the tail is COLLAPSED in the UI:
+  // narration_voice_check folds into Compile Shot List, the render lives inside
+  // Final cut (11), and package_widescreen / mobile_variant / publish fold into
+  // Package & publish (12). The engine stages still exist; only their presentation
+  // is merged (preprocess_review_render carries the merged step's status).
+  const HIDDEN_STAGES = new Set([
+    'narration_voice_check',
+    'package_widescreen',
+    'mobile_variant',
+    'publish',
+  ])
   const positions = [
     [30, 110], // 01 Project setup
     [288, 110], // 02 Video idea
@@ -20,15 +29,12 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
     [1788, 110], // 08 Compile Shot List
     [2046, 60], // 09 Narration audio
     [2046, 160], // 10 Visual generation
-    [2304, 160], // 11 Visual review
-    [2514, 110], // 12 Final render
-    [2772, 110], // 13 Captions and cover
-    [2772, 210], // 14 Vertical cut (optional branch off Captions)
-    [3030, 110], // 15 Video output
+    [2304, 110], // 11 Final cut (review + export; voice/pics branches merge here)
+    [2562, 110], // 12 Package & publish
   ]
-  
+
   return stages
-    .filter((stage) => stage.id !== 'narration_voice_check')
+    .filter((stage) => !HIDDEN_STAGES.has(stage.id))
     .map((stage, index) => {
       const alias = stepAlias[stage.id] ?? {
         id: stage.id,
@@ -70,7 +76,7 @@ export function buildStepsFromContract(blank = false, apiStatusData?: any): Step
         blurb: alias.blurb,
         status,
         progress,
-        optional: alias.id === 'phone',
+        optional: false,
         num: String(index + 1).padStart(2, '0'),
         x,
         y,
@@ -170,20 +176,14 @@ export function buildGates(_blank: boolean = false, apiStatusData?: any): Gate[]
       state: isPassed('working/scene-audit.json') ? 'passed' : 'pending',
       source: 'working/scene-audit.json',
     },
-    {
-      id: 'g-render',
-      type: 'audit',
-      step: 'build',
-      pos: 'after',
-      label: 'Render audit',
-      state: isPassed('working/render-audit.passed') ? 'passed' : 'pending',
-      source: 'working/render-audit.passed',
-    },
+    // The render gate is retired: the render runs inside Final cut (11), so its
+    // audit has no between-steps home anymore. Publish approval survives — it
+    // gates the upload inside Package & publish (12).
     {
       id: 'g-pub',
       type: 'human',
-      step: 'post',
-      pos: 'before',
+      step: 'build',
+      pos: 'after',
       label: 'Per-platform publish approval',
       state: humanGateState('publish'),
       source: 'working/approvals.json',

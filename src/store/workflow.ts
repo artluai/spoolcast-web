@@ -11,6 +11,8 @@ export type S1 = {
   editing: string
 }
 
+export type FinalRenderState = 'idle' | 'rendering' | 'done' | 'failed' | 'stale'
+
 type Drafts = { ideaBrief: string; goal: Goal; s1: S1 }
 export type StageProcess = {
   stageId: string
@@ -44,6 +46,19 @@ interface WorkflowStore extends Drafts {
   // is locked until the draft lands.
   handoff: { stageId: string; label: string } | null
   setHandoff: (h: { stageId: string; label: string } | null) => void
+  // Final cut's compile/export state. Lives here (not component state) so the
+  // step footer can gate Save/Autopilot on it and it survives step navigation.
+  // 'stale' = a compile finished, but the visuals/timing changed afterwards —
+  // the video no longer matches and must be re-compiled (ROADMAP item 9).
+  finalRender: FinalRenderState
+  setFinalRender: (state: FinalRenderState) => void
+  // Why the last compile failed — in the store (not component state) so the
+  // explanation survives navigation/remounts as long as the failure does.
+  finalRenderError: string | null
+  setFinalRenderError: (error: string | null) => void
+  // Called by anything that changes what the render consumes (regenerated
+  // visuals, re-synced audio timing): a finished compile becomes stale.
+  staleFinalRender: () => void
   setStageProcess: (stageId: string, process: StageProcess | null) => void
   // Drop cached drafts for a stage so the editor reloads fresh engine content.
   clearStageDrafts: (stageId: string) => void
@@ -109,6 +124,12 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   isStepDirty: (stepId) => Boolean(get().dirtySteps[stepId]),
   handoff: null,
   setHandoff: (h) => set(() => ({ handoff: h })),
+  finalRender: 'idle',
+  setFinalRender: (finalRender) => set(() => ({ finalRender })),
+  finalRenderError: null,
+  setFinalRenderError: (finalRenderError) => set(() => ({ finalRenderError })),
+  staleFinalRender: () =>
+    set((state) => (state.finalRender === 'done' ? { finalRender: 'stale' as const } : {})),
   setStageProcess: (stageId, process) =>
     set((state) => {
       const next = { ...state.stageProcesses }

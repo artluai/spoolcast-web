@@ -349,7 +349,7 @@
       "owner": "script",
       "requires_approval": true,
       "inputs": ["approved assets", "source/audio/*.mp3"],
-      "outputs": ["frames/*", "review/shot-review.html", "renders/*.mp4", "working/render-audit.passed"],
+      "outputs": ["renders/*.mp4", "working/render-audit.passed"],
       "gate": "render audit sentinel exists",
       "actions": ["batch_preprocess", "build_review_board", "render_with_audit"]
     },

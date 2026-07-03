@@ -44,7 +44,7 @@ const flattenRule = (raw: string) => raw.replace(/^\s*[-*]\s+/, '').replace(/\n\
 // reads them fresh on every draft run — edits apply with no restart); this
 // view is just a door to them. Scope tags show how far a rulebook reaches.
 
-type RuleFile = { id: string; label: string; scope: 'global' | 'series'; file: string; content: string }
+type RuleFile = { id: string; label: string; scope: 'global' | 'series'; file: string; content: string; readonly?: boolean }
 
 const SCOPE_LABEL: Record<string, string> = {
   global: 'every video',
@@ -394,7 +394,14 @@ export function RulesView() {
                     <code style={{ color: 'var(--ink-3)', fontSize: 12 }}>{active.file}</code>
                     <span style={chip}>{SCOPE_LABEL[active.scope]}</span>
                     <span style={{ flex: 1 }} />
-                    {editing ? (
+                    {active.readonly ? (
+                      // TEMPLATE rulebooks are read-only: they're the defaults a
+                      // NEW series starts from (copied in at creation). Editing
+                      // happens on the series' own copy.
+                      <span style={chip} title="These defaults are copied into every new series — edit your series' own rules instead.">
+                        template · read-only
+                      </span>
+                    ) : editing ? (
                       <>
                         <button className="vp-undo" type="button" disabled={saving} onClick={save}>
                           {saving ? 'Saving…' : 'Save rulebook'}
@@ -529,7 +536,7 @@ export function RulesView() {
                                     __html: DOMPurify.sanitize(marked.parse(b.text, { async: false }) as string),
                                   }}
                                 />
-                                {hoverRule === `${i}:${bi}` ? (
+                                {hoverRule === `${i}:${bi}` && !active.readonly ? (
                                   <span style={{ position: 'absolute', right: 0, top: 4, display: 'inline-flex', gap: 4 }}>
                                     <button
                                       type="button"

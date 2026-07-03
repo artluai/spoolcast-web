@@ -5,7 +5,6 @@ import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
-import type { Step } from '../../types'
 
 const VOICE_RULES_ID = 'series:spoolcast-devlog:voice'
 const WORLD_KIT_PRONUNCIATION_HEADER = '## Pronunciation / TTS Rules'
@@ -37,18 +36,17 @@ function upsertWorldKitPronunciationRule(content: string, word: string, alias: s
   return `${before}${nextSection}\n`
 }
 
-// Last step (Video output): once the video exists, offer to immortalize its setup.
-// The kind is predetermined — a brand-new/standalone video saves a NEW format
-// template; a video that came from an existing series saves a SUBTEMPLATE (a new
-// episode pattern). If the format never diverged from what it started from, there's
-// nothing new to save, so the action is greyed out.
+// Closing card of the last step (Package & publish): once the video exists,
+// offer to immortalize its setup. The kind is predetermined — a brand-new/
+// standalone video saves a NEW format template; a video that came from an
+// existing series saves a SUBTEMPLATE (a new episode pattern). If the format
+// never diverged from what it started from, there's nothing new to save, so
+// the action is greyed out.
 export function SaveTemplateContent({
-  step,
   origin,
   formatDirty,
   onToast,
 }: {
-  step: Step
   origin: 'blank' | 'template' | 'series'
   formatDirty: boolean
   onToast: (message: string) => void
@@ -74,10 +72,6 @@ export function SaveTemplateContent({
   ]
   return (
     <div className="save-tpl">
-      <div className="stub">
-        <p>{step.blurb}</p>
-        <div className="what">Source-of-truth files and action logs will appear here when backend wiring lands.</div>
-      </div>
       <div className="save-tpl-card">
         <span className="eyebrow">REUSE THIS SETUP</span>
         <h3>Save as a {kindLabel}</h3>

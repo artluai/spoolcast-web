@@ -179,27 +179,14 @@ export const stepAlias: Record<string, { id: string; name: string; blurb: string
   },
   asset_audit: {
     id: 'check',
-    name: 'Visual review',
-    blurb: 'Quality audit of generated visuals.',
+    name: 'Final cut',
+    blurb: 'Review the generated visuals and compile the final video.',
   },
+  // The engine's package_widescreen / mobile_variant / publish stages are folded
+  // into this one UI step (see HIDDEN_STAGES in workflow-graph.ts).
   preprocess_review_render: {
     id: 'build',
-    name: 'Final render',
-    blurb: 'Compiled master video.',
-  },
-  package_widescreen: {
-    id: 'caps',
-    name: 'Captions and cover',
-    blurb: 'Subtitle file and thumbnail image.',
-  },
-  mobile_variant: {
-    id: 'phone',
-    name: 'Vertical cut',
-    blurb: 'Mobile-format version.',
-  },
-  publish: {
-    id: 'post',
-    name: 'Video output',
-    blurb: 'Final video — export the file or publish to a platform.',
+    name: 'Package & publish',
+    blurb: 'Captions, title & description, thumbnail, and upload.',
   },
 }
