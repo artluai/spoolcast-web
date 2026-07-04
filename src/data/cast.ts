@@ -19,6 +19,13 @@ export const styleThumbs = [
   { id: 'custom', name: 'Make my own', badge: 'CUSTOM' },
 ]
 
+// Session `series` id → show name (the castByShow key). A session with no
+// series — or an unknown one — has no show behind it and gets the honest
+// empty 'standalone' identity, never another show's cast.
+export const showBySeries: Record<string, string> = {
+  'spoolcast-devlog': 'spoolcast dev log',
+}
+
 export const castByShow = {
   'spoolcast dev log': {
     style: 'wojak-gpt2',
@@ -50,6 +57,12 @@ export const castByShow = {
         lastUsed: 'Dev Log #09',
       },
     ],
+  },
+  // A blank/standalone project has no show behind it: empty cast, no style.
+  // Keeps the World Kit page honest instead of falling back to the devlog's.
+  'standalone': {
+    style: '',
+    chars: [],
   },
   'faux7-news': {
     style: 'anime / nano-banana',
@@ -188,5 +201,66 @@ export const stepAlias: Record<string, { id: string; name: string; blurb: string
     id: 'build',
     name: 'Package & publish',
     blurb: 'Captions, title & description, thumbnail, and upload.',
+  },
+}
+
+// Per-contract alias OVERRIDES: the ad template reuses the explainer's stage
+// ids, but several stages MEAN something else there (story_lock is the hook
+// lock, world_kit is the brand kit). The UI step ids stay the same so the
+// panels keep dispatching; only names/blurbs — and which stage carries the
+// 'check'/'build' cards — change. Lookup via stepAliasFor in workflow-graph.ts.
+export const stepAliasByContract: Record<
+  string,
+  Record<string, { id: string; name: string; blurb: string }>
+> = {
+  ad: {
+    input_intake: {
+      id: 'idea',
+      name: 'Product intake',
+      blurb: 'The product, the offer, the landing page, and every available asset.',
+    },
+    story_lock: {
+      id: 'goal',
+      name: 'Hook & promise',
+      blurb: 'Generate candidate hooks, pick one, and lock the promise the ad makes.',
+    },
+    structure: {
+      id: 'plan',
+      name: 'Ad structure',
+      blurb: 'Hook → demo → proof → CTA, budgeted inside the platform duration cap.',
+    },
+    world_kit: {
+      id: 'worldkit',
+      name: 'Brand kit',
+      blurb: 'Product references, talent and setting refs, brand colors, and safe zones.',
+    },
+    screenplay_plan: {
+      id: 'script',
+      name: 'Shot script',
+      blurb: 'Per-shot prompts plus the exact spoken lines the clips must perform.',
+    },
+    visual_pacing: {
+      id: 'pacing',
+      name: 'Shot pacing',
+      blurb: 'Target duration per shot, inside the clip range and the platform cap.',
+    },
+    visual_assets: {
+      id: 'pics',
+      name: 'AV generation',
+      blurb: 'Generate the video clips with sound — picture and audio in one step.',
+    },
+    // Video-first tail: no asset_audit stage, so Final cut is carried by
+    // preprocess_review_render and Package & publish by package_widescreen
+    // (publish folds into it — see UI_HINTS.ad in workflow-graph.ts).
+    preprocess_review_render: {
+      id: 'check',
+      name: 'Final cut',
+      blurb: 'Clip-master timeline: order and trim the clips, lay the music bed, render.',
+    },
+    package_widescreen: {
+      id: 'build',
+      name: 'Package & publish',
+      blurb: 'Per-platform exports, burned captions, CTA end card, and upload.',
+    },
   },
 }

@@ -28,6 +28,9 @@ export type Step = {
   progress?: { done: number; total: number }
   optional?: boolean
   blockedBy?: string
+  // Format fork not decided yet (blank flow): the step renders as a nameless
+  // skeleton ghost — no name, no status, no connectors. Absent = normal node.
+  fog?: 'ghost'
 }
 
 export type Gate = {

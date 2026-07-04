@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pill } from '../../components/common/Pill'
-import { SESSION, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { FeedbackButton } from './FeedbackButton'
 
 // Word-timed upload captions produced by the engine's build_timepoints job
 // (ROADMAP item 8): aligns each chunk's narration to its mp3 with Whisper,
 // persists audio/<chunk>.timepoints.json, and assembles this SRT from it.
-const SRT_PATH = `renders/${SESSION}-upload.srt`
-const SRT_NAME = `${SESSION}-upload.srt`
+const srtPath = () => `renders/${activeSession()}-upload.srt`
+const srtName = () => `${activeSession()}-upload.srt`
 
 // Publish metadata drafted by the engine (draft_video_meta job → OpenRouter):
 // title, description, and N distinct thumbnail candidate prompts.
@@ -16,9 +16,9 @@ const META_PATH = 'working/video-meta.json'
 // Thumbnail candidates land in renders/thumbnail-options/ (one per drafted
 // prompt); the picked one is finalized to the canonical cover slot the
 // packaging stage expects.
-const THUMB_PATH = `renders/${SESSION}-thumbnail.png`
+const thumbPath = () => `renders/${activeSession()}-thumbnail.png`
 const MAX_THUMBS = 6
-const thumbOptionPath = (v: number) => `renders/thumbnail-options/${SESSION}-thumb-v${v}.png`
+const thumbOptionPath = (v: number) => `renders/thumbnail-options/${activeSession()}-thumb-v${v}.png`
 
 // Step 12 — Package & publish: the closing screen. Video download, captions,
 // title/description drafting, and thumbnail generation are REAL (engine jobs
@@ -48,8 +48,8 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
       return
     }
     const link = document.createElement('a')
-    link.href = downloadUrl(`renders/${SESSION}-1.0x.mp4`)
-    link.download = `${SESSION}-1.0x.mp4`
+    link.href = downloadUrl(`renders/${activeSession()}-1.0x.mp4`)
+    link.download = `${activeSession()}-1.0x.mp4`
     link.click()
   }
 
@@ -85,7 +85,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
   const [captionsState, setCaptionsState] = useState<'unknown' | 'missing' | 'generating' | 'ready'>('unknown')
   useEffect(() => {
     let alive = true
-    getJson<{ ok?: boolean }>(fileUrl(SRT_PATH)).then((out) => {
+    getJson<{ ok?: boolean }>(fileUrl(srtPath())).then((out) => {
       if (alive) setCaptionsState(out?.ok ? 'ready' : 'missing')
     })
     const timers = jobTimersRef.current
@@ -107,8 +107,8 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
 
   const downloadCaptions = () => {
     const link = document.createElement('a')
-    link.href = downloadUrl(SRT_PATH)
-    link.download = SRT_NAME
+    link.href = downloadUrl(srtPath())
+    link.download = srtName()
     link.click()
   }
 
@@ -143,7 +143,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
       setMetaGen('ready')
     })
     Promise.all([
-      urlOk(contentUrl(THUMB_PATH)),
+      urlOk(contentUrl(thumbPath())),
       ...Array.from({ length: MAX_THUMBS }, (_, i) => urlOk(contentUrl(thumbOptionPath(i + 1)))),
     ]).then(([cover, ...options]) => {
       if (!alive) return
@@ -219,7 +219,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
           <button type="button" onClick={downloadVideo}>
             Download video
           </button>
-          <span className="pkg-meta">{SESSION}-1.0x.mp4 · 1920×1080 · from the Final cut export</span>
+          <span className="pkg-meta">{activeSession()}-1.0x.mp4 · 1920×1080 · from the Final cut export</span>
         </div>
       </section>
 
@@ -235,7 +235,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
           )}
           <span className="pkg-meta">
             {captionsState === 'ready'
-              ? `${SRT_NAME} · word-timed from the narration audio`
+              ? `${srtName()} · word-timed from the narration audio`
               : 'aligns each narration chunk word-by-word (runs locally, a few minutes)'}
           </span>
         </div>
@@ -317,7 +317,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
             </div>
             <p className="pkg-note">
               {thumb.cover
-                ? `Cover set: ${SESSION}-thumbnail.png — click a candidate to view it full-size or change the cover.`
+                ? `Cover set: ${activeSession()}-thumbnail.png — click a candidate to view it full-size or change the cover.`
                 : 'Click a candidate to view it full-size and set it as the cover.'}
             </p>
           </>

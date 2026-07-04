@@ -66,6 +66,10 @@ interface WorkflowStore extends Drafts {
   // history available on the active step.
   stepUndo: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null
   setStepUndo: (u: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null) => void
+  // Everything in this store belongs to ONE session. Switching the route to a
+  // different session must drop it all — a draft leaking across sessions would
+  // be written into the wrong project's files.
+  resetSession: () => void
 }
 
 const resolve = <T,>(action: React.SetStateAction<T>, prev: T): T =>
@@ -139,6 +143,19 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     }),
   stepUndo: null,
   setStepUndo: (u) => set(() => ({ stepUndo: u })),
+  resetSession: () =>
+    set(() => ({
+      ideaBrief: '',
+      goal: { text: '', mode: '' },
+      s1: { narrator: '', style: '', output: '', length: 120, projectId: 'untitled-01', editing: '' },
+      dirtySteps: {},
+      stageDrafts: {},
+      stageProcesses: {},
+      handoff: null,
+      finalRender: 'idle' as const,
+      finalRenderError: null,
+      stepUndo: null,
+    })),
   clearStageDrafts: (stageId) =>
     set((state) => {
       const stageDrafts = Object.fromEntries(

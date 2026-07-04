@@ -3,6 +3,8 @@
 // file — the same file every AI drafter reads fresh on its next run, so the
 // rule applies immediately. Returns true or an error message.
 
+import { actionUrl, activeSession, apiUrl } from './api'
+
 export const SERIES_RULES_ID = 'series:spoolcast-devlog:rules' // session-id debt, like elsewhere
 
 export const USER_RULES_HEADER = '## User-added rules'
@@ -15,11 +17,11 @@ export async function saveRuleContent(ruleId: string, content: string): Promise<
 }
 
 async function saveRuleFile(ruleId: string, content: string): Promise<RuleResult> {
-  const save = await fetch('http://localhost:8000/api/action', {
+  const save = await fetch(actionUrl(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      session: 'spoolcast-dev-log-12',
+      session: activeSession(),
       tenant: 'local',
       action: 'set_rule_file',
       rule_id: ruleId,
@@ -33,7 +35,7 @@ async function saveRuleFile(ruleId: string, content: string): Promise<RuleResult
 }
 
 async function loadRuleContent(ruleId: string): Promise<string | null> {
-  const r = await fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
+  const r = await fetch(apiUrl('rules', { session: activeSession() }))
   const out = await r.json().catch(() => null)
   const rule = out?.ok ? (out.data?.rules || []).find((x: { id: string }) => x.id === ruleId) : null
   return rule ? String(rule.content) : null

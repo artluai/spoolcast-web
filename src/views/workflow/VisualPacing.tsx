@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { visualPacingPlan, type VPOverlay } from '../../data/demo-shots'
+import { fileUrl } from '../../lib/api'
 
 // Shot-List (step 08): read-only, hierarchical chunk → beat → image view that
 // mirrors shot-list.json (base_layer + overlay_layer). It reads the confirmed pacing plan
@@ -71,7 +72,7 @@ export function VisualGallery() {
   const [uploads, setUploads] = useState<Record<string, string>>({})
   const [queueNotice, setQueueNotice] = useState('')
   useEffect(() => {
-    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json')
+    fetch(fileUrl('shot-list/shot-list.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (!out?.ok || !out.data?.content) return

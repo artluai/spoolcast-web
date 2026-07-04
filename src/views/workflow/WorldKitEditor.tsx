@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc } from '../../lib/worldkit-md'
+import { actionUrl, activeSession } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 
 // Scope tokens (stored in the md) ↔ human labels shown in the per-item picker.
@@ -47,10 +48,10 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
   useEffect(() => {
     if (draft.trim() || inheritTriedRef.current) return
     inheritTriedRef.current = true
-    fetch('http://localhost:8000/api/action', {
+    fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'inherit_world_kit' }),
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'inherit_world_kit' }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
@@ -108,10 +109,10 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
     // discarding every local edit and episode-only addition.
     snapshot()
     try {
-      const r = await fetch('http://localhost:8000/api/action', {
+      const r = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'inherit_world_kit', force: true }),
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'inherit_world_kit', force: true }),
       })
       const out = await r.json().catch(() => null)
       if (out?.ok && typeof out.data?.content === 'string') setStageDraft(stageId, out.data.content)

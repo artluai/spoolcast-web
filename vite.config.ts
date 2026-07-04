@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
+    // Tooling (e.g. the Claude preview harness) assigns a port via $PORT;
+    // plain `npm run dev` keeps the 5173 default.
+    port: Number(process.env.PORT) || 5173,
     // PERMANENT FIX: Prevent browser caching of index.html during local dev
     headers: {
       'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',

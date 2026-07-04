@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FeedbackButton } from './FeedbackButton'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
+import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 
 // COMPILE SHOT LIST (step 08): the machine-precise lens over the pacing plan.
 // The engine compiles shot-list/shot-list.json (code-law structure, AI polish,
@@ -91,7 +92,6 @@ type XlsxPreviewSheet = {
 type XlsxPreview = { sheets: XlsxPreviewSheet[] }
 
 const WORDS_PER_SEC = 2.5
-const SESSION = 'spoolcast-dev-log-12'
 const FILE_PATH = 'shot-list/shot-list.json'
 
 const estSec = (c: Chunk) =>
@@ -143,7 +143,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     }
   }, [])
   useEffect(() => {
-    fetch(`http://localhost:8000/api/status?session=${SESSION}&tenant=local`)
+    fetch(statusUrl())
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         const cur = out?.data?.current_contract_stage?.id
@@ -166,7 +166,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     seededRef.current = true
     const store = useWorkflowStore.getState()
     if ((store.stageDrafts[stageId] ?? '').length > 0) return
-    fetch(`http://localhost:8000/api/file?session=${SESSION}&path=${encodeURIComponent(FILE_PATH)}`)
+    fetch(fileUrl(FILE_PATH))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
@@ -210,7 +210,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const isBusy = building || checking || activeProcess
 
   const loadFreshShotList = async () => {
-    const fr = await fetch(`http://localhost:8000/api/file?session=${SESSION}&path=${encodeURIComponent(FILE_PATH)}`)
+    const fr = await fetch(fileUrl(FILE_PATH))
     const fileOut = await fr.json().catch(() => null)
     if (fileOut?.ok && fileOut.data?.exists) {
       seedStageDraft(stageId, fileOut.data.content) // fresh from engine = clean state
@@ -222,7 +222,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
 
   const downloadXlsx = () => {
     const link = document.createElement('a')
-    link.href = `http://localhost:8000/api/download?session=${SESSION}&path=${encodeURIComponent('shot-list/shot-list.xlsx')}`
+    link.href = downloadUrl('shot-list/shot-list.xlsx')
     link.download = 'shot-list.xlsx'
     document.body.appendChild(link)
     link.click()
@@ -232,7 +232,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const loadXlsxPreview = async () => {
     setXlsxLoading(true)
     try {
-      const res = await fetch(`http://localhost:8000/api/xlsx-preview?session=${SESSION}&path=${encodeURIComponent('shot-list/shot-list.xlsx')}`)
+      const res = await fetch(apiUrl('xlsx-preview', { session: activeSession(), path: 'shot-list/shot-list.xlsx' }))
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {
         setXlsxPreview(null)
@@ -259,7 +259,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   }
 
   const loadXlsxStatus = async () => {
-    const res = await fetch(`http://localhost:8000/api/status?session=${SESSION}&tenant=local`)
+    const res = await fetch(statusUrl())
     const out = await res.json().catch(() => null)
     const artifact = (out?.data?.artifacts || []).find(
       (item: { stage_id?: string; pattern?: string }) =>
@@ -301,7 +301,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
         pollingJobRef.current = null
         return
       }
-      const jr = await fetch(`http://localhost:8000/api/jobs/${jobId}`)
+      const jr = await fetch(jobsUrl(jobId))
       const jout = await jr.json().catch(() => null)
       if (!jr.ok || jout?.ok === false) {
         setError(jout?.message || jout?.error || 'Could not read shot-list job status.')
@@ -345,11 +345,11 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     setError(null)
     setAudit(null)
     try {
-      const res = await fetch('http://localhost:8000/api/jobs', {
+      const res = await fetch(jobsUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION, tenant: 'local', kind: 'draft_stage', stage_id: stageId,
+          session: activeSession(), tenant: 'local', kind: 'draft_stage', stage_id: stageId,
           allow_cost: true, ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
@@ -384,10 +384,10 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       setXlsxMessage('Exporting shot-list.xlsx…')
     }
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: SESSION, tenant: 'local', action: 'export_xlsx' }),
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'export_xlsx' }),
       })
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {
@@ -424,11 +424,11 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     setError(null)
     try {
       if (edited && draft.trim()) {
-        const so = await fetch('http://localhost:8000/api/action', {
+        const so = await fetch(actionUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            session: SESSION, tenant: 'local', action: 'set_stage_output',
+            session: activeSession(), tenant: 'local', action: 'set_stage_output',
             stage_id: stageId, path: FILE_PATH, content: draft,
           }),
         })
@@ -437,10 +437,10 @@ export function ShotListStage({ stageId }: { stageId: string }) {
           return
         }
       }
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: SESSION, tenant: 'local', action: 'run_audit', stage: 'shot-list' }),
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'run_audit', stage: 'shot-list' }),
       })
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {

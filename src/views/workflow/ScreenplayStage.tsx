@@ -4,9 +4,8 @@ import DOMPurify from 'dompurify'
 import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
+import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 
-const SESSION = 'spoolcast-dev-log-12'
-const API = 'http://localhost:8000/api'
 const FILE_LISTENER = 'working/listener-draft.md'
 const FILE_SCREENPLAY = 'working/screenplay-v3.md'
 
@@ -159,7 +158,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
     seededRef.current = true
     Promise.all(
       [FILE_LISTENER, FILE_SCREENPLAY].map((p) =>
-        fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(p)}`)
+        fetch(fileUrl(p))
           .then((r) => (r.ok ? r.json() : null))
           .then((out) => (out?.ok && out.data?.exists ? String(out.data.content) : ''))
           .catch(() => ''),
@@ -196,10 +195,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       .trim()
 
   const post = (body: object) =>
-    fetch(`${API}/action`, {
+    fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: SESSION, tenant: 'local', ...body }),
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', ...body }),
     })
 
   // Persist a revision's text to BOTH contract files — one document, one
@@ -286,7 +285,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       return null
     }
     const file = initial ? FILE_LISTENER : FILE_SCREENPLAY
-    const fr = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(file)}`)
+    const fr = await fetch(fileUrl(file))
     const fileOut = await fr.json().catch(() => null)
     const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
     if (!text.trim()) {

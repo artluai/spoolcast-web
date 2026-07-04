@@ -1,7 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import explainerContract from '../../contracts/explainer.json'
-import { postAction } from '../../lib/api'
-import newsContract from '../../contracts/news-anime-bot.json'
+import { actionUrl, activeSession, fileUrl, postAction } from '../../lib/api'
 import { castByShow } from '../../data/cast'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
@@ -58,6 +56,7 @@ const AUTO_CARD_SIZE: CardSize = { w: null, h: null }
 export function WorkflowView({
   steps: rawSteps,
   gates,
+  contractId,
   seed,
   selected,
   setSelected,
@@ -80,6 +79,7 @@ export function WorkflowView({
 }: {
   steps: Step[]
   gates: Gate[]
+  contractId: string
   seed: OnboardSeed | null
   selected: string
   setSelected: (id: string) => void
@@ -176,11 +176,11 @@ export function WorkflowView({
     if (!resetConfirm || resetting) return
     setResetting(true)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: resetConfirm.stageId,
@@ -218,8 +218,7 @@ export function WorkflowView({
   useEffect(() => {
     if (prefilledRef.current) return
     prefilledRef.current = true
-    const base = 'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path='
-    fetch(base + encodeURIComponent('source/idea-brief.md'))
+    fetch(fileUrl('source/idea-brief.md'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
@@ -231,7 +230,7 @@ export function WorkflowView({
         }
       })
       .catch(() => {})
-    fetch(base + encodeURIComponent('session.json'))
+    fetch(fileUrl('session.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
@@ -314,22 +313,28 @@ export function WorkflowView({
   const cardRef = useRef<HTMLDivElement | null>(null)
   const landedStepRef = useRef('')
 
+  // The canvas grows with the layout (contracts with more steps extend it);
+  // 3340 is the floor so today's explainer canvas is pixel-identical.
+  const canvasWidth = useMemo(
+    () => Math.max(3340, ...steps.map((step) => step.x + 730)),
+    [steps],
+  )
+
+  // Connectors are DERIVED from the computed layout: steps sharing one x slot
+  // are a parallel group; every member links to every member of the next
+  // group (fan-out before a pair, fan-in after). No per-contract edge list.
   const edges = useMemo(() => {
-    return [
-      ['setup', 'idea'],
-      ['idea', 'goal'],
-      ['goal', 'plan'],
-      ['plan', 'worldkit'],
-      ['worldkit', 'script'],
-      ['script', 'pacing'],
-      ['pacing', 'shots'],
-      ['shots', 'voice'],
-      ['shots', 'pics'],
-      ['pics', 'check'],
-      ['voice', 'check'],
-      ['check', 'build'],
-    ] as const
-  }, [])
+    const groups: Step[][] = []
+    for (const step of steps) {
+      const last = groups[groups.length - 1]
+      if (last && last[0].x === step.x) last.push(step)
+      else groups.push([step])
+    }
+    const out: (readonly [string, string])[] = []
+    for (let i = 0; i < groups.length - 1; i++)
+      for (const a of groups[i]) for (const b of groups[i + 1]) out.push([a.id, b.id] as const)
+    return out
+  }, [steps])
 
   const orderedSteps = steps
   const selectableIndex = orderedSteps.findIndex((step) => step.id === selected)
@@ -618,7 +623,7 @@ export function WorkflowView({
           event.preventDefault()
         }}
       >
-        <svg className="edges" viewBox="0 0 3340 850" preserveAspectRatio="none" aria-hidden="true">
+        <svg className="edges" viewBox={`0 0 ${canvasWidth} 850`} style={{ width: canvasWidth }} preserveAspectRatio="none" aria-hidden="true">
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="#414866" />
@@ -637,6 +642,9 @@ export function WorkflowView({
             const from = steps.find((step) => step.id === a)
             const to = steps.find((step) => step.id === b)
             if (!from || !to) return null
+            // Fogged territory gets NO connectors — an arrow between ghosts
+            // already narrates a sequence the format answer hasn't decided.
+            if (from.fog || to.fog) return null
             const anchors = edgeAnchors(from, to)
             const { x1, y1, x2, y2, vertical } = anchors
             const active = from.status === 'done' && to.status === 'work'
@@ -753,6 +761,22 @@ export function WorkflowView({
             : null}
         </svg>
         {steps.map((step) => {
+          if (step.fog) {
+            // Format fork undecided: a ghost of a step, not a step — nameless,
+            // arrowless, unselectable. Nothing exists here until Step 01 answers.
+            return (
+              <div
+                className="node fog fog-ghost"
+                key={step.id}
+                style={{ left: step.x + 24, top: step.y + 14 }}
+                aria-hidden="true"
+              >
+                <span className="num">?</span>
+                <span className="fog-bar" style={{ width: 74, top: 40 }} />
+                <span className="fog-bar" style={{ width: 46, top: 54 }} />
+              </div>
+            )
+          }
           const progressIncomplete =
             Boolean(step.progress)
             && Number(step.progress?.total || 0) > 0
@@ -787,9 +811,23 @@ export function WorkflowView({
             </button>
           )
         })}
-        {gates.map((gate) => (
-          <GateMarker key={gate.id} gate={gate} steps={steps} />
-        ))}
+        {gates.map((gate) => {
+          // No gate chips on fogged territory — the gates themselves depend
+          // on which format the fork resolves to.
+          const owner = steps.find((s) => s.id === gate.step)
+          if (owner?.fog) return null
+          return <GateMarker key={gate.id} gate={gate} steps={steps} />
+        })}
+        {steps.some((s) => s.fog) ? (
+          <div
+            className="fog-note"
+            style={{ left: Math.min(...steps.filter((s) => s.fog).map((s) => s.x)) - 40, top: 278 }}
+          >
+            {s1.narrator === 'no'
+              ? 'VIDEO-FIRST IS ON ITS WAY — THE AD AND SHORT STORY TEMPLATES WILL TAKE IT FROM HERE'
+              : 'THE REST TAKES SHAPE ONCE STEP 01 ANSWERS THE FORMAT QUESTION'}
+          </div>
+        ) : null}
         <div className="gate-legend">
           <span>Gates</span>
           <i className="token" />
@@ -1305,8 +1343,9 @@ export function WorkflowView({
           </div>
         </div>
         <span className="canvas-meta">
-          Format template: explainer · {((explainerContract as { stages: unknown[] }).stages.length)} steps
-          · anime-news-video available ({((newsContract as { stages: unknown[] }).stages.length)} steps)
+          {rawSteps.some((s) => s.fog)
+            ? 'Template contract: — · Step 01 decides the format'
+            : `Template contract: ${contractId} · ${rawSteps.length} steps`}
         </span>
       </div>
     </section>

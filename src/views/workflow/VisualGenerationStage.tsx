@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
+import { API_BASE, activeSession, actionUrl, downloadUrl, fileUrl } from '../../lib/api'
 
-const API = 'http://localhost:8000/api'
-const SESSION = 'spoolcast-dev-log-12'
+const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
 const SCENE_STATUS_PATH = 'working/batch-scenes-status.json'
 const SCENE_MANIFEST_PATH = 'manifests/scenes.manifest.json'
@@ -377,7 +377,7 @@ function updateDocItemFromDraft(doc: GenerationPromptsDoc, id: string, draftText
 }
 
 async function readJsonFile<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(path)}`)
+  const res = await fetch(fileUrl(path))
   if (!res.ok) return null
   const out = await res.json().catch(() => null)
   if (!out?.ok || !out.data?.content) return null
@@ -385,11 +385,11 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 }
 
 async function savePromptDoc(doc: GenerationPromptsDoc) {
-  const res = await fetch(`${API}/action`, {
+  const res = await fetch(actionUrl(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      session: SESSION,
+      session: activeSession(),
       tenant: 'local',
       action: 'set_stage_output',
       stage_id: 'visual_assets',
@@ -620,11 +620,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       updatedAt: new Date().toISOString(),
     })
     try {
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'build_generation_prompts',
           image_model: imageModel,
@@ -648,11 +648,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     setBuildError('')
     setTimingSyncing(true)
     try {
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'sync_audio_timing',
         }),
@@ -738,11 +738,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       updatedAt: new Date().toISOString(),
     })
     try {
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'rewrite_generation_prompts',
           allow_cost: true,
@@ -807,11 +807,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         }
       }
 
-      const approvalRes = await fetch(`${API}/action`, {
+      const approvalRes = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'approve_generation_prompts',
           allow_cost: true,
@@ -826,11 +826,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
       const extraArgs = ['--only', ids.join(',')]
       if (force) extraArgs.push('--force')
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'batch_scenes',
           allow_cost: true,
@@ -894,11 +894,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         }
       }
 
-      const approvalRes = await fetch(`${API}/action`, {
+      const approvalRes = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'approve_generation_prompts',
           allow_cost: true,
@@ -913,11 +913,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
       const extraArgs = ['--media-type', 'video', '--only', ids.join(',')]
       if (force) extraArgs.push('--force')
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'batch_scenes',
           allow_cost: true,
@@ -1019,12 +1019,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     if (contentRel.startsWith('styles/') || contentRel.startsWith('shows/') || contentRel.startsWith('sessions/')) {
       return `${API}/content?path=${encodeURIComponent(contentRel)}`
     }
-    return `${API}/download?session=${SESSION}&path=${encodeURIComponent(contentRel)}`
+    return downloadUrl(contentRel)
   }
 
   const sceneImageSrc = (id: string) => {
     const manifestPath = manifestContentPath(mediaManifestItem(sceneManifest, id, 'image'))
-    const path = manifestPath || `sessions/${SESSION}/source/generated-assets/scenes/${id}.png`
+    const path = manifestPath || `sessions/${activeSession()}/source/generated-assets/scenes/${id}.png`
     const version = encodeURIComponent(batchStatus?.updated_at || '')
     return `${API}/content?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ''}`
   }
@@ -1124,11 +1124,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     try {
       const content = await fileToBase64(file)
       const safeName = `${rowId}-${file.name}`.replace(/[^a-zA-Z0-9._-]/g, '-')
-      const res = await fetch(`${API}/action`, {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: SESSION,
+          session: activeSession(),
           tenant: 'local',
           action: 'upload_file',
           filename: safeName,

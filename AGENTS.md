@@ -104,10 +104,19 @@ Netlify/Cloudflare; a real, queue-backed, multi-tenant engine elsewhere). To kee
 that hookup a config change rather than a refactor, hold this seam:
 
 - **All server calls resolve through `src/lib/api.ts`.** Do not hardcode
-  `http://localhost:8000` or the session id in new code. `API_BASE`, `SESSION`,
-  `TENANT` come from `import.meta.env.VITE_*` with local-dev defaults, so a deploy
-  is `VITE_API_BASE=…` (+ later, sessions from auth). Migrate existing hardcoded
-  calls opportunistically — when you next edit that file, not in a churn pass.
+  `http://localhost:8000` or a session id anywhere — the migration is complete
+  and zero hardcoded engine URLs remain. **The session comes from the route:**
+  `/p/:id` sets it via `setActiveSession()`; helpers default to `activeSession()`.
+  `VITE_SESSION` is only the dev fallback for the `/p/new` mock flow. Never bake
+  `activeSession()` into a module-level constant (it would freeze at import
+  time) — derive per call, like `PackagePublishStage`'s `srtPath()`.
+- **The workflow builds from the ENGINE's contract** (`GET /api/contract`), not
+  a bundled copy. `src/contracts/explainer.json` survives only as the offline
+  fallback (engine down / `/p/new`). Step positions are computed in
+  `workflow-graph.ts`; per-contract presentation (folded stages, branch pairs,
+  gates) lives in its `UI_HINTS` — new contracts render generically without an
+  entry. Sessions/templates for the home page come from `GET /api/sessions` and
+  `GET /api/templates`; new videos go through the `create_session` action.
 - **Media goes through `contentUrl(path, 'preview' | 'full')`** (and `audioUrl`).
   The preview player requests `'preview'`, export/download requests `'full'`. Today
   both resolve identically; when the backend serves low-quality **preview proxies**

@@ -9,11 +9,15 @@ export function WorldKitPanel({
   showName,
   onManage,
   compact = false,
+  blank = false,
 }: {
   castData: (typeof castByShow)['spoolcast dev log']
   showName: string
   onManage?: () => void
   compact?: boolean
+  // Blank/standalone project: no show behind it — every section starts empty
+  // instead of borrowing the devlog's mock references.
+  blank?: boolean
 }) {
   const [scopes, setScopes] = useState<Record<string, string>>(() =>
     Object.fromEntries(WORLD_KIT_SECTIONS.map((s) => [s.id, s.scope])),
@@ -58,21 +62,29 @@ export function WorldKitPanel({
               )}
             </div>
             {sec.locked ? (
-              sec.image ? (
+              !blank && sec.image ? (
                 <div className="wk-style">
                   <img src={sec.image} alt="" />
                   <span>{sec.caption}</span>
                 </div>
               ) : (
-                <div className="wk-empty">No style reference set</div>
+                <div className="wk-empty">
+                  {blank ? 'No style anchor yet — set it in Project setup (Step 01).' : 'No style reference set'}
+                </div>
               )
             ) : sec.cast ? (
-              <>
-                <CastGrid castData={castData} compact={compact} />
-                {onManage ? (
-                  <button className="wk-manage" onClick={onManage}>Manage cast →</button>
-                ) : null}
-              </>
+              castData.chars.length ? (
+                <>
+                  <CastGrid castData={castData} compact={compact} />
+                  {onManage ? (
+                    <button className="wk-manage" onClick={onManage}>Manage cast →</button>
+                  ) : null}
+                </>
+              ) : (
+                <div className="wk-empty">No recurring cast yet — characters join here during World Kit (Step 05).</div>
+              )
+            ) : blank ? (
+              <div className="wk-empty">Nothing here yet — references land during World Kit (Step 05).</div>
             ) : (
               <div className="wk-items">
                 {sec.items?.map((it) => (
@@ -90,9 +102,11 @@ export function WorldKitPanel({
 export function WorldKitView({
   castData,
   showName,
+  blank = false,
 }: {
   castData: (typeof castByShow)['spoolcast dev log']
   showName: string
+  blank?: boolean
 }) {
   const navigate = useNavigate()
   const params = useParams()
@@ -107,10 +121,13 @@ export function WorldKitView({
               <h1>Visual references for this episode</h1>
               <button>+ New reference</button>
             </div>
-            <p>Style, cast, environments, props, screens, motion, and beat-specific refs — each with its own reuse scope. Style library: {castData.style}.</p>
+            <p>
+              Style, cast, environments, props, screens, motion, and beat-specific refs — each with
+              its own reuse scope.{castData.style ? ` Style library: ${castData.style}.` : ' No style picked yet.'}
+            </p>
           </div>
         </div>
-        <WorldKitPanel castData={castData} showName={showName} />
+        <WorldKitPanel castData={castData} showName={showName} blank={blank} />
       </div>
     </section>
   )

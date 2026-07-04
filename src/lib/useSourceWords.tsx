@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { fileUrl } from './api'
 
 /**
  * Word count of the session's cataloged source material — counted from
@@ -9,10 +10,7 @@ import { useEffect, useState } from 'react'
 export function useSourceWords(): number | null {
   const [words, setWords] = useState<number | null>(null)
   useEffect(() => {
-    fetch(
-      'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=' +
-        encodeURIComponent('working/asset-inventory.md'),
-    )
+    fetch(fileUrl('working/asset-inventory.md'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { actionUrl, activeSession, apiUrl } from '../lib/api'
 
 // RECENT SAVES: the automatic snapshots taken before every "start over",
 // listed newest-first with one-click restore (the explicit human undo).
@@ -14,7 +15,7 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
   const [reloading, setReloading] = useState(false)
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/save-points?session=spoolcast-dev-log-12')
+    fetch(apiUrl('save-points', { session: activeSession() }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.save_points)) setPoints(out.data.save_points)
@@ -26,10 +27,10 @@ export function SavePointsModal({ onClose, onToast }: { onClose: () => void; onT
   const restore = async (id: string) => {
     setBusy(id)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'restore_save_point', save_point: id }),
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'restore_save_point', save_point: id }),
       })
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) {

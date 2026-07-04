@@ -379,7 +379,7 @@
       "owner": "human+script",
       "requires_approval": true,
       "inputs": ["audited package"],
-      "outputs": ["platform URL or package folder"],
+      "outputs": [],
       "gate": "explicit per-platform publish approval and pre-upload checklist pass",
       "actions": ["publish_youtube", "manual_publish"]
     }

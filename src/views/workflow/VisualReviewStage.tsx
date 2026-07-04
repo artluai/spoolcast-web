@@ -1,18 +1,15 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
-import { downloadUrl, fileUrl, getFileJson, getJson, postAction } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
-
-const API = 'http://localhost:8000/api'
-const SESSION = 'spoolcast-dev-log-12'
 
 // The engine's render job: started via POST /api/action (heavy actions route to
 // the durable job runner), tracked through its state file + log under
 // working/jobs/ — ordinary session files. Output path is the script's default.
-const RENDER_JOB_STORAGE_KEY = `spoolcast:render-job:${SESSION}`
-const RENDER_OUTPUT_PATH = `renders/${SESSION}-1.0x.mp4`
-const RENDER_OUTPUT_NAME = `${SESSION}-1.0x.mp4`
+const RENDER_JOB_STORAGE_KEY = () => `spoolcast:render-job:${activeSession()}`
+const RENDER_OUTPUT_PATH = () => `renders/${activeSession()}-1.0x.mp4`
+const RENDER_OUTPUT_NAME = () => `${activeSession()}-1.0x.mp4`
 
 type ShotBeat = {
   id?: string
@@ -199,7 +196,7 @@ const mobileReviewLayoutRows: ReviewLayoutRow[] = [
   { id: 'mobile-gallery', columns: [{ id: 'mobile-gallery-col', panels: ['gallery'] }] },
 ]
 
-const reviewLayoutDefaultsKey = `${SESSION}:visual-review-layout-defaults`
+const reviewLayoutDefaultsKey = () => `${activeSession()}:visual-review-layout-defaults`
 
 type SavedReviewLayout = {
   rows: ReviewLayoutRow[]
@@ -285,7 +282,7 @@ function replaceSizesForIds(current: Record<string, number>, ids: Set<string>, n
 
 function readSavedReviewLayouts(): SavedReviewLayouts {
   try {
-    const raw = window.localStorage.getItem(reviewLayoutDefaultsKey)
+    const raw = window.localStorage.getItem(reviewLayoutDefaultsKey())
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed as SavedReviewLayouts : {}
@@ -369,7 +366,7 @@ function moveReviewPanel(rows: ReviewLayoutRow[], panelId: ReviewPanelId, target
 }
 
 function readJsonFile<T>(path: string): Promise<T | null> {
-  return fetch(`${API}/file?session=${SESSION}&path=${encodeURIComponent(path)}`)
+  return fetch(fileUrl(path))
     .then((res) => (res.ok ? res.json() : null))
     .then((out) => {
       if (!out?.ok || !out.data?.content) return null
@@ -399,11 +396,11 @@ function manifestContentPath(item: SceneManifestItem | undefined) {
 
 function contentSrc(path: string) {
   const clean = path.trim().replace(/^\/+/, '')
-  return clean ? `${API}/content?path=${encodeURIComponent(`sessions/${SESSION}/${clean}`)}` : ''
+  return clean ? contentUrl(clean, 'preview') : ''
 }
 
 function audioSrc(chunkId: string) {
-  return `${API}/download?session=${SESSION}&path=${encodeURIComponent(`source/audio/${chunkId}.mp3`)}`
+  return downloadUrl(`source/audio/${chunkId}.mp3`)
 }
 
 function mediaKindFromPath(path: string): 'image' | 'video' | 'missing' {
@@ -677,7 +674,7 @@ export function VisualReviewStage({
       manualPanelIds: [...ids.panelSlotIds].filter((id) => manualPanelSizeIdsRef.current.has(id)),
     }
     try {
-      window.localStorage.setItem(reviewLayoutDefaultsKey, JSON.stringify(defaults))
+      window.localStorage.setItem(reviewLayoutDefaultsKey(), JSON.stringify(defaults))
       onToast?.('Visual review layout saved.')
     } catch {
       onToast?.('Could not save layout.')
@@ -789,7 +786,7 @@ export function VisualReviewStage({
         const activeType = selectedMediaType(promptItem, fallbackType)
         const manifestItem = mediaManifestItem(manifest, id, activeType)
         const manifestPath = manifestContentPath(manifestItem)
-        const path = manifestPath.replace(new RegExp(`^sessions/${SESSION}/`), '')
+        const path = manifestPath.replace(new RegExp(`^sessions/${activeSession()}/`), '')
           || eventPathForType(event, activeType)
         const mediaType = mediaKindFromPath(path)
         const chunkId = String(event.chunk_id || '').trim()
@@ -1200,7 +1197,7 @@ export function VisualReviewStage({
 
   const finishRenderJob = (job: { state?: string; exit_code?: number | null }, log = '') => {
     stopRenderPolling()
-    window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY)
+    window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY())
     renderJobRef.current = null
     setRenderPct(null)
     if (job.state === 'succeeded') {
@@ -1277,7 +1274,7 @@ export function VisualReviewStage({
       return
     }
     if (jobId) {
-      window.localStorage.setItem(RENDER_JOB_STORAGE_KEY, jobId)
+      window.localStorage.setItem(RENDER_JOB_STORAGE_KEY(), jobId)
       beginRenderPolling(jobId)
     }
     // No job id parsed (unexpected): stay in 'rendering' — the App status poll
@@ -1287,10 +1284,10 @@ export function VisualReviewStage({
   // A compile started in a previous visit/page-load may still be running (or
   // have finished while this step was closed) — resume polling to resolve it.
   useEffect(() => {
-    const jobId = window.localStorage.getItem(RENDER_JOB_STORAGE_KEY)
+    const jobId = window.localStorage.getItem(RENDER_JOB_STORAGE_KEY())
     if (!jobId) return
     if (useWorkflowStore.getState().finalRender === 'done') {
-      window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY)
+      window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY())
       return
     }
     setRenderState('rendering')
@@ -1301,8 +1298,8 @@ export function VisualReviewStage({
 
   const downloadFinalVideo = () => {
     const link = document.createElement('a')
-    link.href = downloadUrl(RENDER_OUTPUT_PATH)
-    link.download = RENDER_OUTPUT_NAME
+    link.href = downloadUrl(RENDER_OUTPUT_PATH())
+    link.download = RENDER_OUTPUT_NAME()
     link.click()
   }
 
@@ -2403,7 +2400,7 @@ export function VisualReviewStage({
                 <button type="button" onClick={downloadFinalVideo}>Download video</button>
                 <button type="button" onClick={startRender}>Compile again</button>
               </div>
-              <p className="vr-export-note">{RENDER_OUTPUT_NAME} · 1920×1080 · {fmtTime(totalSec, 'whole')}</p>
+              <p className="vr-export-note">{RENDER_OUTPUT_NAME()} · 1920×1080 · {fmtTime(totalSec, 'whole')}</p>
             </>
           ) : (
             <>

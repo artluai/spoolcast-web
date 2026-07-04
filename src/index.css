@@ -367,6 +367,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   overflow: hidden;
 }
 .node.optional { border-style: dashed; opacity: .86; }
+/* FORMAT FORK FOG (blank flow): the stretch of the map Step 01's answer
+   decides. Ghosts of steps, not steps — dashed, dimmed, unclickable. */
+.node.fog { border: 1px dashed rgba(130, 150, 190, .3); background: rgba(255, 255, 255, .015); opacity: .55; pointer-events: none; }
+.fog-bar { position: absolute; left: 12px; height: 8px; border-radius: 3px; background: rgba(255, 255, 255, .09); }
+.fog-note { position: absolute; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--ink-3); white-space: nowrap; }
 .node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.5), 0 12px 32px rgba(0,0,0,.38); }
 .node-stripe { position: absolute; left: 0; top: 0; right: 0; height: 2px; background: var(--ink-3); }
 .node.s-done .node-stripe { background: var(--green); }
@@ -1550,6 +1555,14 @@ body.chat-pinned { padding-right: 380px; }
 .actions { margin-top: 24px; display: flex; justify-content: flex-end; gap: 10px; }
 .actions button { border: 1px solid var(--line-2); border-radius: 9px; background: transparent; color: var(--ink-2); padding: 9px 16px; }
 .actions .primary { background: var(--purple); border-color: var(--purple); color: #110b20; font-weight: 700; }
+/* new-video modal (/projects → Use this template): confirm-modal + form fields */
+.create-session .cs-field { display: block; margin-top: 14px; }
+.create-session .cs-field b { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.create-session .cs-field input, .create-session .cs-field select { width: 100%; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-3); color: var(--ink); padding: 9px 12px; font: inherit; }
+.create-session .cs-field input:focus, .create-session .cs-field select:focus { outline: none; border-color: var(--purple); }
+.create-session .cs-note { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
+.create-session .cs-error { margin-top: 10px; font-size: 12.5px; color: var(--red, #e5484d); }
+.create-session .actions .spin { margin-right: 8px; }
 /* signup gate at end of onboarding — centered, reuses login button styles */
 .signup-modal { width: 400px; text-align: center; }
 .signup-modal .login-mark { width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 18px; font-size: 22px; }
@@ -1933,6 +1946,7 @@ body.chat-pinned { padding-right: 380px; }
 .tpl-picker .t-dev      {grid-column:span 2;grid-row:span 2}
 .tpl-picker .t-news     {grid-column:span 1;grid-row:span 4}
 .tpl-picker .t-ugc      {grid-column:span 1;grid-row:span 4}
+.tpl-picker .t-ad       {grid-column:span 1;grid-row:span 4}
 .tpl-picker .t-explainer{grid-column:span 2;grid-row:span 2}
 
 .tpl-picker .tile{position:relative;border-radius:12px;overflow:hidden;background:#0c0e16;cursor:pointer}
@@ -2217,15 +2231,15 @@ body.chat-pinned { padding-right: 380px; }
   .tpl-picker .section-label{margin-bottom:10px}
   .tpl-picker .bento{grid-template-columns:repeat(2,1fr);grid-auto-rows:auto;grid-auto-flow:row}
   .tpl-picker .t-dev,.tpl-picker .t-explainer{grid-column:span 2;grid-row:auto;aspect-ratio:16/9}
-  .tpl-picker .t-news,.tpl-picker .t-ugc{grid-column:span 1;grid-row:auto;aspect-ratio:9/16}
+  .tpl-picker .t-news,.tpl-picker .t-ugc,.tpl-picker .t-ad{grid-column:span 1;grid-row:auto;aspect-ratio:9/16}
   .tpl-picker .resume-row .r-prog{width:110px}
 }
 @media (max-width:480px){
-  .tpl-picker .t-news .t-sig,.tpl-picker .t-ugc .t-sig{display:none}
-  .tpl-picker .t-news .t-name,.tpl-picker .t-ugc .t-name{font-size:14px}
-  .tpl-picker .t-news .scrim,.tpl-picker .t-ugc .scrim{padding:36px 9px 9px}
-  .tpl-picker .t-news .acts,.tpl-picker .t-ugc .acts{flex-direction:column;gap:6px}
-  .tpl-picker .t-news .act,.tpl-picker .t-ugc .act{width:100%;padding:8px;font-size:11.5px}
+  .tpl-picker .t-news .t-sig,.tpl-picker .t-ugc .t-sig,.tpl-picker .t-ad .t-sig{display:none}
+  .tpl-picker .t-news .t-name,.tpl-picker .t-ugc .t-name,.tpl-picker .t-ad .t-name{font-size:14px}
+  .tpl-picker .t-news .scrim,.tpl-picker .t-ugc .scrim,.tpl-picker .t-ad .scrim{padding:36px 9px 9px}
+  .tpl-picker .t-news .acts,.tpl-picker .t-ugc .acts,.tpl-picker .t-ad .acts{flex-direction:column;gap:6px}
+  .tpl-picker .t-news .act,.tpl-picker .t-ugc .act,.tpl-picker .t-ad .act{width:100%;padding:8px;font-size:11.5px}
 }
 
 /* onboarding length: AI / skip state */

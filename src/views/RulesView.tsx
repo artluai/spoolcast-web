@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { appendUserRule, removeUserRules, saveRuleContent, USER_RULES_HEADER } from '../lib/rules'
+import { actionUrl, activeSession, apiUrl } from '../lib/api'
 
 // Split a section body into prose chunks and individual bullet rules, so each
 // rule can get its own hover actions (edit / remove) while prose stays prose.
@@ -189,7 +190,7 @@ export function RulesView() {
   }
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
+    fetch(apiUrl('rules', { session: activeSession() }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.rules)) {
@@ -251,11 +252,11 @@ export function RulesView() {
     setSaving(true)
     setNote(null)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'set_rule_file',
           rule_id: active.id,
@@ -326,6 +327,14 @@ export function RulesView() {
 
         {error ? <p style={{ color: 'var(--red)' }}>{error}</p> : null}
         {!rules && !error ? <p className="label">Loading the rulebooks from the engine…</p> : null}
+        {rules && !rules.some((r) => r.scope === 'series') ? (
+          // No series layer yet: only the GLOBAL law shows. Without this line,
+          // the global rulebooks read as some other project's wiki.
+          <p className="label" style={{ color: 'var(--ink-3)' }}>
+            These are the global rulebooks — every project works under them. When this video joins a
+            series, the series' own rulebook appears here as its editable layer on top.
+          </p>
+        ) : null}
 
         {rules ? (
           <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>

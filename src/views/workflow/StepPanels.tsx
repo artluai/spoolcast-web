@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
+import { actionUrl, activeSession, apiUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
@@ -441,7 +442,7 @@ export function NarrationContent() {
       (chunk?.beats || []).some((beat) => String(beat?.narration || '').trim()),
     ).length
   const stageId = 'narration_audio'
-  const session = 'spoolcast-dev-log-12'
+  const session = activeSession()
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
   const audioDemo = (path: string) => `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/${path}`
@@ -546,7 +547,7 @@ export function NarrationContent() {
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
   const updateSpeed = (nextSpeed: string) => setSpeed(Number(nextSpeed))
   const audioSrc = (chunkId: string) =>
-    `http://localhost:8000/api/download?session=${session}&path=${encodeURIComponent(`source/audio/${chunkId}.mp3`)}&v=${audioVersions[chunkId] || 0}`
+    apiUrl('download', { session, path: `source/audio/${chunkId}.mp3`, v: audioVersions[chunkId] || 0 })
   const startChunkEdit = (chunk: AudioChunk) => {
     setEditingChunkId(chunk.id)
     setChunkDraft(chunk.narration)
@@ -592,7 +593,7 @@ export function NarrationContent() {
     setSavingChunkId(chunkId)
     setRunError(null)
     try {
-      const fileRes = await fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('shot-list/shot-list.json')}`)
+      const fileRes = await fetch(fileUrl('shot-list/shot-list.json'))
       const fileOut = await fileRes.json().catch(() => null)
       const shotList = fileOut?.data?.content ? JSON.parse(fileOut.data.content) : null
       const chunks = Array.isArray(shotList?.chunks) ? shotList.chunks : []
@@ -603,7 +604,7 @@ export function NarrationContent() {
         return { ...chunk, beats: distributeNarration(clean, chunk.beats) }
       })
       if (!found) throw new Error(`Could not find ${chunkId} in shot-list.json.`)
-      const saveRes = await fetch('http://localhost:8000/api/action', {
+      const saveRes = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -640,7 +641,7 @@ export function NarrationContent() {
     setRunError(null)
     setChunkMessages((prev) => ({ ...prev, [chunk.id]: '' }))
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -670,8 +671,8 @@ export function NarrationContent() {
   }
   const loadProgress = async () => {
     const [statusRes, shotRes] = await Promise.all([
-      fetch(`http://localhost:8000/api/status?session=${session}&tenant=local`),
-      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('shot-list/shot-list.json')}`),
+      fetch(statusUrl()),
+      fetch(fileUrl('shot-list/shot-list.json')),
     ])
     const statusOut = await statusRes.json().catch(() => null)
     const shotOut = await shotRes.json().catch(() => null)
@@ -706,7 +707,7 @@ export function NarrationContent() {
     }
   }
   const saveTtsSettings = async (nextPronunciations = pronunciations) => {
-    const res = await fetch('http://localhost:8000/api/action', {
+    const res = await fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -727,9 +728,9 @@ export function NarrationContent() {
   }
   const loadNarrationSettings = async () => {
     const [sessionRes, worldKitRes, rulesRes] = await Promise.all([
-      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('session.json')}`),
-      fetch(`http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent('working/world-kit.md')}`),
-      fetch(`http://localhost:8000/api/rules?session=${session}`),
+      fetch(fileUrl('session.json')),
+      fetch(fileUrl('working/world-kit.md')),
+      fetch(apiUrl('rules', { session })),
     ])
     const sessionOut = await sessionRes.json().catch(() => null)
     const worldKitOut = await worldKitRes.json().catch(() => null)
@@ -800,9 +801,7 @@ export function NarrationContent() {
     let cancelled = false
     const pollJob = async () => {
       try {
-        const res = await fetch(
-          `http://localhost:8000/api/file?session=${session}&path=${encodeURIComponent(`working/jobs/${stageProcess.jobId}.json`)}`,
-        )
+        const res = await fetch(fileUrl(`working/jobs/${stageProcess.jobId}.json`))
         const out = await res.json().catch(() => null)
         const content = out?.data?.content ? JSON.parse(out.data.content) : null
         const state = String(content?.state || '')
@@ -863,7 +862,7 @@ export function NarrationContent() {
     })
     try {
       await saveTtsSettings()
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -918,7 +917,7 @@ export function NarrationContent() {
         word,
         alias,
       )
-      const worldRes = await fetch('http://localhost:8000/api/action', {
+      const worldRes = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1477,11 +1476,11 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)))
       
       // Send to local API
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'upload_file',
           filename: file.name,
@@ -1610,11 +1609,11 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
     setGenerating(true)
     setAiError(null)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'draft_stage',
           stage_id: stepId,
@@ -1631,10 +1630,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
         setAiError(out?.message || out?.error || 'Suggestion failed.')
         return
       }
-      const fr = await fetch(
-        'http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=' +
-          encodeURIComponent('working/core-message-candidates.json'),
-      )
+      const fr = await fetch(fileUrl('working/core-message-candidates.json'))
       const fileOut = await fr.json().catch(() => null)
       if (fileOut?.ok && fileOut.data?.exists) {
         const parsed = JSON.parse(fileOut.data.content)
@@ -1650,11 +1646,11 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const rewindAndSuggest = async () => {
     setNeedRewind(false)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: stepId,
@@ -1925,7 +1921,7 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
-    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=session.json')
+    fetch(fileUrl('session.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (!out?.ok || !out.data?.exists || typeof out.data.content !== 'string') return
@@ -1987,11 +1983,16 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
   const [open, setOpen] = useState<string | null>(null)
   const [styleId, setStyleId] = useState('')
   const [series, setSeries] = useState('')
+  const [template, setTemplate] = useState('')
+  // The CLOCK (audio-first / video-first) comes from the template registry —
+  // session.json's `format` key is the contract id (naming debt, see
+  // docs/format-templates.md), so it can't be read as the clock.
+  const [clock, setClock] = useState('')
   const [voiceExcerpt, setVoiceExcerpt] = useState('')
   const [rulesExcerpt, setRulesExcerpt] = useState('')
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=session.json')
+    fetch(fileUrl('session.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists) {
@@ -1999,11 +2000,23 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
             const cfg = JSON.parse(out.data.content)
             if (typeof cfg?.style === 'string') setStyleId(cfg.style)
             if (typeof cfg?.series === 'string') setSeries(cfg.series)
+            if (typeof cfg?.template === 'string') {
+              setTemplate(cfg.template)
+              fetch(templatesUrl())
+                .then((r) => (r.ok ? r.json() : null))
+                .then((reg) => {
+                  const hit = reg?.data?.templates?.find(
+                    (t: { id?: string; format?: string }) => t.id === cfg.template,
+                  )
+                  if (typeof hit?.format === 'string') setClock(hit.format)
+                })
+                .catch(() => {})
+            }
           } catch { /* ignore */ }
         }
       })
       .catch(() => {})
-    fetch('http://localhost:8000/api/rules?session=spoolcast-dev-log-12')
+    fetch(apiUrl('rules', { session: activeSession() }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.rules)) {
@@ -2018,14 +2031,16 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
 
   // Deep-link straight to the relevant rulebook — never make the user hunt.
   const goRules = (focus?: string) => {
-    window.location.href = `/p/dev-log-12/rules${focus ? `?focus=${focus}` : ''}`
+    window.location.href = `/p/${activeSession()}/rules${focus ? `?focus=${focus}` : ''}`
   }
 
   const rows: { id: string; label: string; value: string; jump?: () => void; detail?: React.ReactNode }[] = [
     {
       id: 'style',
       label: 'Visual style',
-      value: `Wojak comic${styleId ? ` · ${styleId}` : ''}`,
+      // No style on the session = no style. Claiming one would be a lie —
+      // ad sessions ship without a style anchor until the Brand kit sets one.
+      value: styleId ? `Wojak comic · ${styleId}` : 'Not set yet — the Brand kit / World Kit owns the look',
       detail: (
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           <img src={asset('styles/wojak-comic/references/chad.png')} alt="" style={{ width: 240, maxWidth: '45%', borderRadius: 8 }} />
@@ -2040,26 +2055,39 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
     {
       id: 'format',
       label: 'Format',
-      value: 'Illustration video · 16:9 widescreen',
+      // The format is a FACT of the session, decided when its template was
+      // picked (docs/format-templates.md) — never re-asked here. The clock
+      // comes from the template registry, not a hardcoded assumption.
+      value: template
+        ? clock === 'video-first'
+          ? `Video-first — the clips own the clock · from the ${template} template`
+          : `Audio-first — narration drives the clock · from the ${template} template`
+        : 'Illustration video · 16:9 widescreen',
       detail: (
         <p style={{ margin: 0 }}>
-          Chunked still images rendered into video: the script is split into audio chunks, each
-          chunk gets one or more generated images, and the renderer assembles them with narration,
-          captions, and overlays. Locked by the show's format template.
+          {template
+            ? clock === 'video-first'
+              ? 'Locked when this video was created: the video model generates picture and sound together, the clips are the timeline, and any music is layered on afterwards. Want a narrated piece instead? Start a new video from an audio-first template.'
+              : 'Locked when this video was created: the narration audio owns the master timeline and visuals are slotted into it. Want a video-first piece instead? Start a new video from a video-first template.'
+            : "Chunked still images rendered into video: the script is split into audio chunks, each chunk gets one or more generated images, and the renderer assembles them with narration, captions, and overlays. Locked by the show's format template."}
         </p>
       ),
     },
-    {
-      id: 'voice',
-      label: 'Narration voice',
-      value: series ? `${series} voice profile` : 'series voice profile',
-      detail: (
-        <>
-          {voiceExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{voiceExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The voice profile loads from the engine.</p>}
-          <button type="button" className="vp-undo" onClick={() => goRules('voice')}>Read or edit the full profile →</button>
-        </>
-      ),
-    },
+    // Video-first sessions have NO narration voice — the spoken lines live in
+    // the clips. Showing a voice profile row there would be a lie.
+    ...(clock === 'video-first'
+      ? []
+      : [{
+          id: 'voice',
+          label: 'Narration voice',
+          value: series ? `${series} voice profile` : 'series voice profile',
+          detail: (
+            <>
+              {voiceExcerpt ? <p style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap' }}>{voiceExcerpt}…</p> : <p style={{ margin: '0 0 8px' }}>The voice profile loads from the engine.</p>}
+              <button type="button" className="vp-undo" onClick={() => goRules('voice')}>Read or edit the full profile →</button>
+            </>
+          ),
+        }]),
     {
       id: 'rules',
       label: 'Series rules',

@@ -8,8 +8,15 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import type { ChatState, ChatTab, OnboardSeed, SetupMode } from './types'
-import { castByShow } from './data/cast'
-import { buildGates, buildStepsFromContract } from './lib/workflow-graph'
+import { castByShow, showBySeries } from './data/cast'
+import {
+  FALLBACK_CONTRACT,
+  buildGates,
+  buildStepsFromContract,
+  stageToStepMap,
+  type WorkflowContract,
+} from './lib/workflow-graph'
+import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, postAction, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
 import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
@@ -110,11 +117,20 @@ function SpoolcastApp() {
   const navigate = useNavigate()
   const location = useLocation()
   const route = location.pathname
-  const initialStandalone = route === '/p/new' || route === '/p/new/world-kit'
+  // THE SESSION COMES FROM THE ROUTE. /p/:id (and its /world-kit and /rules
+  // children) names the engine session; everything below fetches through the
+  // api.ts seam, which resolves to this. Set during render, before any
+  // session-scoped child mounts and fetches. '/p/new' is the mock blank flow —
+  // api.ts maps it to the dev fallback session.
+  const routeSession = /^\/p\/([^/]+)/.exec(route)?.[1] ?? null
+  setActiveSession(routeSession)
+  const initialStandalone = route.startsWith('/p/new')
   const [setupMode, setSetupMode] = useState<SetupMode>(initialStandalone ? 'standalone' : 'series')
-  const [showName, setShowName] = useState(initialStandalone ? 'standalone' : 'spoolcast dev log')
-  const [steps, setSteps] = useState(() => buildStepsFromContract(initialStandalone, null))
-  const [gates, setGates] = useState(() => buildGates(initialStandalone, null))
+  // 'standalone' (no show, empty cast/kit) is the DEFAULT guess everywhere;
+  // only the session's own series field — or an explicit mock flow — upgrades it.
+  const [showName, setShowName] = useState('standalone')
+  const [steps, setSteps] = useState(() => buildStepsFromContract(FALLBACK_CONTRACT, initialStandalone, null))
+  const [gates, setGates] = useState(() => buildGates(FALLBACK_CONTRACT, initialStandalone, null))
   const [selected, setSelected] = useState<string>('setup') // Will be updated by useEffect once API loads
   const [autopilot, setAutopilot] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -141,11 +157,111 @@ function SpoolcastApp() {
   // Live API State: Fetches real engine status to enforce gates
   const [apiStatus, setApiStatus] = useState<any>(null)
   const [apiLoading, setApiLoading] = useState(true)
+  // The session's stage graph, served by the engine (GET /api/contract).
+  // FALLBACK_CONTRACT covers engine-down and the /p/new mock flow only.
+  const [contract, setContract] = useState<WorkflowContract>(FALLBACK_CONTRACT)
   // Last observed presence of the render-audit sentinel (null = not yet polled) —
   // 'done' is derived from load-seed or absent→present edges, never plain presence.
   const renderSentinelRef = useRef<boolean | null>(null)
+  // AUTO-NAVIGATION RULE: Only run ONCE per opened session. Prevents race
+  // conditions where manual navigation is overridden by background API updates.
+  const hasAutoNavigatedRef = useRef(false)
 
-  // Fetch real status from local API on mount
+  // SESSION SWITCH: moving to a different /p/:id drops the previous session's
+  // truth everywhere — the per-session store (drafts, dirty flags, render
+  // state), the cached status, and the once-per-session sentinels. A draft
+  // leaking across sessions would be saved into the wrong project's files.
+  const prevSessionRef = useRef<string | null | undefined>(undefined)
+  // Set when the blank flow creates its real session (create-on-save): the
+  // route change to that id is an ADOPTION, not a switch — the drafts typed
+  // on /p/new belong to the new session and must survive.
+  const adoptSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevSessionRef.current === routeSession) return
+    const isFirstMount = prevSessionRef.current === undefined
+    prevSessionRef.current = routeSession
+    if (isFirstMount) return // fresh store, nothing to drop
+    if (routeSession && adoptSessionRef.current === routeSession) {
+      adoptSessionRef.current = null
+      hasAutoNavigatedRef.current = false
+      renderSentinelRef.current = null
+      setApiStatus(null)
+      setApiLoading(true)
+      return // same project, now real — keep the store
+    }
+    useWorkflowStore.getState().resetSession()
+    hasAutoNavigatedRef.current = false
+    renderSentinelRef.current = null
+    setApiStatus(null)
+    setApiLoading(true)
+    if (!routeSession || routeSession === 'new') {
+      // Left a real session for the mock blank flow (or off the workflow):
+      // rebuild the blank graph — no poll will reshape it, and the previous
+      // session's completed steps must not linger.
+      setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true, null))
+      setGates(buildGates(FALLBACK_CONTRACT, true, null))
+      setSelected('setup')
+    }
+  }, [routeSession])
+
+  // FORMAT FORK (blank flow): until Step 01's narrator answer picks the
+  // format, the map's format-dependent stretch stays fogged. The answer is
+  // live store state, so the fog lifts the moment the user clicks — no save
+  // needed. Real sessions got their format from the template: never fogged.
+  const narrator = useWorkflowStore((s) => s.s1.narrator)
+  const fogState =
+    routeSession === 'new'
+      ? narrator === 'yes'
+        ? ('lifted' as const)
+        : narrator === 'no'
+          ? ('video' as const)
+          : ('undecided' as const)
+      : ('lifted' as const)
+  useEffect(() => {
+    if (routeSession !== 'new') return
+    setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true, null, fogState))
+    setGates(buildGates(FALLBACK_CONTRACT, true, null))
+  }, [routeSession, fogState])
+
+  // THE SHOW IDENTITY COMES FROM THE SESSION, NOT A GUESS: its series field
+  // names the show (cast, style, world kit). No series — or an unknown one —
+  // means no show behind it: 'standalone', the honest empty identity. Never
+  // another show's cast.
+  useEffect(() => {
+    if (!routeSession || routeSession === 'new') return
+    let cancelled = false
+    getFileJson<{ series?: unknown }>('session.json').then((cfg) => {
+      if (cancelled || cfg === null) return
+      const series = typeof cfg.series === 'string' ? cfg.series : ''
+      setShowName(series ? (showBySeries[series] ?? series) : 'standalone')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [routeSession])
+
+  // The contract is re-fetched per session — the engine copy is the single
+  // source of truth (kills the bundled-mirror drift risk).
+  useEffect(() => {
+    if (!routeSession || routeSession === 'new') {
+      setContract(FALLBACK_CONTRACT)
+      return
+    }
+    let cancelled = false
+    getJson<{ ok?: boolean; data?: { id?: string; contract?: { stages?: unknown[] } } }>(contractUrl())
+      .then((out) => {
+        if (cancelled) return
+        const stages = out?.data?.contract?.stages
+        if (out?.ok && Array.isArray(stages) && stages.length) {
+          setContract({ id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [routeSession])
+
+  // Fetch real status from local API while a session route is open
   useEffect(() => {
     const withUiProgress = async (statusPayload: ApiStatusPayload) => {
       const data = statusPayload?.data
@@ -161,8 +277,8 @@ function SpoolcastApp() {
       let visualDone = Number(visualArtifact?.matches || 0)
       try {
         const [shotRes, manifestRes] = await Promise.all([
-          fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=shot-list%2Fshot-list.json'),
-          fetch('http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=manifests%2Fscenes.manifest.json').catch(() => null),
+          fetch(fileUrl('shot-list/shot-list.json')),
+          fetch(fileUrl('manifests/scenes.manifest.json')).catch(() => null),
         ])
         const [shotOut, manifestOut] = await Promise.all([
           shotRes.json().catch(() => null),
@@ -197,13 +313,13 @@ function SpoolcastApp() {
     }
     const fetchStatus = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+        const response = await fetch(statusUrl())
         if (response.ok) {
           const data = await withUiProgress(await response.json())
           setApiStatus(data)
           // Update steps and gates with live API data to remove fake mock statuses
-          setSteps(buildStepsFromContract(initialStandalone, data.data))
-          setGates(buildGates(initialStandalone, data.data))
+          setSteps(buildStepsFromContract(contract, initialStandalone, data.data))
+          setGates(buildGates(contract, initialStandalone, data.data))
           // FINAL RENDER TRUTH: the render audit's sentinel file. The render
           // script deletes it when a compile starts and the audit re-writes it
           // on pass — so only two observations mean "done": the sentinel already
@@ -235,17 +351,19 @@ function SpoolcastApp() {
         setApiLoading(false)
       }
     }
+    if (!routeSession || routeSession === 'new') {
+      // No engine session to poll: login/projects/library, or the /p/new mock
+      // blank flow — which must NEVER show a real session's state.
+      setApiLoading(false)
+      return
+    }
     fetchStatus()
     // Light polling so the UI tracks engine changes (rewinds, drafts, external
     // script runs) without a manual refresh.
     const interval = setInterval(fetchStatus, 5000)
     return () => clearInterval(interval)
-  }, [initialStandalone])
+  }, [initialStandalone, routeSession, contract])
 
-  // AUTO-NAVIGATION RULE: Only run ONCE on initial load to set the starting point.
-  // Prevents race conditions where manual navigation is overridden by background API updates.
-  const hasAutoNavigatedRef = useRef(false)
-  
   useEffect(() => {
     if (!apiLoading && apiStatus?.data?.workflow_graph?.nodes) {
       if (hasAutoNavigatedRef.current) return // Skip if we've already auto-navigated once
@@ -253,26 +371,9 @@ function SpoolcastApp() {
       const nodes = apiStatus.data.workflow_graph.nodes
       const firstIncomplete = nodes.find((n: any) => n.status !== 'passed' && n.status !== 'approved')
       
-      // Map the contract stage id to our UI step id
-      const stepMap: Record<string, string> = {
-        'format_setup': 'setup',
-        'input_intake': 'idea',
-        'story_lock': 'goal',
-        'structure': 'plan',
-        'world_kit': 'worldkit',
-        'screenplay_plan': 'script',
-        'visual_pacing': 'pacing',
-        'shot_list_json': 'shots',
-        'narration_audio': 'voice',
-        'visual_assets': 'pics',
-        'asset_audit': 'check',
-        'preprocess_review_render': 'build',
-        // The tail stages are folded into the single Package & publish step, so
-        // sessions the engine reports as mid-packaging/publish land there.
-        'package_widescreen': 'build',
-        'mobile_variant': 'build',
-        'publish': 'build'
-      }
+      // Contract stage id -> UI step id, folded tail included — derived from
+      // the session's contract instead of an explainer-only literal.
+      const stepMap = stageToStepMap(contract)
       
       if (firstIncomplete && stepMap[firstIncomplete.id]) {
         setSelected(stepMap[firstIncomplete.id])
@@ -286,7 +387,7 @@ function SpoolcastApp() {
         }
       }
     }
-  }, [apiLoading, apiStatus])
+  }, [apiLoading, apiStatus, contract])
 
   const markStepDone = useCallback(
     (id: string) =>
@@ -315,7 +416,7 @@ function SpoolcastApp() {
   const isRules = route.endsWith('/rules')
   const blankProject = setupMode === 'standalone'
   const castData =
-    castByShow[showName as keyof typeof castByShow] ?? castByShow['spoolcast dev log']
+    castByShow[showName as keyof typeof castByShow] ?? castByShow['standalone']
   const activeStep = steps.find((step) => step.id === selected) ?? steps[0]
   const isBlocked = apiStatus?.data?.status === 'blocked'
 
@@ -344,8 +445,8 @@ function SpoolcastApp() {
     setOrigin('blank')
     setSetupMode('standalone')
     setShowName('standalone')
-    setSteps(buildStepsFromContract(true))
-    setGates(buildGates(true))
+    setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true))
+    setGates(buildGates(FALLBACK_CONTRACT, true))
     setSelected('setup')
     setAutopilot(false)
     setChatTab('chat')
@@ -353,13 +454,65 @@ function SpoolcastApp() {
     setCustomChat(chat)
   }
 
+  // ENTRY SPINE, STEP 4: saving Project setup on the blank flow CREATES the
+  // real video. The step-1 answers become engine truth — the narrator answer
+  // picks the template (yes → Explainer, no → the video-first Ad template),
+  // the choices persist to session.json, the setup approval records — then
+  // the route adopts the new id.
+  const createFromBlank = async (): Promise<boolean> => {
+    const s1Now = useWorkflowStore.getState().s1
+    if (s1Now.narrator !== 'yes' && s1Now.narrator !== 'no') {
+      setToast('Answer the format question first.')
+      return false
+    }
+    const template = s1Now.narrator === 'no' ? 'ad' : 'explainer'
+    const base =
+      s1Now.projectId.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-_]/g, '') || 'untitled'
+    const listing = await getJson<{ ok?: boolean; data?: { sessions?: { id: string }[] } }>(sessionsUrl())
+    if (!listing?.ok) {
+      setToast('The engine is not reachable \u2014 is the local API running?')
+      return false
+    }
+    const taken = new Set((listing.data?.sessions ?? []).map((existing) => existing.id))
+    let id = base
+    let n = 1
+    while (taken.has(id)) id = `${base}-${String(++n).padStart(2, '0')}`
+    const created = await postAction<{ session?: string }>({
+      action: 'create_session',
+      session: id,
+      template,
+    })
+    if (!created?.ok || !created.data?.session) {
+      setToast(`Engine: ${created?.error || created?.message || 'could not create the video.'}`)
+      return false
+    }
+    const aspect = s1Now.output === '916' ? '9:16' : s1Now.output === '11' ? '1:1' : '16:9'
+    await postAction({
+      action: 'set_session_fields',
+      session: id,
+      fields: { target_length_s: s1Now.length, aspect_ratio: aspect },
+    })
+    await postAction({
+      action: 'approve_stage',
+      session: id,
+      stage_id: 'format_setup',
+      approval_note: 'Project setup approved at creation (blank flow).',
+    })
+    adoptSessionRef.current = id
+    setOrigin('template')
+    setSetupMode('series')
+    navigate(`/p/${id}`)
+    setToast(`Video created \u2014 saved as ${id}.`)
+    return true
+  }
+
   const restoreDemo = () => {
     setOnboardSeed(null)
     setOrigin('series')
     setSetupMode('series')
     setShowName('spoolcast dev log')
-    setSteps(buildStepsFromContract(false))
-    setGates(buildGates(false))
+    setSteps(buildStepsFromContract(FALLBACK_CONTRACT, false))
+    setGates(buildGates(FALLBACK_CONTRACT, false))
     setSelected('pics')
     setAutopilot(false)
     setChatState('closed')
@@ -371,13 +524,13 @@ function SpoolcastApp() {
   const finishOnboarding = (seed: OnboardSeed, auto: boolean) => {
     setSetupMode('standalone')
     setShowName('standalone')
-    const fresh = buildStepsFromContract(true).map((step) =>
+    const fresh = buildStepsFromContract(FALLBACK_CONTRACT, true).map((step) =>
       step.id === 'setup' || step.id === 'idea' || step.id === 'goal'
         ? { ...step, status: 'done' as const }
         : step,
     )
     setSteps(fresh)
-    setGates(buildGates(true))
+    setGates(buildGates(FALLBACK_CONTRACT, true))
     setOnboardSeed(seed)
     setOrigin('blank')
     setSelected('plan')
@@ -414,7 +567,7 @@ function SpoolcastApp() {
         navigate('/projects')
       }}
       onBack={() => {
-        if (isWorldKit || isRules) navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}`)
+        if (isWorldKit || isRules) navigate(`/p/${routeSession ?? 'new'}`)
         else {
           restoreDemo()
           navigate('/projects')
@@ -434,14 +587,14 @@ function SpoolcastApp() {
           setConfirmAuto(true)
         }
       }}
-      onCast={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-06' : 'new'}/world-kit`)}
-      onRules={() => navigate(`/p/${setupMode === 'series' ? 'dev-log-12' : 'new'}/rules`)}
+      onCast={() => navigate(`/p/${routeSession ?? 'new'}/world-kit`)}
+      onRules={() => navigate(`/p/${routeSession ?? 'new'}/rules`)}
       onSave={async () => {
         try {
-          const r = await fetch('http://localhost:8000/api/action', {
+          const r = await fetch(actionUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'create_save_point' }),
+            body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'create_save_point' }),
           })
           const out = await r.json().catch(() => null)
           if (r.ok && out?.ok !== false) setToast('Save point kept.')
@@ -492,32 +645,20 @@ function SpoolcastApp() {
                   resetBlank()
                   navigate('/p/new')
                 }}
-                onRecent={(kind) => {
-                  if (kind === 'standalone') resetBlank()
-                  else restoreDemo()
-                  setOrigin(kind === 'standalone' ? 'template' : 'series')
-                  navigate(kind === 'standalone' ? '/p/new' : '/p/dev-log-06')
-                }}
-                onTemplate={(seed, series) => {
-                  // choosing a template imports its format settings into the workflow
-                  setOnboardSeed(seed)
-                  setOrigin(series ? 'series' : 'template')
-                  setSetupMode('standalone')
+                onOpenSession={(id) => {
+                  // A REAL session: /p/:id is the identity — the session-switch
+                  // effect resets per-session state and auto-nav picks the step.
+                  setOnboardSeed(null)
+                  setOrigin('series')
+                  setSetupMode('series')
+                  // Provisional: the show identity resolves from the session's
+                  // own series field the moment session.json loads.
                   setShowName('standalone')
-                  const fresh = buildStepsFromContract(true).map((step) =>
-                    step.id === 'setup'
-                      ? { ...step, status: 'done' as const }
-                      : series && step.id === 'worldkit'
-                        ? { ...step, status: 'done' as const }
-                        : step,
-                  )
-                  setSteps(fresh)
-                  setGates(buildGates(true))
-                  setSelected('idea')
+                  setSelected('setup')
                   setAutopilot(false)
                   setChatState('closed')
                   setCustomChat(false)
-                  navigate('/p/new')
+                  navigate(`/p/${id}`)
                 }}
                 onScrolled={setHeaderScrolled}
               />
@@ -527,8 +668,10 @@ function SpoolcastApp() {
             path="/p/:id"
             element={
               <WorkflowView
+                key={routeSession ?? 'mock'}
                 steps={steps}
                 gates={gates}
+                contractId={contract.id}
                 seed={onboardSeed}
                 selected={selected}
                 setSelected={setSelected}
@@ -541,9 +684,20 @@ function SpoolcastApp() {
                 castData={castData}
                 blankProject={blankProject}
                 autopilot={autopilot}
-                onOpenCast={() => navigate(`/p/dev-log-06/world-kit`)}
+                onOpenCast={() => navigate(`/p/${routeSession ?? 'new'}/world-kit`)}
                 onToast={setToast}
                 onAdvance={async (id: string, opts?: { aiHandoff?: boolean }): Promise<boolean> => {
+                  // BLANK FLOW: no engine session exists behind /p/new. Saving
+                  // Project setup is the moment the video becomes real; every
+                  // other step waits for that.
+                  if (routeSession === 'new') {
+                    const blankStep = steps.find((st) => st.id === id)
+                    if ((blankStep?.sourceId || id) !== 'format_setup') {
+                      setToast('Save Project setup first \u2014 that creates the video.')
+                      return false
+                    }
+                    return createFromBlank()
+                  }
                   // SAVE-TO-ENGINE PROTOCOL: Save/Approve must actually move the engine, for EVERY stage:
                   //   1. Persist the user's typed input into the session's source/ folder.
                   //   2. Run the stage's contract action (the engine produces the stage's artifacts).
@@ -568,11 +722,11 @@ function SpoolcastApp() {
                     //    that a re-approve cannot bring back.
                     const isDirtyNow = Boolean(useWorkflowStore.getState().dirtySteps[sourceId])
                     if (wasAlreadyPassed && isDirtyNow) {
-                      const rw = await fetch('http://localhost:8000/api/action', {
+                      const rw = await fetch(actionUrl(), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                          session: 'spoolcast-dev-log-12',
+                          session: activeSession(),
                           tenant: 'local',
                           action: 'rewind_stage',
                           stage_id: sourceId,
@@ -591,11 +745,11 @@ function SpoolcastApp() {
                       // Step 1's target length feeds the AI structure drafter's runtime plan.
                       const s1Now = useWorkflowStore.getState().s1
                       if (s1Now.length > 0) {
-                        await fetch('http://localhost:8000/api/action', {
+                        await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'set_session_fields',
                             fields: { target_length_s: s1Now.length },
@@ -608,11 +762,11 @@ function SpoolcastApp() {
                       const ideaBrief = useWorkflowStore.getState().ideaBrief
                       if (ideaBrief.trim().length > 0) {
                         const toB64 = (s: string) => btoa(unescape(encodeURIComponent(s)))
-                        const up = await fetch('http://localhost:8000/api/action', {
+                        const up = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'upload_file',
                             filename: 'idea-brief.md',
@@ -630,11 +784,11 @@ function SpoolcastApp() {
                       // write the contract-declared file via set_stage_output.
                       const draft = useWorkflowStore.getState().stageDrafts[sourceId] ?? ''
                       if (draft.trim().length > 0) {
-                        const so = await fetch('http://localhost:8000/api/action', {
+                        const so = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'set_stage_output',
                             stage_id: sourceId,
@@ -661,11 +815,11 @@ function SpoolcastApp() {
                       ]
                       for (const [path, content] of files) {
                         if (!content.trim()) continue
-                        const so = await fetch('http://localhost:8000/api/action', {
+                        const so = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'set_stage_output',
                             stage_id: sourceId,
@@ -680,10 +834,10 @@ function SpoolcastApp() {
                       }
                       if (wasAlreadyPassed) {
                         for (const stage of ['screenplay', 'narration']) {
-                          await fetch('http://localhost:8000/api/action', {
+                          await fetch(actionUrl(), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ session: 'spoolcast-dev-log-12', tenant: 'local', action: 'run_audit', stage }),
+                            body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'run_audit', stage }),
                           }).catch(() => {})
                         }
                       }
@@ -692,11 +846,11 @@ function SpoolcastApp() {
                       // The core message is the stage's contract output — record it in session.json.
                       const goal = useWorkflowStore.getState().goal
                       if (goal.text.trim().length > 0) {
-                        const cm = await fetch('http://localhost:8000/api/action', {
+                        const cm = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'set_core_message',
                             content: goal.text.trim(),
@@ -718,11 +872,11 @@ function SpoolcastApp() {
                     {
                       let res: Response
                       if (needsApproval) {
-                        res = await fetch('http://localhost:8000/api/action', {
+                        res = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'approve_stage',
                             stage_id: sourceId,
@@ -734,11 +888,11 @@ function SpoolcastApp() {
                         // automatically on save. AI-drafting stages (screenplay,
                         // etc.) have explicit buttons — saving must never
                         // silently re-run a paid draft.
-                        res = await fetch('http://localhost:8000/api/action', {
+                        res = await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
-                            session: 'spoolcast-dev-log-12',
+                            session: activeSession(),
                             tenant: 'local',
                             action: 'inventory_source',
                             approve: false,
@@ -758,12 +912,12 @@ function SpoolcastApp() {
                         const msg = out?.message || out?.data?.message || out?.data?.error || out?.error || 'Engine rejected this step.'
                         setToast(`Engine: ${msg}`)
                         // Still refresh so blockers/statuses shown are the engine's current truth.
-                        const r = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                        const r = await fetch(statusUrl())
                         if (r.ok) {
                           const apiData = await r.json()
                           setApiStatus(apiData)
-                          setSteps(buildStepsFromContract(initialStandalone, apiData.data))
-                          setGates(buildGates(initialStandalone, apiData.data))
+                          setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                          setGates(buildGates(contract, initialStandalone, apiData.data))
                         }
                         return false
                       }
@@ -788,11 +942,11 @@ function SpoolcastApp() {
                       useWorkflowStore.getState().setHandoff({ stageId: handoff.stage_id, label: handoff.busy })
                       ;(async () => {
                         try {
-                          const r = await fetch('http://localhost:8000/api/action', {
+                          const r = await fetch(actionUrl(), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                              session: 'spoolcast-dev-log-12',
+                              session: activeSession(),
                               tenant: 'local',
                               action: 'draft_stage',
                               stage_id: handoff.stage_id,
@@ -814,12 +968,12 @@ function SpoolcastApp() {
                           useWorkflowStore.getState().setHandoff(null)
                           // Refresh so statuses/gates reflect the new artifacts.
                           try {
-                            const res2 = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                            const res2 = await fetch(statusUrl())
                             if (res2.ok) {
                               const apiData = await res2.json()
                               setApiStatus(apiData)
-                              setSteps(buildStepsFromContract(initialStandalone, apiData.data))
-                              setGates(buildGates(initialStandalone, apiData.data))
+                              setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                              setGates(buildGates(contract, initialStandalone, apiData.data))
                             }
                           } catch { /* polling will catch up */ }
                         }
@@ -828,12 +982,12 @@ function SpoolcastApp() {
                     }
 
                     // 3. REFRESH: the UI reflects the engine's new state (green gate, statuses, no warning).
-                    const res = await fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+                    const res = await fetch(statusUrl())
                     if (res.ok) {
                       const apiData = await res.json()
                       setApiStatus(apiData)
-                      setSteps(buildStepsFromContract(initialStandalone, apiData.data))
-                      setGates(buildGates(initialStandalone, apiData.data))
+                      setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                      setGates(buildGates(contract, initialStandalone, apiData.data))
                     }
                     // Only now start the background AI hand-off — the quick refresh
                     // above is already done, so the UI advances instantly.
@@ -858,7 +1012,7 @@ function SpoolcastApp() {
           />
           <Route
             path="/p/:id/world-kit"
-            element={<WorldKitView castData={castData} showName={showName} />}
+            element={<WorldKitView castData={castData} showName={showName} blank={showName === 'standalone'} />}
           />
           <Route path="/p/:id/rules" element={<RulesView />} />
           <Route path="*" element={<Navigate to="/" replace />} />

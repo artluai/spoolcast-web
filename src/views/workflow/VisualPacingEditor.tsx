@@ -22,6 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
+import { actionUrl, activeSession, contentUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -75,10 +76,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [assetUrl, setAssetUrl] = useState('')
   const [fetchingAsset, setFetchingAsset] = useState(false)
   const [assetErr, setAssetErr] = useState<string | null>(null)
-  // Dev-server path for previewing session media (vite fs.allow covers
-  // spoolcast-content). Session id hardcode = known debt.
-  const assetSrc = (rel: string) =>
-    `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/sessions/spoolcast-dev-log-12/${rel}`
+  // Session media preview URL, served by the engine.
+  const assetSrc = (rel: string) => contentUrl(rel, 'preview')
   const fetchOverlayAsset = async () => {
     setEditing((d) => d) // keep editor open
     const cur = editing
@@ -86,11 +85,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setFetchingAsset(true)
     setAssetErr(null)
     try {
-      const r = await fetch('http://localhost:8000/api/action', {
+      const r = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'fetch_overlay_asset',
           url: assetUrl.trim(),

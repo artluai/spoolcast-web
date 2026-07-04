@@ -7,7 +7,7 @@ export function Footer({ blank }: { blank: boolean }) {
       </div>
       <div>
         <span className="dot ok" />
-        {blank ? '0 of 12 steps complete' : 'Narration audio complete'}
+        {blank ? '0 steps complete' : 'Narration audio complete'}
       </div>
       <div className="footer-right">
         <span>{blank ? '0 approvals on file' : '4 approvals on file'}</span>

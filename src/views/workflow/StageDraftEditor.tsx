@@ -7,6 +7,7 @@ import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
+import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 
 // Selectable OpenRouter models for AI drafting. The id is sent to the engine;
 // pricing tiers will hang off this list when the credit system lands.
@@ -68,7 +69,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     }
   }, [])
   useEffect(() => {
-    fetch('http://localhost:8000/api/status?session=spoolcast-dev-log-12&tenant=local')
+    fetch(statusUrl())
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         const cur = out?.data?.current_contract_stage?.id
@@ -104,9 +105,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       setOpen(true)
       return
     }
-    fetch(
-      `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
-    )
+    fetch(fileUrl(cfg.path))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
@@ -128,9 +127,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const isBusy = drafting || activeProcess
 
   const loadFreshDraft = async () => {
-    const fr = await fetch(
-      `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(cfg.path)}`,
-    )
+    const fr = await fetch(fileUrl(cfg.path))
     const fileOut = await fr.json().catch(() => null)
     if (fileOut?.ok && fileOut.data?.exists) {
       // setStageDraft (not seed): an AI draft awaiting review counts as an
@@ -155,9 +152,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       // saved it as a proposal. Offer the human the explicit choice.
       const proposedPath = cfg.path.replace(/\.md$/, '.proposed.md')
       try {
-        const pr = await fetch(
-          `http://localhost:8000/api/file?session=spoolcast-dev-log-12&path=${encodeURIComponent(proposedPath)}`,
-        )
+        const pr = await fetch(fileUrl(proposedPath))
         const pOut = await pr.json().catch(() => null)
         if (pOut?.ok && pOut.data?.exists && typeof pOut.data.content === 'string') {
           const issues = msg
@@ -196,7 +191,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         pollingJobRef.current = null
         return
       }
-      const jr = await fetch(`http://localhost:8000/api/jobs/${jobId}`)
+      const jr = await fetch(jobsUrl(jobId))
       const jout = await jr.json().catch(() => null)
       if (!jr.ok || jout?.ok === false) {
         setDraftError(jout?.message || jout?.error || 'Could not read draft job status.')
@@ -238,11 +233,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     setDraftJob(null)
     try {
       const useJob = stageId === 'visual_pacing'
-      const res = await fetch(useJob ? 'http://localhost:8000/api/jobs' : 'http://localhost:8000/api/action', {
+      const res = await fetch(useJob ? jobsUrl() : actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           ...(useJob ? { kind: 'draft_stage' } : { action: 'draft_stage' }),
           stage_id: stageId,
@@ -286,11 +281,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const rewindAndDraft = async () => {
     setNeedRewind(false)
     try {
-      const res = await fetch('http://localhost:8000/api/action', {
+      const res = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: 'spoolcast-dev-log-12',
+          session: activeSession(),
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: stageId,
