@@ -5,6 +5,8 @@ import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 const FILE_LISTENER = 'working/listener-draft.md'
 const FILE_SCREENPLAY = 'working/screenplay-v3.md'
@@ -81,6 +83,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setChain = (nextRevs: Rev[], nextSel: number) =>
     seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs: nextRevs, sel: nextSel }))
   const [editing, setEditing] = useState(false)
+  const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
   const [needRewind, setNeedRewind] = useState<{ feedback: string } | null>(null)
@@ -273,6 +276,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       stage_id: stageId,
       variant: initial ? 'listener' : 'screenplay',
       allow_cost: true,
+      model,
+      ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
     })
     const out = await r.json().catch(() => null)
@@ -354,6 +359,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         const r = await post({
           action: 'ai_review',
           allow_cost: true,
+          model,
           previous: { notes: prevNotes.filter((d) => !ignored.has(`ai:${d}`)), dismissed: prevDismissed },
         })
         const out = await r.json().catch(() => null)
@@ -617,6 +623,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             rulesFocus="story"
             onRun={(fb) => runReview(fb, true)}
           />
+          <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
           <button
             style={ghost}
             onClick={() => {
@@ -1033,6 +1040,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   rulesFocus="story"
                   onRun={(fb) => runReview(composeAuditFeedback(fb), true)}
                 />
+                <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
                 {audit && !auditStale && !audit.passed ? (
                   <button style={ghost} disabled={!!busy} onClick={() => setConfirmSkip(true)}>
                     Skip the checks

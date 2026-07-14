@@ -3,6 +3,8 @@ import { FeedbackButton } from './FeedbackButton'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 // COMPILE SHOT LIST (step 08): the machine-precise lens over the pacing plan.
 // The engine compiles shot-list/shot-list.json (code-law structure, AI polish,
@@ -119,6 +121,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
   const [building, setBuilding] = useState(false)
+  const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [buildJob, setBuildJob] = useState<DraftJob | null>(null)
   const [checking, setChecking] = useState(false)
   const [audit, setAudit] = useState<Audit>(null)
@@ -350,7 +353,9 @@ export function ShotListStage({ stageId }: { stageId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: activeSession(), tenant: 'local', kind: 'draft_stage', stage_id: stageId,
-          allow_cost: true, ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+          allow_cost: true, model,
+          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
+          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -518,6 +523,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
             rulesFocus="visual-pacing"
             onRun={(fb) => build(fb)}
           />
+          <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
           {chunks.length > 0 ? (
             <button type="button" className="vp-undo" disabled={isBusy} onClick={recheck} title="Free — saves your edits and reruns the validator">
               {checking ? 'Checking…' : edited ? 'Save & re-check' : 'Re-check'}

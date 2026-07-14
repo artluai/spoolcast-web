@@ -3,6 +3,8 @@ import { Pill } from '../../components/common/Pill'
 import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { FeedbackButton } from './FeedbackButton'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 // Word-timed upload captions produced by the engine's build_timepoints job
 // (ROADMAP item 8): aligns each chunk's narration to its mp3 with Whisper,
@@ -116,6 +118,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
   // from the script + core message + series rules) writes working/video-meta.json;
   // fields are editable after. The ▾ carries optional guidance to the model.
   const [metaGen, setMetaGen] = useState<GenState>('idle')
+  const [metaModel, setMetaModel] = useState(DEFAULT_MODEL_ID)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [thumb, setThumb] = useState<ThumbState>({ gen: 'idle', versions: [], chosen: null, cover: false, finalizing: null, bust: 0 })
@@ -156,7 +159,11 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
   }, [])
   const generateMeta = (guidance: string) => {
     setMetaGen('working')
-    const extra = guidance.trim() ? ['--guidance', guidance.trim()] : []
+    const extra = [
+      '--model', metaModel,
+      ...(draftReasoning(metaModel) ? ['--reasoning', draftReasoning(metaModel)!] : []),
+      ...(guidance.trim() ? ['--guidance', guidance.trim()] : []),
+    ]
     void runEngineJob({ action: 'draft_video_meta', extra_args: extra }, (succeeded) => {
       if (!succeeded) {
         setMetaGen((prev) => (prev === 'working' ? 'idle' : prev))
@@ -252,6 +259,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
             placeholder="Optional guidance — e.g. “lead with the failure story”, “no jargon in the title”…"
             onRun={generateMeta}
           />
+          <ModelPicker model={metaModel} onChange={setMetaModel} disabled={metaGen === 'working'} />
           {metaGen === 'idle' ? (
             <span className="pkg-meta">drafted from the script &amp; series rules · ▾ adds guidance</span>
           ) : null}

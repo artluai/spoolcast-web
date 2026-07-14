@@ -8,13 +8,11 @@ import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
-// Selectable OpenRouter models for AI drafting. The id is sent to the engine;
-// pricing tiers will hang off this list when the credit system lands.
-// Three everyday choices up front; the rest live behind "More models".
-// `reasoning` overrides the engine default where it saves money (Opus bills
-// its thinking tokens at full output rate — medium is the sweet spot).
-type DraftModel = { id: string; label: string; cost: string; desc: string; reasoning?: string }
+// The model catalog + dropdown live in ModelPicker.tsx — ONE list and ONE
+// design shared by every AI-suggest button.
 type DraftJob = {
   id: string
   status: 'queued' | 'running' | 'done' | 'failed'
@@ -22,18 +20,6 @@ type DraftJob = {
   message?: string | null
   result?: { ok?: boolean; error?: string; message?: string } | null
 }
-const PRIMARY_MODELS: DraftModel[] = [
-  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', cost: 'Standard cost', desc: 'best value — the default' },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash', cost: 'Budget cost', desc: 'quick drafts' },
-  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', cost: 'Premium cost', desc: 'best writing, highest spend', reasoning: 'medium' },
-]
-const MORE_MODELS: DraftModel[] = [
-  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek v4 pro', cost: 'Budget cost', desc: 'stronger drafts without a big spend' },
-  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini', cost: 'Standard cost', desc: 'balanced all-rounder' },
-  { id: 'qwen/qwen3.7-max', label: 'Qwen 3.7 max', cost: 'Premium cost', desc: 'stronger Qwen, more expensive' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', cost: 'Standard cost', desc: 'high quality, moderate spend' },
-]
-const ALL_MODELS = [...PRIMARY_MODELS, ...MORE_MODELS]
 
 /**
  * Draft editor for stages whose contract output is a single drafted file.
@@ -50,9 +36,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
   const [open, setOpen] = useState(false)
   const sourceWords = useSourceWords()
-  const [model, setModel] = useState(PRIMARY_MODELS[0].id)
-  const [modelMenu, setModelMenu] = useState(false)
-  const [showMore, setShowMore] = useState(false)
+  const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [draftJob, setDraftJob] = useState<DraftJob | null>(null)
@@ -244,9 +228,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           model,
           allow_cost: true,
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-          ...(ALL_MODELS.find((m) => m.id === model)?.reasoning
-            ? { reasoning: ALL_MODELS.find((m) => m.id === model)!.reasoning }
-            : {}),
+          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -370,44 +352,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
             onRun={(fb) => runDraft(fb)}
           />
-          <span style={{ position: 'relative' }}>
-            <button
-              type="button"
-              className="vp-menu-btn"
-              disabled={isBusy}
-              onClick={() => { setModelMenu((v) => !v); setShowMore(false) }}
-              style={{ fontSize: 12, padding: '8px 12px' }}
-            >
-              {ALL_MODELS.find((m) => m.id === model)?.label ?? model} ▾
-            </button>
-            {modelMenu && (
-              <>
-                <span className="vp-menu-backdrop" onClick={() => setModelMenu(false)} />
-                <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, minWidth: 250 }}>
-                  <span className="vp-menu-h">MODEL</span>
-                  {(showMore ? ALL_MODELS : PRIMARY_MODELS).map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => { setModel(m.id); setModelMenu(false) }}
-                      style={m.id === model ? { background: 'var(--bg-3)' } : undefined}
-                    >
-                      {m.label}
-                      <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                        {m.cost} — {m.desc}
-                      </span>
-                    </button>
-                  ))}
-                  {!showMore && (
-                    <>
-                      <span className="vp-menu-div" style={{ display: 'block' }} />
-                      <button type="button" onClick={() => setShowMore(true)}>More models ▸</button>
-                    </>
-                  )}
-                </span>
-              </>
-            )}
-          </span>
+          <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
           <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>uses model credits</span>
           {(draftJob || stageProcess) && isBusy && (
             <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>

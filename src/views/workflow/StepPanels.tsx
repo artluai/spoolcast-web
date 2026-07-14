@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
 import { actionUrl, activeSession, apiUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
@@ -1471,10 +1473,16 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
     if (!file) return
 
     try {
-      // Read file as base64
-      const buffer = await file.arrayBuffer()
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)))
-      
+      // Read file as base64 via FileReader. NOT String.fromCharCode(...bytes):
+      // spreading a multi-MB file as call arguments overflows the JS call
+      // stack, so every real photo "failed to upload" while the API was fine.
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '')
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+
       // Send to local API
       const res = await fetch(actionUrl(), {
         method: 'POST',
@@ -1587,6 +1595,30 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [needRewind, setNeedRewind] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [model, setModel] = useState(DEFAULT_MODEL_ID)
+
+  // CANDIDATES CONVENTION (video-first hook lock): if the stage's
+  // working/hook-options.json artifact exists, its options preload the
+  // STANDARD candidates list — same default layout, same pick behavior,
+  // nothing template-specific about the UI (docs/format-templates.md).
+  useEffect(() => {
+    fetch(fileUrl('working/hook-options.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.ok && out.data?.exists) {
+          try {
+            const parsed = JSON.parse(out.data.content) as {
+              options?: { hook?: string; promise?: string }[]
+            }
+            const opts = (parsed?.options ?? [])
+              .filter((o) => typeof o?.hook === 'string')
+              .map((o) => `${o.hook}${o.promise ? `\nPromise: ${o.promise}` : ''}`)
+            if (opts.length > 0) setCandidates((prev) => prev ?? opts)
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // MULTI-MESSAGE: goal.text holds messages separated by blank lines (e.g. a
   // UGC product video may carry 3 selling points). Default is one; "+ Add"
@@ -1618,6 +1650,8 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           action: 'draft_stage',
           stage_id: stepId,
           allow_cost: true,
+          model,
+          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
@@ -1708,9 +1742,12 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             <span className="ds">3 candidates drafted from your idea &amp; source material — pick one, then edit it</span>
           </span>
           {!candidates && (
-            <button type="button" className="core-create" disabled={generating} onClick={suggest}>
-              {generating ? (<><span className="spin" /> Generating…</>) : 'Suggest'}
-            </button>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <ModelPicker model={model} onChange={setModel} disabled={generating} />
+              <button type="button" className="core-create" disabled={generating} onClick={suggest}>
+                {generating ? (<><span className="spin" /> Generating…</>) : 'Suggest'}
+              </button>
+            </span>
           )}
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
@@ -1742,7 +1779,8 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             {/* RE-SUGGEST: plain button by default; the expand toggle opens a
                 multi-line feedback box with the button inside it. */}
             {!feedbackOpen ? (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <ModelPicker model={model} onChange={setModel} disabled={generating} />
                 {/* SPLIT BUTTON: one pill, two zones — ▾ opens the feedback box,
                     the main zone re-suggests. */}
                 <span style={{ display: 'inline-flex' }}>
