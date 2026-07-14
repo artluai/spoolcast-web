@@ -786,7 +786,9 @@ export function WorkflowView({
             <button
               className={`node s-${displayStatus} ${selected === step.id ? 'selected' : ''} ${
                 step.optional ? 'optional' : ''
-              } ${runningId === step.id ? 'running' : ''} ${step.progress ? 'has-progress' : ''}`}
+              } ${runningId === step.id ? 'running' : ''} ${step.progress ? 'has-progress' : ''} ${
+                step.subtitle && !step.progress ? 'has-sub' : ''
+              }`}
               key={step.id}
               style={{ left: step.x + 24, top: step.y + 14 }}
               onClick={() => setSelected(step.id)}
@@ -799,6 +801,7 @@ export function WorkflowView({
                 {`${step.num}${step.optional ? ' · OPTIONAL' : ''}`}
               </span>
               <span className="node-name">{step.name}</span>
+              {step.subtitle ? <span className="node-sub">{step.subtitle}</span> : null}
               {step.progress ? (
                 <span className="progress">
                   <i style={{ width: `${Math.round((step.progress.done / step.progress.total) * 100)}%` }} />
@@ -1008,6 +1011,10 @@ export function WorkflowView({
             <button className="icon-btn expand-btn" onClick={() => setFull((value) => !value)}>
               {fullView ? '⤡' : '⤢'}
             </button>
+            {/* Template-provided description (contract ui.description): a
+                full-width second line under the whole header row — title and
+                buttons keep the default single-row layout untouched. */}
+            {activeStep.description ? <span className="head-desc">{activeStep.description}</span> : null}
           </div>
           {resetConfirm ? (
             <div className="modal-scrim">

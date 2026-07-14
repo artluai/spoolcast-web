@@ -379,6 +379,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .node .num { position: absolute; left: 12px; right: 12px; top: 20px; display: block; font-family: var(--mono); font-size: 10px; line-height: 12px; color: var(--ink-3); letter-spacing: .12em; }
 .node-name { position: absolute; left: 12px; right: 12px; top: 39px; display: block; margin: 0; font-size: 13px; line-height: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node.has-progress .node-name { top: 35px; }
+/* Template-provided subtitle under the canonical module name ("this one is
+   the hook"). Only renders when the contract's ui.blurb supplies it. The
+   .has-sub card redistributes its vertical rhythm — num and name shift up so
+   the subtitle keeps clear air above the status foot. */
+.node.has-sub .num { top: 13px; }
+.node.has-sub .node-name { top: 29px; }
+/* The step's long description (contract ui.description): a full-width second
+   line inside the header bar, below the title AND the buttons. Without a
+   description the header is the untouched default single row; with one, the
+   bar wraps and grows by exactly the description line. */
+.detail-head:has(.head-desc) { flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+.head-desc { flex: 1 1 100%; min-width: 0; margin-top: -4px; color: var(--ink-3); font-size: 12.5px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-sub { position: absolute; left: 12px; right: 12px; top: 47px; display: block; font-size: 10.5px; line-height: 13px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node.has-progress .node-sub { display: none; }
 .node-foot { position: absolute; left: 12px; right: 12px; bottom: 10px; min-height: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-family: var(--mono); font-size: 10px; line-height: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-3); }
 .node-foot b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-foot small { flex: none; letter-spacing: .05em; }

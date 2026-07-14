@@ -1,5 +1,5 @@
 import explainerContract from '../contracts/explainer.json'
-import { stepAlias, stepAliasByContract } from '../data/cast'
+import { stepAlias } from '../data/cast'
 import type { Gate, StageContract, Status, Step } from '../types'
 
 // The workflow is built from the SESSION'S CONTRACT SERVED BY THE ENGINE
@@ -34,24 +34,40 @@ const UI_HINTS: Record<
     },
     branchPairs: [['narration_audio', 'visual_assets']],
   },
-  ad: {
-    // Video-first: no fork (the clips carry the audio), and the tail is one
-    // stage shorter — package_widescreen carries the Package & publish card,
-    // so only publish folds into it.
-    foldInto: {
-      publish: 'build',
-    },
-    branchPairs: [],
-  },
 }
 const NO_HINTS = { foldInto: {}, branchPairs: [] as [string, string][] }
 export const uiHints = (contractId: string) => UI_HINTS[contractId] ?? NO_HINTS
 
-// Alias resolution is CONTRACT-AWARE: the ad template reuses explainer stage
-// ids with different meanings, so per-contract overrides win over the shared
-// stepAlias map (see stepAliasByContract in data/cast.ts).
-const stepAliasFor = (contractId: string, stageId: string) =>
-  stepAliasByContract[contractId]?.[stageId] ?? stepAlias[stageId]
+// TEMPLATE-OWNED PRESENTATION. The hardcoded maps above are explainer-only
+// legacy; every other contract carries its display data in its own stages'
+// `ui` blocks (docs/format-templates.md "UI hints"), served by the engine —
+// a user-made template adapts presentation by editing its contract file,
+// never this bundle. Module NAMES are canonical per UI step (users learn the
+// app once — "Core message" is the same box in every template); the
+// template's meaning lives in the SUBTITLE (ui.blurb).
+const CANONICAL_STEP_NAME: Record<string, string> = Object.fromEntries(
+  Object.values(stepAlias).map((a) => [a.id, a.name]),
+)
+
+const presentStage = (stage: StageContract) => {
+  const alias = stepAlias[stage.id]
+  const id = stage.ui?.step ?? alias?.id ?? stage.id
+  return {
+    id,
+    name: CANONICAL_STEP_NAME[id] ?? alias?.name ?? stage.label,
+    blurb: stage.ui?.description ?? stage.ui?.blurb ?? alias?.blurb ?? stage.gate ?? '',
+    subtitle: stage.ui?.blurb,
+    description: stage.ui?.description,
+  }
+}
+
+const foldTargets = (contract: WorkflowContract): Record<string, string> => {
+  const map: Record<string, string> = { ...uiHints(contract.id).foldInto }
+  for (const stage of contract.stages) {
+    if (stage.ui?.fold_into) map[stage.id] = stage.ui.fold_into
+  }
+  return map
+}
 
 // FORMAT FORK (blank flow only). Until Step 01's narrator answer picks the
 // format, the map must not pretend to know it: the shared spine renders
@@ -76,11 +92,10 @@ const FOG_STAGES = new Set([
 /** Contract stage id → UI step id, INCLUDING folded (hidden) stages, so engine
  *  state on any stage can be attributed to the step that presents it. */
 export function stageToStepMap(contract: WorkflowContract): Record<string, string> {
-  const hints = uiHints(contract.id)
+  const folds = foldTargets(contract)
   const map: Record<string, string> = {}
   for (const stage of contract.stages) {
-    const folded = hints.foldInto[stage.id]
-    map[stage.id] = folded ?? (stepAliasFor(contract.id, stage.id)?.id ?? stage.id)
+    map[stage.id] = folds[stage.id] ?? presentStage(stage).id
   }
   return map
 }
@@ -98,7 +113,7 @@ export function buildStepsFromContract(
   fogState: FogState = 'lifted',
 ): Step[] {
   const hints = uiHints(contract.id)
-  const hidden = new Set(Object.keys(hints.foldInto))
+  const hidden = new Set(Object.keys(foldTargets(contract)))
   const pairRole = new Map<string, 0 | 1>()
   for (const [first, second] of hints.branchPairs) {
     pairRole.set(first, 0)
@@ -134,11 +149,7 @@ export function buildStepsFromContract(
   })
 
   return visible.map((stage, index) => {
-    const alias = stepAliasFor(contract.id, stage.id) ?? {
-      id: stage.id,
-      name: stage.label,
-      blurb: stage.gate ?? '',
-    }
+    const alias = presentStage(stage)
 
     // Derive status from live API data if available, otherwise default to 'later'
     let status: Status = 'later'
@@ -173,6 +184,8 @@ export function buildStepsFromContract(
       sourceId: stage.id,
       name: alias.name,
       blurb: alias.blurb,
+      ...(alias.subtitle && !fog ? { subtitle: alias.subtitle } : {}),
+      ...(alias.description && !fog ? { description: alias.description } : {}),
       status,
       progress,
       optional: false,
