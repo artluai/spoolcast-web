@@ -308,7 +308,7 @@ export function RefImagePanel({
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
             <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
-              character sheet — blank background
+              generate as character sheet with blank background
             </label>
             {detailed.trim() ? (
               <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
@@ -322,9 +322,7 @@ export function RefImagePanel({
                   <option value="notes">original notes</option>
                 </select>
               </label>
-            ) : (
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>from the notes above · uses image credits</span>
-            )}
+            ) : null}
           </div>
 
           {/* DETAILED PROMPT: AI-expanded, editable, used by Generate when selected */}
@@ -333,7 +331,6 @@ export function RefImagePanel({
               {detailing ? (<><span className="spin" /> Detailing…</>) : '✦ Make detailed image prompt'}
             </button>
             <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
-            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>uses text credits</span>
           </div>
           {detailed.trim() !== '' && (
             <textarea
@@ -365,9 +362,7 @@ export function RefImagePanel({
                 </button>
               </span>
             ))}
-            {attached.length > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>these ride along with the prompt</span>
-            )}
+
           </div>
           {attachOpen && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>

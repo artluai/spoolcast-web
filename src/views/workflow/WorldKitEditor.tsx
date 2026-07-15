@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc } from '../../lib/worldkit-md'
-import { actionUrl, activeSession } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import { useWorkflowStore } from '../../store/workflow'
 
@@ -19,6 +19,7 @@ const SECTION_BLURBS: Record<string, string> = {
   'Props / Objects': 'Recurring objects and held items.',
   'Documents / Screens': 'On-screen UI, documents, and charts.',
   'Motion / Camera References': 'Camera moves and motion cues.',
+  'Master Shots': 'Composed scenes clips anchor to — built from cast + environment refs.',
   'Beat-Specific Refs': 'One-off refs scoped to a single beat.',
   'Beat-Specific References': 'One-off refs scoped to a single beat.',
 }
@@ -44,6 +45,22 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   const [raw, setRaw] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null) // `${si}:${ri}`
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  // Active reference image per kit item (ref id -> session-rel path): chip
+  // thumbnails. Refreshed when an item closes (generate/pick may change it).
+  const [activeRefImages, setActiveRefImages] = useState<Record<string, string>>({})
+  useEffect(() => {
+    fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!out?.ok) return
+        const map: Record<string, string> = {}
+        for (const img of out.data?.images ?? []) {
+          if (img.ref) map[img.ref] = img.path
+        }
+        setActiveRefImages(map)
+      })
+      .catch(() => {})
+  }, [expanded])
   const inheritTriedRef = useRef(false)
 
   // AUTO-INHERIT: arriving with no kit pulls the show's shared items from the
@@ -320,16 +337,21 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                         </button>
                       )
                     }
+                    const activeImg = activeRefImages[row[refIdx]]
                     return (
                       <button
                         key={key}
                         style={{
                           ...chip,
                           borderColor: expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)',
+                          ...(activeImg ? { display: 'inline-flex', alignItems: 'center', gap: 7, paddingLeft: 6 } : {}),
                         }}
                         title={shared ? 'Shared with the show/template' : 'This episode only'}
                         onClick={() => setExpanded(expanded === key ? null : key)}
                       >
+                        {activeImg && (
+                          <img src={contentUrl(activeImg)} alt="" style={{ width: 26, height: 26, objectFit: 'cover', borderRadius: 5, display: 'block' }} />
+                        )}
                         {row[refIdx] || '(unnamed)'}
                         {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
                       </button>
