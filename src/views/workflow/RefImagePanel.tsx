@@ -127,47 +127,53 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
-  // "Less AI" snippet: editable degradation text inserted into the prompt.
-  // Edits save as THIS video's override; a button promotes it to the global
-  // default. Resolution lives engine-side: session -> global -> built-in.
-  const [lessOpen, setLessOpen] = useState(false)
-  const [lessText, setLessText] = useState<string | null>(null)
-  const [lessSource, setLessSource] = useState('')
-  const savedLessRef = useRef<string | null>(null)
-  const lastInsertedRef = useRef('')
-
-  const openLess = () => {
-    setLessOpen((v) => !v)
-    if (lessText === null) {
-      void postAction<{ text?: string; source?: string }>({ action: 'get_prompt_snippet', name: 'less-ai' }).then((out) => {
-        if (out?.ok) {
-          savedLessRef.current = out.data?.text ?? ''
-          setLessText(out.data?.text ?? '')
-          setLessSource(out.data?.source ?? '')
-        }
-      })
-    }
+  // "Less AI": ONE-BOX rule — the button inserts the saved degradation text
+  // into the prompt itself (last line before the reference-image lines), the
+  // user edits it THERE, and the save buttons take that line back as the new
+  // saved text. No second text box. Resolution engine-side: this video's
+  // override -> global default -> built-in.
+  const [lessActive, setLessActive] = useState(false)
+  const lessTextRef = useRef<string | null>(null)
+  const fetchLess = async (): Promise<string> => {
+    if (lessTextRef.current !== null) return lessTextRef.current
+    const out = await postAction<{ text?: string }>({ action: 'get_prompt_snippet', name: 'less-ai' })
+    lessTextRef.current = out?.ok ? (out.data?.text ?? '').trim() : ''
+    return lessTextRef.current
   }
-  useEffect(() => {
-    if (lessText === null || lessText === savedLessRef.current) return
-    const t = window.setTimeout(() => {
-      savedLessRef.current = lessText
-      setLessSource('session')
-      void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'session', text: lessText })
-    }, 800)
-    return () => window.clearTimeout(t)
-  }, [lessText])
-
-  const insertLess = () => {
-    const text = (lessText ?? '').trim()
-    if (!text) return
-    let base = stripRefLines(notes)
-    const prev = lastInsertedRef.current
-    if (prev && base.includes(prev)) base = base.replace(prev, text).trim()
-    else base = base ? `${base}\n${text}` : text
+  const toggleLess = async () => {
     const lines = existingRefLines(notes)
-    onNotesChange?.(base + (lines ? `\n\n${lines}` : ''))
-    lastInsertedRef.current = text
+    const withLines = (b: string) => b + (lines ? `\n\n${lines}` : '')
+    const base = stripRefLines(notes)
+    if (!lessActive) {
+      const text = await fetchLess()
+      if (!text) return
+      if (!base.includes(text)) onNotesChange?.(withLines(base ? `${base}\n${text}` : text))
+      setLessActive(true)
+      return
+    }
+    const saved = (lessTextRef.current ?? '').trim()
+    if (saved && base.includes(saved)) {
+      onNotesChange?.(withLines(base.replace(saved, '').replace(/\n{2,}/g, '\n').trim()))
+    } else if (saved) {
+      onToast('The less-AI text was edited — remove it from the prompt by hand.')
+    }
+    setLessActive(false)
+  }
+  const saveLess = (scope: 'session' | 'global') => {
+    // The snippet lives as the LAST line of the prompt (before the reference
+    // lines) — that line, however the user edited it, becomes the saved text.
+    const last = stripRefLines(notes).split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? ''
+    if (!last) return
+    lessTextRef.current = last
+    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope, text: last })
+    if (scope === 'global') {
+      // The global default should now be what the user sees — drop any
+      // session override so it doesn't silently win over the new default.
+      void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'session', text: '' })
+      onToast('Saved as the less-AI default for all videos.')
+    } else {
+      onToast('Saved as this video’s less-AI text.')
+    }
   }
   // Dual-prompt state: charPrompt = the character prompt (imported when this
   // item is referenced elsewhere); notes stay the generation prompt. sheetMode
@@ -222,6 +228,7 @@ export function RefImagePanel({
     setCharPrompt(null)
     setPromptView('prompt')
     setSheetMode(false)
+    setLessActive(false)
     // no image yet -> the create section is the whole point, start it open
     loadManifest().then((m) => {
       setCreateOpen(m.versions.length === 0)
@@ -739,11 +746,11 @@ export function RefImagePanel({
             </button>
             <button
               type="button"
-              style={small}
-              title="Editable snippet that makes the result look like a casual phone photo instead of a clean AI render"
-              onClick={openLess}
+              style={lessActive ? { ...small, borderColor: 'var(--accent)', color: 'var(--ink-1)' } : small}
+              title="Adds the saved less-AI line to the prompt (casual phone photo, soft blur, uneven light). Edit it in the prompt like any text; click again to remove."
+              onClick={() => void toggleLess()}
             >
-              📷 Less AI {lessOpen ? '▴' : '▾'}
+              📷 Less AI{lessActive ? ' ✓' : ''}
             </button>
           </div>
           {improveOpen && (
@@ -773,39 +780,15 @@ export function RefImagePanel({
               </div>
             </div>
           )}
-          {lessOpen && (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6 }}>
-                Added to the prompt as plain text — edit it there like anything else. Edits here save for{' '}
-                <b>this video</b>{lessSource === 'global' ? ' (currently using your saved default)' : lessSource === 'default' ? ' (currently using the built-in text)' : ''}.
-              </div>
-              <textarea
-                value={lessText ?? ''}
-                onChange={(e) => setLessText(e.target.value)}
-                rows={3}
-                placeholder={lessText === null ? 'Loading…' : ''}
-                style={{
-                  width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
-                  color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
-                  padding: '7px 9px', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6,
-                }}
-              />
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="button" style={small} disabled={!lessText?.trim()} onClick={insertLess}>
-                  ＋ Add to prompt
-                </button>
-                <button
-                  type="button"
-                  style={small}
-                  disabled={!lessText?.trim()}
-                  onClick={() => {
-                    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'global', text: (lessText ?? '').trim() })
-                    onToast('Saved as the default for all videos.')
-                  }}
-                >
-                  Save as default for all videos
-                </button>
-              </div>
+          {lessActive && (
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              edit the added line in the prompt, then save it:
+              <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('session')}>
+                for this video
+              </button>
+              <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('global')}>
+                for all videos
+              </button>
             </div>
           )}
           {attached.length > 0 && (
