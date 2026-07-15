@@ -97,6 +97,19 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
     doc = null
   }
   const parseFailed = !doc || doc.sections.length === 0
+  // Every kit item's kind + notes, keyed by ref — the casting panel uses it
+  // to pull referenced items' TEXT into a composed generation's prompt.
+  const kitIndex: Record<string, { kind: string; notes: string; section: string }> = {}
+  for (const sec of doc?.sections ?? []) {
+    if (sec.kind !== 'table') continue
+    const rIdx = Math.max(0, sec.columns.findIndex((c) => /ref/i.test(c)))
+    const kIdx = sec.columns.findIndex((c) => /kind/i.test(c))
+    const dIdx = sec.columns.length - 1
+    for (const r of sec.rows) {
+      const ref = (r[rIdx] || '').trim()
+      if (ref) kitIndex[ref] = { kind: kIdx >= 0 ? r[kIdx] : '', notes: dIdx !== rIdx ? r[dIdx] : '', section: sec.heading }
+    }
+  }
 
   const snapshot = () => {
     historyRef.current.push(draft)
@@ -448,6 +461,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                           kind={kindIdx >= 0 ? row[kindIdx] : ''}
                           notes={descIdx !== refIdx ? row[descIdx] : ''}
                           fields={fieldRows}
+                          kitIndex={kitIndex}
                           onDescribed={(text) => {
                             if (descIdx === refIdx) return
                             snapshot()

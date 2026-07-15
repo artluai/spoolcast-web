@@ -34,6 +34,7 @@ export function RefImagePanel({
   notes,
   kind = '',
   fields,
+  kitIndex = {},
   onDescribed,
   onToast,
 }: {
@@ -43,6 +44,10 @@ export function RefImagePanel({
   // The item's editors (REF/KIND/SAVE TO/notes) — rendered to the RIGHT of
   // the image so the card reads image-first with no dead space.
   fields?: React.ReactNode
+  // Other kit items' kind + notes, keyed by ref: attached kit images bring
+  // their own descriptions into the prompt so "the cast reference" means
+  // something to the model.
+  kitIndex?: Record<string, { kind: string; notes: string; section: string }>
   onDescribed: (text: string) => void
   onToast: (message: string) => void
 }) {
@@ -110,6 +115,16 @@ export function RefImagePanel({
   const versionRelPath = (v: RefVersion) =>
     v.kind === 'mapped' ? (v.path ?? '') : `source/world-kit-refs/${refId}/${v.file ?? ''}`
 
+  // Which kit item an attached image belongs to (by its world-kit-refs path,
+  // or by the pool entry's ref for mapped actives).
+  const itemForPath = (path: string): { ref: string; kind: string; notes: string } | null => {
+    const m = /world-kit-refs\/([^/]+)\//.exec(path)
+    const ref = m?.[1] ?? attachPool?.find((i) => i.path === path)?.ref ?? null
+    if (!ref) return null
+    const info = kitIndex[ref]
+    return { ref, kind: info?.kind ?? '', notes: info?.notes ?? '' }
+  }
+
   const versions = manifest?.versions ?? []
   const active = versions.find((v) => v.id === manifest?.active) ?? null
 
@@ -140,6 +155,17 @@ export function RefImagePanel({
     }
     if (sheet && !isMaster) {
       prompt += ', isolated on a clean neutral studio background, character reference sheet, no background scene'
+    }
+    if (attached.length) {
+      // The model can't know what "the cast reference" is — spell out what
+      // each attached image contains, in the same order the images arrive.
+      const lines = attached.map((p, i) => {
+        const item = itemForPath(p)
+        return item
+          ? `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${item.notes}`.trim()
+          : `Reference image ${i + 1}: ${p.split('/').pop()}`
+      })
+      prompt += `\n\n${lines.join('\n')}`
     }
     setGenerating(true)
     const out = await postAction<{ stdout?: string }>({
@@ -436,8 +462,11 @@ export function RefImagePanel({
           {attached.length > 0 && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               {attached.map((path) => (
-                <span key={path} style={{ position: 'relative', display: 'inline-block' }}>
+                <span key={path} style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2, maxWidth: 74 }}>
                   <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
+                  <span style={{ fontSize: 9, color: 'var(--ink-3)', maxWidth: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {itemForPath(path)?.ref ?? path.split('/').pop()}
+                  </span>
                   <button
                     type="button"
                     title="Remove reference image"
@@ -468,11 +497,14 @@ export function RefImagePanel({
                       )
                     }
                     style={{
-                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none',
+                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', position: 'relative',
                       border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
                     }}
                   >
                     <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
+                    <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 9, lineHeight: '13px', background: 'rgba(5,6,8,.75)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 3px' }}>
+                      {img.ref ?? img.name}
+                    </span>
                   </button>
                 ))
               )}
