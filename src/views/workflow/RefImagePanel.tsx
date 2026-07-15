@@ -127,12 +127,12 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
-  // "Less AI": ONE-BOX rule — the button inserts the saved degradation text
-  // into the prompt itself (last line before the reference-image lines), the
-  // user edits it THERE, and the save buttons take that line back as the new
-  // saved text. No second text box. Resolution engine-side: this video's
-  // override -> global default -> built-in.
-  const [lessActive, setLessActive] = useState(false)
+  // "Reduce AI aesthetic" — same pattern as the Character sheet button: it
+  // opens improve-with-AI with the saved instruction pre-filled as guidance,
+  // and Improve rewrites the whole prompt with that look woven in. The
+  // instruction is editable in the guidance box; small buttons save the tweak
+  // (engine resolution: this video's override -> global default -> built-in).
+  const [lessMode, setLessMode] = useState(false)
   const lessTextRef = useRef<string | null>(null)
   const fetchLess = async (): Promise<string> => {
     if (lessTextRef.current !== null) return lessTextRef.current
@@ -140,39 +140,25 @@ export function RefImagePanel({
     lessTextRef.current = out?.ok ? (out.data?.text ?? '').trim() : ''
     return lessTextRef.current
   }
-  const toggleLess = async () => {
-    const lines = existingRefLines(notes)
-    const withLines = (b: string) => b + (lines ? `\n\n${lines}` : '')
-    const base = stripRefLines(notes)
-    if (!lessActive) {
-      const text = await fetchLess()
-      if (!text) return
-      if (!base.includes(text)) onNotesChange?.(withLines(base ? `${base}\n${text}` : text))
-      setLessActive(true)
-      return
-    }
-    const saved = (lessTextRef.current ?? '').trim()
-    if (saved && base.includes(saved)) {
-      onNotesChange?.(withLines(base.replace(saved, '').replace(/\n{2,}/g, '\n').trim()))
-    } else if (saved) {
-      onToast('The less-AI text was edited — remove it from the prompt by hand.')
-    }
-    setLessActive(false)
+  const openLessMode = () => {
+    setLessMode(true)
+    setImproveOpen(true)
+    void fetchLess().then((text) => {
+      if (text) setGuidance(text)
+    })
   }
   const saveLess = (scope: 'session' | 'global') => {
-    // The snippet lives as the LAST line of the prompt (before the reference
-    // lines) — that line, however the user edited it, becomes the saved text.
-    const last = stripRefLines(notes).split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? ''
-    if (!last) return
-    lessTextRef.current = last
-    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope, text: last })
+    const text = guidance.trim()
+    if (!text) return
+    lessTextRef.current = text
+    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope, text })
     if (scope === 'global') {
       // The global default should now be what the user sees — drop any
       // session override so it doesn't silently win over the new default.
       void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'session', text: '' })
-      onToast('Saved as the less-AI default for all videos.')
+      onToast('Saved as the default instruction for all videos.')
     } else {
-      onToast('Saved as this video’s less-AI text.')
+      onToast('Saved as this video’s instruction.')
     }
   }
   // Dual-prompt state: charPrompt = the character prompt (imported when this
@@ -228,7 +214,7 @@ export function RefImagePanel({
     setCharPrompt(null)
     setPromptView('prompt')
     setSheetMode(false)
-    setLessActive(false)
+    setLessMode(false)
     // no image yet -> the create section is the whole point, start it open
     loadManifest().then((m) => {
       setCreateOpen(m.versions.length === 0)
@@ -417,6 +403,10 @@ export function RefImagePanel({
       onNotesChange?.(sheetOut.data.text)
       setPromptView('prompt')
       setImproveOpen(false)
+      if (lessMode) {
+        setLessMode(false)
+        setGuidance('')
+      }
       onToast('Two prompts written — toggle between sheet and character above the text box.')
       return
     }
@@ -427,6 +417,10 @@ export function RefImagePanel({
       const lines = existingRefLines(notes)
       onNotesChange?.(out.data.text + (lines ? `\n\n${lines}` : ''))
       setImproveOpen(false)
+      if (lessMode) {
+        setLessMode(false)
+        setGuidance('')
+      }
     } else {
       onToast(`Engine: ${out?.error || out?.message || 'could not improve the prompt.'}`)
     }
@@ -741,16 +735,16 @@ export function RefImagePanel({
             <button type="button" style={small} onClick={() => setImproveOpen((v) => !v)}>
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
             </button>
-            <button type="button" style={small} onClick={openAttach}>
-              🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
-            </button>
             <button
               type="button"
-              style={lessActive ? { ...small, borderColor: 'var(--accent)', color: 'var(--ink-1)' } : small}
-              title="Adds the saved less-AI line to the prompt (casual phone photo, soft blur, uneven light). Edit it in the prompt like any text; click again to remove."
-              onClick={() => void toggleLess()}
+              style={small}
+              title="Opens Improve with the saved instruction pre-filled — the AI rewrites the prompt to read like a casual phone snapshot instead of a clean AI render"
+              onClick={openLessMode}
             >
-              📷 Less AI{lessActive ? ' ✓' : ''}
+              📷 Reduce AI aesthetic
+            </button>
+            <button type="button" style={small} onClick={openAttach}>
+              🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
           </div>
           {improveOpen && (
@@ -777,18 +771,18 @@ export function RefImagePanel({
                   {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
                 </button>
                 <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
+                {lessMode && (
+                  <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    save this instruction:
+                    <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('session')}>
+                      for this video
+                    </button>
+                    <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('global')}>
+                      for all videos
+                    </button>
+                  </span>
+                )}
               </div>
-            </div>
-          )}
-          {lessActive && (
-            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              edit the added line in the prompt, then save it:
-              <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('session')}>
-                for this video
-              </button>
-              <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('global')}>
-                for all videos
-              </button>
             </div>
           )}
           {attached.length > 0 && (
