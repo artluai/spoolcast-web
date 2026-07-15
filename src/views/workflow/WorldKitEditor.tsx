@@ -371,10 +371,8 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                   }
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
                   const scopeKnown = SCOPE_OPTIONS.some((o) => o.value === scope)
-                  return (
-                    <div style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
-                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  const fieldRows = (
+                    <>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                               REF
@@ -431,31 +429,36 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                                 value={row[descIdx]}
                                 onFocus={snapshot}
                                 onChange={(e) => setCell(descIdx, e.target.value)}
-                                rows={3}
+                                rows={5}
                                 style={{
-                                  display: 'block', width: '100%', resize: 'vertical', background: 'transparent',
+                                  display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
                                   color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
                                   padding: '8px 10px', fontSize: 13, lineHeight: 1.5, marginTop: 3,
                                 }}
                               />
                             </label>
                           )}
-                          {/* CASTING: generate/upload/map this item's reference
-                              image, with the full pick-from-history filmstrip. */}
-                          {row[refIdx].trim() !== '' && (
-                            <RefImagePanel
-                              refId={row[refIdx].trim()}
-                              kind={kindIdx >= 0 ? row[kindIdx] : ''}
-                              notes={descIdx !== refIdx ? row[descIdx] : ''}
-                              onDescribed={(text) => {
-                                if (descIdx === refIdx) return
-                                snapshot()
-                                setCell(descIdx, row[descIdx].trim() ? `${row[descIdx].trim()}\n\n${text}` : text)
-                              }}
-                              onToast={toast}
-                            />
-                          )}
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    </>
+                  )
+                  return (
+                    <div style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
+                      {row[refIdx].trim() !== '' ? (
+                        <RefImagePanel
+                          refId={row[refIdx].trim()}
+                          kind={kindIdx >= 0 ? row[kindIdx] : ''}
+                          notes={descIdx !== refIdx ? row[descIdx] : ''}
+                          fields={fieldRows}
+                          onDescribed={(text) => {
+                            if (descIdx === refIdx) return
+                            snapshot()
+                            setCell(descIdx, row[descIdx].trim() ? `${row[descIdx].trim()}\n\n${text}` : text)
+                          }}
+                          onToast={toast}
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{fieldRows}</div>
+                      )}
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
                             <button style={btn} onClick={() => setExpanded(null)}>Done</button>
                             {confirmRemove === expanded ? (
                               <>
@@ -487,8 +490,6 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                               </button>
                             )}
                           </div>
-                        </div>
-                      </div>
                     </div>
                   )
                 })()}
