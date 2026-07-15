@@ -31,6 +31,9 @@ const SECTION_BLURBS: Record<string, string> = {
  * description, change its save scope (episode default / show / template), or
  * remove it (with an impact warning). Undo / Reset / Raw live in the header.
  */
+// Survives unmounts (step hops) within the app session; keyed session:stage.
+const EXPANDED_MEMORY: Record<string, string | null> = {}
+
 export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; path: string; onToast?: (m: string) => void }) {
   // Toast plumbing is optional here (StageDraftEditor doesn't thread it yet) —
   // fall back to a console note rather than swallowing feedback.
@@ -43,7 +46,14 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   const [historyLen, setHistoryLen] = useState(0)
   const [redoLen, setRedoLen] = useState(0)
   const [raw, setRaw] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null) // `${si}:${ri}`
+  // HOLD MY PLACE: which item is expanded survives hopping to other steps
+  // (module memory — the component unmounts when the user leaves the step).
+  const memKey = `${activeSession()}:${stageId}`
+  const [expanded, setExpandedState] = useState<string | null>(() => EXPANDED_MEMORY[memKey] ?? null) // `${si}:${ri}`
+  const setExpanded = (v: string | null) => {
+    EXPANDED_MEMORY[memKey] = v
+    setExpandedState(v)
+  }
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   // Active reference image per kit item (ref id -> session-rel path): chip
   // thumbnails. Refreshed when an item closes (generate/pick may change it).

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { activeSession, apiUrl, contentUrl, getFileJson, getJson, postAction } from '../../lib/api'
+import { activeSession, apiUrl, contentUrl, getFileJson, getJson, postAction, statusUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { ModelPicker } from './ModelPicker'
@@ -233,6 +233,28 @@ export function RefImagePanel({
       REF_LINE_RE.lastIndex = 0
       void loadAttachPool().then((pool) => prefillAttached(notes, pool))
     }
+    // HOLD MY PLACE: a generation started earlier keeps running engine-side
+    // (durable job files) — leaving the step unmounted the panel and dropped
+    // its poller. Find a live job for THIS item and show it again.
+    void fetch(statusUrl())
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (out) => {
+        const jobs = (out?.data?.jobs ?? []) as { job_id?: string; job?: string; state?: string }[]
+        for (const j of jobs) {
+          if (j.job !== 'generate_worldkit_ref' || !j.job_id) continue
+          if (!['queued', 'running'].includes(j.state ?? '')) continue
+          const st = await getFileJson<{ command?: string[] }>(`working/jobs/${j.job_id}.json`)
+          const cmd = st?.command ?? []
+          const ri = cmd.indexOf('--ref')
+          if (ri >= 0 && cmd[ri + 1] === refId) {
+            setGenerating(true)
+            setCreateOpen(true)
+            pollJob(j.job_id)
+            return
+          }
+        }
+      })
+      .catch(() => {})
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
     }
