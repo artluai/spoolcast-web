@@ -296,7 +296,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     const descIdx = section.columns.length - 1
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
-                    const img = castImages[row[refIdx]]
+                    const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
                     if (img) {
                       // CHARACTER SHEET CARD: reference image + name + prompt excerpt
                       return (
@@ -337,21 +337,16 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                         </button>
                       )
                     }
-                    const activeImg = activeRefImages[row[refIdx]]
                     return (
                       <button
                         key={key}
                         style={{
                           ...chip,
                           borderColor: expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)',
-                          ...(activeImg ? { display: 'inline-flex', alignItems: 'center', gap: 7, paddingLeft: 6 } : {}),
                         }}
                         title={shared ? 'Shared with the show/template' : 'This episode only'}
                         onClick={() => setExpanded(expanded === key ? null : key)}
                       >
-                        {activeImg && (
-                          <img src={contentUrl(activeImg)} alt="" style={{ width: 26, height: 26, objectFit: 'cover', borderRadius: 5, display: 'block' }} />
-                        )}
                         {row[refIdx] || '(unnamed)'}
                         {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
                       </button>
@@ -374,7 +369,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     if (sec.kind === 'table') sec.rows[ri][ci] = v
                     apply(d)
                   }
-                  const img = castImages[row[refIdx]]
+                  const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
                   const scopeKnown = SCOPE_OPTIONS.some((o) => o.value === scope)
                   return (

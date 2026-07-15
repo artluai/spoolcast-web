@@ -54,7 +54,14 @@ export function RefImagePanel({
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [pool, setPool] = useState<PoolImage[] | null>(null)
   // Character sheet: blank background so the identity composes anywhere.
-  const [sheet, setSheet] = useState(() => /char|person|talent|creator/i.test(kind))
+  // Masters are the opposite — a full scene — so the toggle hides for them.
+  const isMaster = /master/i.test(kind)
+  const [sheet, setSheet] = useState(() => !/master/i.test(kind) && /char|person|talent|creator/i.test(kind))
+  // Canvas ratio for THIS generation ('auto' = the session's ratio). A wide
+  // character sheet inside a vertical video is normal.
+  const [ratio, setRatio] = useState('auto')
+  const [addOpen, setAddOpen] = useState(false)
+  const [dims, setDims] = useState('')
   // Ingredients: other images (kit actives, intake photos) attached to the
   // generation — this is how master shots get composed.
   const [attachOpen, setAttachOpen] = useState(false)
@@ -73,6 +80,9 @@ export function RefImagePanel({
     setPromptSource('notes')
     setAttached([])
     setAttachOpen(false)
+    setAddOpen(false)
+    setGalleryOpen(false)
+    setDims('')
     loadManifest()
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
@@ -124,6 +134,7 @@ export function RefImagePanel({
       prompt,
       model: imgModel,
       ...(attached.length ? { ref_images: attached } : {}),
+      ...(ratio !== 'auto' ? { aspect_ratio: ratio } : {}),
       allow_cost: true,
     })
     const already = /already running as (\S+)/.exec(out?.details || '')?.[1]
@@ -206,7 +217,7 @@ export function RefImagePanel({
   }
 
   const openGallery = async () => {
-    setGalleryOpen((v) => !v)
+    setGalleryOpen(true)
     if (pool === null) {
       const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
         apiUrl('source-images', { session: activeSession() }),
@@ -248,14 +259,15 @@ export function RefImagePanel({
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* ACTIVE reference */}
         {active ? (
-          <div style={{ width: 168, flex: 'none' }}>
+          <div style={{ width: 190, flex: 'none' }}>
             <img
               src={versionUrl(active)}
               alt=""
-              style={{ width: 168, height: 168, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--accent)' }}
+              onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
+              style={{ width: 190, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--accent)' }}
             />
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
-              active · {KIND_BADGE[active.kind]}
+              active · {KIND_BADGE[active.kind]}{dims ? ` · ${dims}` : ''}
             </div>
           </div>
         ) : (
@@ -286,7 +298,7 @@ export function RefImagePanel({
                     background: 'none',
                   }}
                 >
-                  <img src={versionUrl(v)} alt="" style={{ width: 64, height: 64, objectFit: 'cover', display: 'block' }} />
+                  <img src={versionUrl(v)} alt="" style={{ height: 64, width: 'auto', maxWidth: 128, objectFit: 'cover', display: 'block' }} />
                   <span
                     style={{
                       position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 9, lineHeight: '14px',
@@ -301,15 +313,36 @@ export function RefImagePanel({
           )}
 
           {/* GENERATE row */}
+          {isMaster && (
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+              A master shot is the approved scene your clips will start from. Attach the cast and
+              environment images below, describe the moment, and generate.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button type="button" className="core-create" disabled={generating} onClick={generate}>
               {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
             </button>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
-            <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
-              generate as character sheet with blank background
-            </label>
+            <select
+              value={ratio}
+              onChange={(e) => setRatio(e.target.value)}
+              title="Canvas ratio for this generation"
+              style={{ background: 'var(--bg-3)', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, fontFamily: 'var(--mono)' }}
+            >
+              <option value="auto">ratio: video</option>
+              <option value="1:1">1:1</option>
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
+            {!isMaster && (
+              <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
+                character sheet, blank background
+              </label>
+            )}
             {detailed.trim() ? (
               <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                 from
@@ -325,13 +358,31 @@ export function RefImagePanel({
             ) : null}
           </div>
 
-          {/* DETAILED PROMPT: AI-expanded, editable, used by Generate when selected */}
+          {/* TOOLS — one quiet row: detail the prompt, attach ingredients,
+              add an image (upload or map), describe the active image */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
-              {detailing ? (<><span className="spin" /> Detailing…</>) : '✦ Make detailed image prompt'}
+              {detailing ? (<><span className="spin" /> Detailing…</>) : '✦ Detailed prompt'}
             </button>
             <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
+            <button type="button" style={small} onClick={openAttach}>
+              🖇 Attach {attachOpen ? '▴' : '▾'}
+            </button>
+            <button type="button" style={small} onClick={() => setAddOpen((v) => !v)}>
+              ＋ Add image {addOpen ? '▴' : '▾'}
+            </button>
+            {active && (
+              <button type="button" style={small} disabled={describing} onClick={describe}>
+                {describing ? (<><span className="spin" /> Describing…</>) : '✦ Describe → notes'}
+              </button>
+            )}
           </div>
+          {addOpen && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>
+              <button type="button" style={small} onClick={() => { setAddOpen(false); fileRef.current?.click() }}>↑ Upload a file…</button>
+              <button type="button" style={small} onClick={() => { setAddOpen(false); void openGallery() }}>↦ From this session…</button>
+            </div>
+          )}
           {detailed.trim() !== '' && (
             <textarea
               value={detailed}
@@ -344,11 +395,8 @@ export function RefImagePanel({
             />
           )}
 
-          {/* ATTACH INGREDIENTS: images the generation composes from */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" style={small} onClick={openAttach}>
-              🖇 Attach images {attachOpen ? '▴' : '▾'}
-            </button>
+          {/* attached ingredient thumbs */}
+          <div style={{ display: attached.length ? 'flex' : 'none', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {attached.map((path) => (
               <span key={path} style={{ position: 'relative', display: 'inline-block' }}>
                 <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
@@ -393,9 +441,7 @@ export function RefImagePanel({
             </div>
           )}
 
-          {/* UPLOAD / MAP / DESCRIBE row */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" style={small} onClick={() => fileRef.current?.click()}>↑ Upload image</button>
+          <div style={{ display: 'none' }}>
             <input
               ref={fileRef}
               type="file"
@@ -407,14 +453,6 @@ export function RefImagePanel({
                 e.target.value = ''
               }}
             />
-            <button type="button" style={small} onClick={openGallery}>
-              ↦ Map existing {galleryOpen ? '▴' : '▾'}
-            </button>
-            {active && (
-              <button type="button" style={small} disabled={describing} onClick={describe}>
-                {describing ? (<><span className="spin" /> Describing…</>) : '✦ Describe image → notes'}
-              </button>
-            )}
           </div>
 
           {/* MAP GALLERY: the session's uploaded/intake images */}
