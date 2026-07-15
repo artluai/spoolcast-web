@@ -39,6 +39,20 @@ const REF_LINE_RE = /^Reference image \d+.*$/gm
 const stripRefLines = (t: string) => t.replace(REF_LINE_RE, '').replace(/\n{3,}/g, '\n\n').trim()
 const existingRefLines = (t: string) => (t.match(REF_LINE_RE) ?? []).join('\n')
 
+// Job failures store the tail of stderr (ANSI-colored traceback). Dig out the
+// human sentence — kie's msg=… if present, else the last "SomeError: …" line.
+const jobErrorMessage = (raw: string): string => {
+  const clean = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/\x1b/g, '')
+  const kie = /msg=(.*)\)\s*$/m.exec(clean)
+  if (kie) return kie[1].trim()
+  const errLine = clean
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^[\w.]+Error(:|\b)/.test(l))
+    .pop()
+  return errLine ? errLine.replace(/^[\w.]+Error:\s*/, '') : ''
+}
+
 export function RefImagePanel({
   refId,
   notes,
@@ -97,6 +111,8 @@ export function RefImagePanel({
   const [createOpen, setCreateOpen] = useState(false)
   const [improveOpen, setImproveOpen] = useState(false)
   const [guidance, setGuidance] = useState('')
+  // Last generation failure, shown in the panel until the next attempt.
+  const [genError, setGenError] = useState('')
   const manifestPath = `source/world-kit-refs/${refId}/manifest.json`
   const loadManifest = () =>
     getFileJson<RefManifest>(manifestPath).then((m) => {
@@ -108,6 +124,7 @@ export function RefImagePanel({
   useEffect(() => {
     setManifest(null)
     setAttached([])
+    setGenError('')
     setAttachOpen(false)
     setGalleryOpen(false)
     setImproveOpen(false)
@@ -141,7 +158,7 @@ export function RefImagePanel({
 
   const pollJob = (jobId: string) => {
     const tick = async () => {
-      const state = await getFileJson<{ state?: string }>(`working/jobs/${jobId}.json`)
+      const state = await getFileJson<{ state?: string; error?: string }>(`working/jobs/${jobId}.json`)
       if (state?.state === 'succeeded') {
         setGenerating(false)
         await loadManifest()
@@ -150,7 +167,9 @@ export function RefImagePanel({
       }
       if (state?.state && ['failed', 'stopped', 'lost'].includes(state.state)) {
         setGenerating(false)
-        onToast('Reference generation failed — see the job log, then try again.')
+        const msg = jobErrorMessage(state.error ?? '')
+        setGenError(msg || `Generation ${state.state} — see the job log (working/jobs/${jobId}.log).`)
+        onToast(msg ? `Generation failed: ${msg}` : 'Reference generation failed — see the job log, then try again.')
         return
       }
       timerRef.current = window.setTimeout(tick, 4000)
@@ -191,6 +210,7 @@ export function RefImagePanel({
       onToast('Write a prompt description first — that’s what the image is generated from.')
       return
     }
+    setGenError('')
     setGenerating(true)
     const out = await postAction<{ stdout?: string }>({
       action: 'generate_worldkit_ref',
@@ -438,6 +458,11 @@ export function RefImagePanel({
               </label>
             )}
           </div>
+          {genError !== '' && (
+            <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>
+              ⚠ {genError}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
             <button type="button" style={small} onClick={() => setImproveOpen((v) => !v)}>
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
