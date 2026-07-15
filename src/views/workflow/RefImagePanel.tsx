@@ -30,10 +30,14 @@ const KIND_BADGE: Record<RefVersion['kind'], string> = {
 }
 
 // ONE text box is the whole prompt: the item's notes are sent verbatim, and
-// every control (sheet checkbox, attach/detach, improve-with-AI) edits that
-// text in place — nothing is appended invisibly at send time.
-const SHEET_SUFFIX =
-  ', isolated on a clean neutral studio background, character reference sheet, no background scene'
+// every control (character-sheet rewrite, attach/detach, improve-with-AI)
+// edits that text in place — nothing is appended invisibly at send time.
+//
+// A character sheet is multiple angles of the same subject — a suffix can't
+// turn a scene description into one, so the button routes through
+// improve-with-AI with this pre-filled instruction to rewrite the prompt.
+const SHEET_GUIDANCE =
+  'Rewrite this as a character reference sheet: multiple angles of the same person (front, side, three-quarter view), identical face, hair and wardrobe in every view, isolated on a clean blank studio background, no scene.'
 const REF_LINE_RE = /^Reference image \d+.*$/gm
 
 const stripRefLines = (t: string) => t.replace(REF_LINE_RE, '').replace(/\n{3,}/g, '\n\n').trim()
@@ -87,10 +91,8 @@ export function RefImagePanel({
   const [describing, setDescribing] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [pool, setPool] = useState<PoolImage[] | null>(null)
-  // Masters are full scenes; the character-sheet toggle only fits ingredients.
+  // Masters are full scenes; the character-sheet rewrite only fits ingredients.
   const isMaster = /master/i.test(kind)
-  // The checkbox mirrors the text: checked ⟺ the suffix is in the notes.
-  const sheet = notes.includes(SHEET_SUFFIX)
   // Canvas ratio for THIS generation ('auto' = the video's ratio). A wide
   // character sheet inside a vertical video is normal.
   const [ratio, setRatio] = useState('auto')
@@ -195,13 +197,6 @@ export function RefImagePanel({
     setAttached(paths)
     const base = stripRefLines(notes)
     onNotesChange?.(paths.length ? `${base}\n\n${refBlock(paths)}` : base)
-  }
-
-  const toggleSheet = (on: boolean) => {
-    const lines = existingRefLines(notes)
-    const base = stripRefLines(notes).replaceAll(SHEET_SUFFIX, '').trim()
-    const next = (on ? base + SHEET_SUFFIX : base) + (lines ? `\n\n${lines}` : '')
-    onNotesChange?.(next)
   }
 
   const generate = async () => {
@@ -452,10 +447,17 @@ export function RefImagePanel({
               ))}
             </select>
             {!isMaster && (
-              <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
-                <input type="checkbox" checked={sheet} onChange={(e) => toggleSheet(e.target.checked)} />
-                character sheet, blank background
-              </label>
+              <button
+                type="button"
+                style={small}
+                title="Rewrite the prompt with AI into a multi-angle character sheet on a blank background"
+                onClick={() => {
+                  setGuidance(SHEET_GUIDANCE)
+                  setImproveOpen(true)
+                }}
+              >
+                ⊞ Character sheet…
+              </button>
             )}
           </div>
           {genError !== '' && (
