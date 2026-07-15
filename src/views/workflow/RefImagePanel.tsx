@@ -144,7 +144,16 @@ export function RefImagePanel({
     setGuidance('')
     setDims('')
     // no image yet -> the create section is the whole point, start it open
-    loadManifest().then((m) => setCreateOpen(m.versions.length === 0))
+    loadManifest().then((m) => {
+      setCreateOpen(m.versions.length === 0)
+      // Notes follow the SELECTED image — but only when they are plainly a
+      // stale version prompt (empty, or identical to another version's stored
+      // prompt). Hand-edited text is never overwritten on open.
+      const noteText = notes.trim()
+      const stale =
+        noteText === '' || m.versions.some((v) => v.id !== m.active && (v.prompt ?? '').trim() === noteText)
+      if (stale) syncNotesToVersion(m.versions.find((v) => v.id === m.active))
+    })
     if (REF_LINE_RE.test(notes)) {
       REF_LINE_RE.lastIndex = 0
       void loadAttachPool().then((pool) => prefillAttached(notes, pool))
