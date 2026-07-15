@@ -19,7 +19,7 @@ const SECTION_BLURBS: Record<string, string> = {
   'Props / Objects': 'Recurring objects and held items.',
   'Documents / Screens': 'On-screen UI, documents, and charts.',
   'Motion / Camera References': 'Camera moves and motion cues.',
-  'Master Shots': 'Composed scenes clips anchor to — built from cast + environment refs.',
+  'Master Shots': 'The approved scenes your clips will start from — add cast + environment images as reference images, describe the moment, and generate.',
   'Beat-Specific Refs': 'One-off refs scoped to a single beat.',
   'Beat-Specific References': 'One-off refs scoped to a single beat.',
 }

@@ -77,6 +77,8 @@ export function RefImagePanel({
   const timerRef = useRef<number | null>(null)
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [improveOpen, setImproveOpen] = useState(false)
+  const [guidance, setGuidance] = useState('')
   const manifestPath = `source/world-kit-refs/${refId}/manifest.json`
   const loadManifest = () =>
     getFileJson<RefManifest>(manifestPath).then((m) => {
@@ -92,6 +94,8 @@ export function RefImagePanel({
     setAttached([])
     setAttachOpen(false)
     setGalleryOpen(false)
+    setImproveOpen(false)
+    setGuidance('')
     setDims('')
     // no image yet -> the create section is the whole point, start it open
     loadManifest().then((m) => setCreateOpen(m.versions.length === 0))
@@ -166,6 +170,7 @@ export function RefImagePanel({
     const out = await postAction<{ text?: string }>({
       action: 'expand_ref_prompt',
       text: notes,
+      ...(guidance.trim() ? { guidance: guidance.trim() } : {}),
       model: txtModel,
       ...(draftReasoning(txtModel) ? { reasoning: draftReasoning(txtModel) } : {}),
       allow_cost: true,
@@ -174,6 +179,7 @@ export function RefImagePanel({
     if (out?.ok && out.data?.text) {
       setDetailed(out.data.text)
       setPromptSource('detailed')
+      setImproveOpen(false)
     } else {
       onToast(`Engine: ${out?.error || out?.message || 'could not improve the prompt.'}`)
     }
@@ -326,29 +332,33 @@ export function RefImagePanel({
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
       {/* CREATE — collapsed by default; the whole point when no image exists */}
-      <div style={{ marginTop: 12 }}>
-        <button
-          type="button"
-          onClick={() => setCreateOpen((v) => !v)}
-          style={{
-            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
-          }}
-        >
-          <span style={{ fontSize: 10 }}>{createOpen ? '▾' : '▸'}</span> CREATE A NEW VERSION
-        </button>
-      </div>
+      {!createOpen && (
+        <div style={{ marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
+            }}
+          >
+            <span style={{ fontSize: 10 }}>▸</span> CREATE A NEW VERSION
+          </button>
+        </div>
+      )}
       {createOpen && (
-        <div style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: '12px 14px', marginTop: 8 }}>
-          {isMaster && (
-            <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 10px', lineHeight: 1.5 }}>
-              A master shot is the approved scene your clips will start from. Add your cast and
-              environment images as reference images, describe the moment in the notes, and generate.
-            </p>
-          )}
+        <div style={{ position: 'relative', border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: '12px 14px', marginTop: 4 }}>
+          <button
+            type="button"
+            title="Collapse"
+            onClick={() => setCreateOpen(false)}
+            style={{ position: 'absolute', right: 8, top: 6, background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12, padding: 2 }}
+          >
+            ▴
+          </button>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
             <button type="button" className="core-create" style={{ marginLeft: 0 }} disabled={generating} onClick={generate}>
-              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate from the notes'}
+              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
             </button>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
             <select
@@ -370,12 +380,9 @@ export function RefImagePanel({
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
-              {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve prompt with AI'}
+            <button type="button" style={small} onClick={() => setImproveOpen((v) => !v)}>
+              ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
             </button>
-            {(detailing || detailed.trim() !== '') && (
-              <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
-            )}
             <button type="button" style={small} onClick={openAttach}>
               🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
@@ -393,6 +400,27 @@ export function RefImagePanel({
               </label>
             )}
           </div>
+          {improveOpen && (
+            <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginBottom: 6 }}>
+              <textarea
+                value={guidance}
+                onChange={(e) => setGuidance(e.target.value)}
+                rows={2}
+                placeholder="Optional — tell the AI what to emphasize (e.g. “more specific about the wardrobe”, “moodier lighting”)…"
+                style={{
+                  width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                  color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                  padding: '7px 9px', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6,
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
+                  {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
+                </button>
+                <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
+              </div>
+            </div>
+          )}
           {detailed.trim() !== '' && (
             <textarea
               value={detailed}

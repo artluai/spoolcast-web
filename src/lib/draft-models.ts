@@ -8,9 +8,9 @@
 export type DraftModel = { id: string; label: string; cost: string; desc: string; reasoning?: string }
 
 export const PRIMARY_MODELS: DraftModel[] = [
-  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', cost: 'Standard cost', desc: 'best value — the default' },
+  { id: 'z-ai/glm-5.2', label: 'GLM 5.2', cost: 'Standard cost', desc: 'strong writer — the default' },
+  { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 fast', cost: 'Standard cost', desc: 'best value' },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek v4 flash', cost: 'Budget cost', desc: 'quick drafts' },
-  { id: 'z-ai/glm-5.2', label: 'GLM 5.2', cost: 'Standard cost', desc: 'strong open-weights writer' },
   { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', cost: 'Premium cost', desc: 'best writing, highest spend', reasoning: 'medium' },
 ]
 export const MORE_MODELS: DraftModel[] = [
