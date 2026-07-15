@@ -353,6 +353,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             busyLabel={(draftJob?.status || stageProcess?.status) === 'queued' ? 'Queued…' : 'Working…'}
             title="Runs the AI — uses model credits"
             rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
+            historyKey={`draft-notes-${stageId.replace(/_/g, '-')}`}
             onRun={(fb) => runDraft(fb)}
           />
           <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
