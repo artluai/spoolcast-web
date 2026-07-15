@@ -1597,22 +1597,18 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
 
-  // CANDIDATES CONVENTION (video-first hook lock): if the stage's
-  // working/hook-options.json artifact exists, its options preload the
-  // STANDARD candidates list — same default layout, same pick behavior,
-  // nothing template-specific about the UI (docs/format-templates.md).
+  // CANDIDATES CONVENTION: working/core-message-candidates.json is THE
+  // candidates artifact for every template's lock stage (the drafter writes
+  // it; the ad contract declares it as a required output). Preloading it
+  // means suggestions survive a reload instead of living in component state.
   useEffect(() => {
-    fetch(fileUrl('working/hook-options.json'))
+    fetch(fileUrl('working/core-message-candidates.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists) {
           try {
-            const parsed = JSON.parse(out.data.content) as {
-              options?: { hook?: string; promise?: string }[]
-            }
-            const opts = (parsed?.options ?? [])
-              .filter((o) => typeof o?.hook === 'string')
-              .map((o) => `${o.hook}${o.promise ? `\nPromise: ${o.promise}` : ''}`)
+            const parsed = JSON.parse(out.data.content) as { candidates?: string[] }
+            const opts = (parsed?.candidates ?? []).filter((c) => typeof c === 'string')
             if (opts.length > 0) setCandidates((prev) => prev ?? opts)
           } catch { /* ignore */ }
         }
@@ -1624,16 +1620,25 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   // UGC product video may carry 3 selling points). Default is one; "+ Add"
   // appends. session.json:core_message stores the joined text.
   const messages = goal.text === '' ? [''] : goal.text.split('\n\n')
+  // Typing claims the text as YOURS (mode '') — editing a picked candidate
+  // adopts it as your working draft ("pick one, then edit it").
   const setMessages = (msgs: string[]) => setGoal({ text: msgs.join('\n\n'), mode: '' })
+
+  // Activate a candidate WITHOUT destroying the user's own draft: the draft
+  // is stashed in goal.ownText and restored when they come back to option 2.
+  const pickCandidate = (c: string) => {
+    setGoal({ text: c, mode: 'ai', ownText: goal.mode === '' ? goal.text : goal.ownText })
+    setWriteOpen(false)
+  }
 
   // Auto-expand "write your own" once when real content arrives (engine prefill).
   const autoOpenedRef = useRef(false)
   useEffect(() => {
-    if (!autoOpenedRef.current && goal.text.trim()) {
+    if (!autoOpenedRef.current && goal.text.trim() && goal.mode === '') {
       autoOpenedRef.current = true
       setWriteOpen(true)
     }
-  }, [goal.text])
+  }, [goal.text, goal.mode])
 
   // REAL AI SUGGESTION: runs the engine's metered propose_core_message draft
   // (writes working/core-message-candidates.json), then loads the candidates.
@@ -1701,12 +1706,15 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
     }
   }
 
+  // ONLY the selected option wears a stroke (the app's accent selection
+  // treatment, same family as .core-opt.sel / .node.selected) — unselected
+  // cards are quiet surfaces, so exactly one option ever reads as chosen.
   const optStyle = (sel: boolean): React.CSSProperties => ({
     width: '100%',
     textAlign: 'left',
-    border: `1px solid ${sel ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+    border: `1px solid ${sel ? 'var(--accent)' : 'transparent'}`,
     borderRadius: 10,
-    background: 'transparent',
+    background: sel ? 'rgba(122,162,255,.07)' : 'rgba(255,255,255,.02)',
     padding: '14px 16px',
     marginBottom: 10,
   })
@@ -1733,8 +1741,19 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
         </div>
       )}
 
-      {/* OPTION 1 — AI suggests (the default path) */}
-      <div style={optStyle(candidates !== null)}>
+      {/* OPTION 1 — AI suggests (the default path). Selected while the
+          locked text came from picking a candidate — writing your own hands
+          the selection to option 2. Clicking the card (once candidates
+          exist) selects it by activating the highlighted/first candidate;
+          the user's own draft is stashed in goal.ownText, never destroyed. */}
+      <div
+        style={{ ...optStyle(goal.mode === 'ai'), cursor: candidates?.length && goal.mode !== 'ai' ? 'pointer' : undefined }}
+        onClick={(e) => {
+          if (goal.mode === 'ai' || !candidates?.length) return
+          if ((e.target as HTMLElement).closest('button, textarea, input')) return
+          pickCandidate(candidates[0])
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="ap-spark">✦</span>
           <span style={{ flex: 1 }}>
@@ -1757,10 +1776,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
               <button
                 key={i}
                 type="button"
-                onClick={() => {
-                  setGoal({ text: c, mode: '' })
-                  setWriteOpen(true)
-                }}
+                onClick={() => pickCandidate(c)}
                 style={{
                   textAlign: 'left',
                   border: `1px solid ${goal.text === c ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
@@ -1776,6 +1792,16 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 {c}
               </button>
             ))}
+            {goal.mode === 'ai' && (
+              <textarea
+                className="idea-textbox"
+                rows={2}
+                value={goal.text}
+                onChange={(e) => setGoal({ text: e.target.value, mode: 'ai', ownText: goal.ownText })}
+                title="Edit your pick — refining a candidate keeps the AI option selected"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            )}
             {/* RE-SUGGEST: plain button by default; the expand toggle opens a
                 multi-line feedback box with the button inside it. */}
             {!feedbackOpen ? (
@@ -1852,11 +1878,20 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
         )}
       </div>
 
-      {/* OPTION 2 — write your own (collapsed until expanded) */}
-      <div style={optStyle(goal.mode !== 'skip' && goal.text.trim().length > 0)}>
+      {/* OPTION 2 — write your own (collapsed until expanded). Selected when
+          the message is yours — typed, edited, or claimed by clicking here. */}
+      <div style={optStyle(goal.mode === '' && (goal.text.trim().length > 0 || writeOpen))}>
         <button
           type="button"
-          onClick={() => setWriteOpen((v) => !v)}
+          onClick={() => {
+            if (goal.mode !== '') {
+              // Coming back from AI/skip: restore the stashed own draft.
+              setGoal({ text: goal.ownText ?? '', mode: '' })
+              setWriteOpen(true)
+            } else {
+              setWriteOpen((v) => !v)
+            }
+          }}
           style={{ background: 'none', border: 'none', padding: 0, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
         >
           <span style={{ fontSize: 10, color: 'var(--ink-2)' }}>{writeOpen ? '▾' : '▸'}</span>
@@ -1904,7 +1939,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
       <button
         type="button"
         className={goal.mode === 'skip' ? 'sel' : ''}
-        onClick={() => setGoal({ text: '', mode: 'skip' })}
+        onClick={() => setGoal({ text: '', mode: 'skip', ownText: goal.mode === '' ? goal.text : goal.ownText })}
         style={{ ...optStyle(goal.mode === 'skip'), cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
       >
         <span style={{ flex: 1 }}>

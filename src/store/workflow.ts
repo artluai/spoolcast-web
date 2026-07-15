@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import type * as React from 'react'
 
-export type Goal = { text: string; mode: '' | 'ai' | 'skip' }
+// text = the ACTIVE core message (what saves to session.json). ownText = the
+// user's own draft, stashed while an AI candidate is active or skip is on, so
+// browsing candidates never destroys what they wrote — switching back to
+// "Write your own" restores it.
+export type Goal = { text: string; mode: '' | 'ai' | 'skip'; ownText?: string }
 export type S1 = {
   narrator: string
   style: string
