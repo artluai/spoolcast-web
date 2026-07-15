@@ -147,12 +147,12 @@ export function RefImagePanel({
     timerRef.current = window.setTimeout(tick, 4000)
   }
 
-  const generate = async () => {
-    let prompt = (promptSource === 'detailed' && detailed.trim() ? detailed : notes).trim()
-    if (!prompt) {
-      onToast('Write a prompt description first — that’s what the image is generated from.')
-      return
-    }
+  // The ONE place the outgoing prompt is assembled — the preview under the
+  // buttons renders exactly this, so what you read is what is sent.
+  const basePrompt = (promptSource === 'detailed' && detailed.trim() ? detailed : notes).trim()
+  const composePrompt = () => {
+    let prompt = basePrompt
+    if (!prompt) return ''
     if (sheet && !isMaster) {
       prompt += ', isolated on a clean neutral studio background, character reference sheet, no background scene'
     }
@@ -166,6 +166,15 @@ export function RefImagePanel({
           : `Reference image ${i + 1}: ${p.split('/').pop()}`
       })
       prompt += `\n\n${lines.join('\n')}`
+    }
+    return prompt
+  }
+
+  const generate = async () => {
+    const prompt = composePrompt()
+    if (!prompt) {
+      onToast('Write a prompt description first — that’s what the image is generated from.')
+      return
     }
     setGenerating(true)
     const out = await postAction<{ stdout?: string }>({
@@ -347,7 +356,7 @@ export function RefImagePanel({
                       background: 'none',
                     }}
                   >
-                    <img src={versionUrl(v)} alt="" style={{ height: 48, width: 'auto', maxWidth: 96, display: 'block' }} />
+                    <img src={versionUrl(v)} alt="" style={{ height: 72, width: 'auto', maxWidth: 128, display: 'block' }} />
                   </button>
                 ))}
               </div>
@@ -460,11 +469,11 @@ export function RefImagePanel({
             />
           )}
           {attached.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 6 }}>
               {attached.map((path) => (
-                <span key={path} style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2, maxWidth: 74 }}>
-                  <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
-                  <span style={{ fontSize: 9, color: 'var(--ink-3)', maxWidth: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span key={path} style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 96 }}>
+                  <img src={contentUrl(path)} alt="" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--accent)', display: 'block' }} />
+                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {itemForPath(path)?.ref ?? path.split('/').pop()}
                   </span>
                   <button
@@ -501,13 +510,27 @@ export function RefImagePanel({
                       border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
                     }}
                   >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
-                    <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 9, lineHeight: '13px', background: 'rgba(5,6,8,.75)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 3px' }}>
+                    <img src={contentUrl(img.path)} alt="" style={{ width: 120, height: 120, objectFit: 'cover', display: 'block' }} />
+                    <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 10.5, lineHeight: '16px', background: 'rgba(5,6,8,.78)', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>
                       {img.ref ?? img.name}
                     </span>
                   </button>
                 ))
               )}
+            </div>
+          )}
+          {basePrompt !== '' && composePrompt() !== basePrompt && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ ...clusterLabel, marginBottom: 4 }}>PROMPT THAT WILL BE SENT</div>
+              <div
+                style={{
+                  whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-3)',
+                  background: 'rgba(255,255,255,.02)', border: '1px dashed var(--line, #2a3142)',
+                  borderRadius: 8, padding: '8px 10px',
+                }}
+              >
+                {composePrompt()}
+              </div>
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px dashed var(--line, #2a3142)', paddingTop: 10, marginTop: 4 }}>
@@ -541,7 +564,7 @@ export function RefImagePanel({
                     onClick={() => mapImage(img.path)}
                     style={{ padding: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none' }}
                   >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
+                    <img src={contentUrl(img.path)} alt="" style={{ width: 120, height: 120, objectFit: 'cover', display: 'block' }} />
                   </button>
                 ))
               )}
