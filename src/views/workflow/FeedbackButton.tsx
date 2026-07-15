@@ -146,11 +146,6 @@ export function FeedbackButton({
         background: 'rgba(255,255,255,.02)',
       }}
     >
-      {historyKey && history !== null && history.length === 0 && (
-        <div style={{ padding: '10px 12px 0', fontSize: 11.5, color: 'var(--ink-3)' }}>
-          Notes you run are remembered here — checked ones apply to every later draft.
-        </div>
-      )}
       {historyKey && (history?.length ?? 0) > 0 && (
         <div style={{ padding: '10px 12px 0' }}>
           <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
@@ -185,7 +180,11 @@ export function FeedbackButton({
         rows={3}
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
-        placeholder={placeholder}
+        placeholder={
+          historyKey && (history?.length ?? 0) === 0
+            ? `${placeholder} Notes you run are remembered here and apply to every later draft.`
+            : placeholder
+        }
         style={{
           display: 'block',
           width: '100%',
