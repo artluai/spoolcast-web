@@ -325,10 +325,6 @@ export function RefImagePanel({
         {fields && (
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
-          </div>
-        )}
-      </div>
-
       {/* CREATE — collapsed by default; the whole point when no image exists */}
       <div style={{ marginTop: 12 }}>
         <button
@@ -351,7 +347,7 @@ export function RefImagePanel({
             </p>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" className="core-create" disabled={generating} onClick={generate}>
+            <button type="button" className="core-create" style={{ marginLeft: 0 }} disabled={generating} onClick={generate}>
               {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate from the notes'}
             </button>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
@@ -493,6 +489,9 @@ export function RefImagePanel({
           )}
         </div>
       )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
