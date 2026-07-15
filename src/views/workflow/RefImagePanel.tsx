@@ -58,6 +58,12 @@ export function RefImagePanel({
   // Canvas ratio for THIS generation ('auto' = the video's ratio). A wide
   // character sheet inside a vertical video is normal.
   const [ratio, setRatio] = useState('auto')
+  const [sessionRatio, setSessionRatio] = useState('16:9')
+  useEffect(() => {
+    getFileJson<{ aspect_ratio?: string }>('session.json').then((cfg) => {
+      if (cfg?.aspect_ratio) setSessionRatio(cfg.aspect_ratio)
+    })
+  }, [])
   const [dims, setDims] = useState('')
   // Ingredients: images that ride along with the prompt (how masters compose).
   const [attachOpen, setAttachOpen] = useState(false)
@@ -334,12 +340,10 @@ export function RefImagePanel({
             title="Canvas ratio for this generation"
             style={{ background: 'var(--bg-3)', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, fontFamily: 'var(--mono)' }}
           >
-            <option value="auto">ratio: video</option>
-            <option value="1:1">1:1</option>
-            <option value="16:9">16:9</option>
-            <option value="9:16">9:16</option>
-            <option value="4:3">4:3</option>
-            <option value="3:4">3:4</option>
+            <option value="auto">ratio: {sessionRatio}</option>
+            {['1:1', '16:9', '9:16', '4:3', '3:4'].filter((r) => r !== sessionRatio).map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
           </select>
           {!isMaster && (
             <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>

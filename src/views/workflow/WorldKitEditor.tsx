@@ -369,15 +369,11 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     if (sec.kind === 'table') sec.rows[ri][ci] = v
                     apply(d)
                   }
-                  const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
                   const scopeKnown = SCOPE_OPTIONS.some((o) => o.value === scope)
                   return (
                     <div style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
                       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                        {img && (
-                          <img src={img} alt="" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8 }} />
-                        )}
                         <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>
