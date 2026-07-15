@@ -4,13 +4,12 @@ import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { ModelPicker } from './ModelPicker'
 
-// WORLD KIT CASTING PANEL — the reference image machinery for one kit item:
-//   · generate a candidate from the item's notes OR an AI-detailed prompt
-//   · upload your own image, or map one already in the session (intake assets)
-//   · EVERY version is kept (source/world-kit-refs/<ref>/manifest.json);
-//     the filmstrip is the history and clicking a version picks the active one
-//   · describe-with-AI turns the active image back into prompt-style notes
-// Paid actions are labeled; generation runs as a durable engine job.
+// WORLD KIT CASTING PANEL — one kit item's reference image. Two labeled paths:
+//   GENERATE (from the item's notes; options: model, canvas ratio, character
+//   sheet, AI-improved prompt, image ingredients) — or ADD YOUR OWN (upload /
+//   pick from the session). Every result is a kept version; the filmstrip is
+//   the history and clicking picks the active one. Describe-with-AI appears
+//   only for images that didn't come from a prompt.
 
 type RefVersion = {
   id: string
@@ -22,7 +21,7 @@ type RefVersion = {
   at?: string
 }
 type RefManifest = { versions: RefVersion[]; active: string | null }
-type PoolImage = { path: string; name: string; size: number }
+type PoolImage = { path: string; name: string; size: number; ref?: string }
 
 const KIND_BADGE: Record<RefVersion['kind'], string> = {
   generated: '✦ gen',
@@ -53,17 +52,14 @@ export function RefImagePanel({
   const [describing, setDescribing] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [pool, setPool] = useState<PoolImage[] | null>(null)
-  // Character sheet: blank background so the identity composes anywhere.
-  // Masters are the opposite — a full scene — so the toggle hides for them.
+  // Masters are full scenes; the character-sheet toggle only fits ingredients.
   const isMaster = /master/i.test(kind)
   const [sheet, setSheet] = useState(() => !/master/i.test(kind) && /char|person|talent|creator/i.test(kind))
-  // Canvas ratio for THIS generation ('auto' = the session's ratio). A wide
+  // Canvas ratio for THIS generation ('auto' = the video's ratio). A wide
   // character sheet inside a vertical video is normal.
   const [ratio, setRatio] = useState('auto')
-  const [addOpen, setAddOpen] = useState(false)
   const [dims, setDims] = useState('')
-  // Ingredients: other images (kit actives, intake photos) attached to the
-  // generation — this is how master shots get composed.
+  // Ingredients: images that ride along with the prompt (how masters compose).
   const [attachOpen, setAttachOpen] = useState(false)
   const [attachPool, setAttachPool] = useState<PoolImage[] | null>(null)
   const [attached, setAttached] = useState<string[]>([])
@@ -80,7 +76,6 @@ export function RefImagePanel({
     setPromptSource('notes')
     setAttached([])
     setAttachOpen(false)
-    setAddOpen(false)
     setGalleryOpen(false)
     setDims('')
     loadManifest()
@@ -98,7 +93,6 @@ export function RefImagePanel({
   const versions = manifest?.versions ?? []
   const active = versions.find((v) => v.id === manifest?.active) ?? null
 
-  // ---- generate (durable job, polled) ------------------------------------
   const pollJob = (jobId: string) => {
     const tick = async () => {
       const state = await getFileJson<{ state?: string }>(`working/jobs/${jobId}.json`)
@@ -124,7 +118,7 @@ export function RefImagePanel({
       onToast('Write a prompt description first — that’s what the image is generated from.')
       return
     }
-    if (sheet) {
+    if (sheet && !isMaster) {
       prompt += ', isolated on a clean neutral studio background, character reference sheet, no background scene'
     }
     setGenerating(true)
@@ -147,10 +141,9 @@ export function RefImagePanel({
     pollJob(jobId)
   }
 
-  // ---- detail the prompt (paid text call) ---------------------------------
   const detailPrompt = async () => {
     if (!notes.trim()) {
-      onToast('Write a short description first — the AI expands it.')
+      onToast('Write a short description first — the AI improves it.')
       return
     }
     setDetailing(true)
@@ -166,11 +159,10 @@ export function RefImagePanel({
       setDetailed(out.data.text)
       setPromptSource('detailed')
     } else {
-      onToast(`Engine: ${out?.error || out?.message || 'could not expand the prompt.'}`)
+      onToast(`Engine: ${out?.error || out?.message || 'could not improve the prompt.'}`)
     }
   }
 
-  // ---- describe active image → notes (paid vision call) -------------------
   const describe = async () => {
     if (!active) return
     setDescribing(true)
@@ -188,7 +180,6 @@ export function RefImagePanel({
     }
   }
 
-  // ---- upload / map --------------------------------------------------------
   const upload = async (file: File) => {
     const b64 = await new Promise<string>((resolve, reject) => {
       const r = new FileReader()
@@ -211,13 +202,12 @@ export function RefImagePanel({
       const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
         apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
       )
-      // an item can't be its own ingredient
       setAttachPool((out?.data?.images ?? []).filter((i) => !i.path.includes(`world-kit-refs/${refId}/`)))
     }
   }
 
   const openGallery = async () => {
-    setGalleryOpen(true)
+    setGalleryOpen((v) => !v)
     if (pool === null) {
       const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
         apiUrl('source-images', { session: activeSession() }),
@@ -231,9 +221,9 @@ export function RefImagePanel({
     if (out?.ok) {
       setGalleryOpen(false)
       await loadManifest()
-      onToast('Mapped — the image joined this item’s history.')
+      onToast('Image added to this item’s history.')
     } else {
-      onToast(`Engine: ${out?.error || 'could not map the image.'}`)
+      onToast(`Engine: ${out?.error || 'could not use that image.'}`)
     }
   }
 
@@ -251,13 +241,22 @@ export function RefImagePanel({
     background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
     borderRadius: 6, padding: '7px 12px', fontSize: 12, cursor: 'pointer',
   }
+  const clusterLabel: React.CSSProperties = {
+    fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)',
+  }
 
   return (
     <div style={{ borderTop: '1px dashed var(--line, #2a3142)', marginTop: 10, paddingTop: 10 }}>
-      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8 }}>REFERENCE IMAGE</div>
+      <div style={{ ...clusterLabel, marginBottom: 4 }}>REFERENCE IMAGE</div>
+      {isMaster && (
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 10px', lineHeight: 1.5 }}>
+          A master shot is the approved scene your clips will start from. Add your cast and
+          environment images as ingredients, describe the moment in the notes, and generate.
+        </p>
+      )}
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {/* ACTIVE reference */}
+      {/* IMAGES: the active pick + every version (click to pick) */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
         {active ? (
           <div style={{ width: 190, flex: 'none' }}>
             <img
@@ -273,212 +272,195 @@ export function RefImagePanel({
         ) : (
           <div
             style={{
-              width: 168, height: 168, flex: 'none', borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
+              width: 190, height: 190, flex: 'none', borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: 12,
               textAlign: 'center', padding: 10,
             }}
           >
-            {manifest === null ? 'Loading…' : 'No reference yet — generate, upload, or map one.'}
+            {manifest === null ? 'Loading…' : 'No image yet — generate one below, or add your own.'}
           </div>
         )}
-
-        <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {/* HISTORY filmstrip: every version, click to pick */}
-          {versions.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {versions.map((v) => (
-                <button
-                  key={v.id}
-                  type="button"
-                  onClick={() => pick(v)}
-                  title={`${v.id} · ${v.kind}${v.model ? ` · ${v.model}` : ''}${v.prompt ? `\n\n${v.prompt.slice(0, 300)}` : ''}`}
+        {versions.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignContent: 'flex-start' }}>
+            {versions.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => pick(v)}
+                title={`${v.id} · ${v.kind}${v.model ? ` · ${v.model}` : ''}${v.prompt ? `\n\n${v.prompt.slice(0, 300)}` : ''}`}
+                style={{
+                  padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
+                  border: manifest?.active === v.id ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
+                  background: 'none',
+                }}
+              >
+                <img src={versionUrl(v)} alt="" style={{ height: 64, width: 'auto', maxWidth: 128, display: 'block' }} />
+                <span
                   style={{
-                    padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
-                    border: manifest?.active === v.id ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
-                    background: 'none',
+                    position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 9, lineHeight: '14px',
+                    background: 'rgba(5,6,8,.72)', color: 'var(--ink-3)', textAlign: 'center',
                   }}
                 >
-                  <img src={versionUrl(v)} alt="" style={{ height: 64, width: 'auto', maxWidth: 128, objectFit: 'cover', display: 'block' }} />
-                  <span
-                    style={{
-                      position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 9, lineHeight: '14px',
-                      background: 'rgba(5,6,8,.72)', color: 'var(--ink-3)', textAlign: 'center',
-                    }}
-                  >
-                    {KIND_BADGE[v.kind]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* GENERATE row */}
-          {isMaster && (
-            <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-              A master shot is the approved scene your clips will start from. Attach the cast and
-              environment images below, describe the moment, and generate.
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="core-create" disabled={generating} onClick={generate}>
-              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
-            </button>
-            <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
-            <select
-              value={ratio}
-              onChange={(e) => setRatio(e.target.value)}
-              title="Canvas ratio for this generation"
-              style={{ background: 'var(--bg-3)', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, fontFamily: 'var(--mono)' }}
-            >
-              <option value="auto">ratio: video</option>
-              <option value="1:1">1:1</option>
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-              <option value="4:3">4:3</option>
-              <option value="3:4">3:4</option>
-            </select>
-            {!isMaster && (
-              <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
-                <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
-                character sheet, blank background
-              </label>
-            )}
-            {detailed.trim() ? (
-              <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                from
-                <select
-                  value={promptSource}
-                  onChange={(e) => setPromptSource(e.target.value as 'notes' | 'detailed')}
-                  style={{ background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
-                >
-                  <option value="detailed">detailed prompt</option>
-                  <option value="notes">original notes</option>
-                </select>
-              </label>
-            ) : null}
-          </div>
-
-          {/* TOOLS — one quiet row: detail the prompt, attach ingredients,
-              add an image (upload or map), describe the active image */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
-              {detailing ? (<><span className="spin" /> Detailing…</>) : '✦ Detailed prompt'}
-            </button>
-            <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
-            <button type="button" style={small} onClick={openAttach}>
-              🖇 Attach {attachOpen ? '▴' : '▾'}
-            </button>
-            <button type="button" style={small} onClick={() => setAddOpen((v) => !v)}>
-              ＋ Add image {addOpen ? '▴' : '▾'}
-            </button>
-            {active && (
-              <button type="button" style={small} disabled={describing} onClick={describe}>
-                {describing ? (<><span className="spin" /> Describing…</>) : '✦ Describe → notes'}
+                  {KIND_BADGE[v.kind]}
+                </span>
               </button>
-            )}
-          </div>
-          {addOpen && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>
-              <button type="button" style={small} onClick={() => { setAddOpen(false); fileRef.current?.click() }}>↑ Upload a file…</button>
-              <button type="button" style={small} onClick={() => { setAddOpen(false); void openGallery() }}>↦ From this session…</button>
-            </div>
-          )}
-          {detailed.trim() !== '' && (
-            <textarea
-              value={detailed}
-              onChange={(e) => setDetailed(e.target.value)}
-              rows={4}
-              style={{
-                width: '100%', resize: 'vertical', background: 'rgba(255,255,255,.02)', color: 'var(--ink-2)',
-                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
-              }}
-            />
-          )}
-
-          {/* attached ingredient thumbs */}
-          <div style={{ display: attached.length ? 'flex' : 'none', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {attached.map((path) => (
-              <span key={path} style={{ position: 'relative', display: 'inline-block' }}>
-                <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
-                <button
-                  type="button"
-                  title="Detach"
-                  onClick={() => setAttached((a) => a.filter((x) => x !== path))}
-                  style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, lineHeight: '13px', padding: 0, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer' }}
-                >
-                  ×
-                </button>
-              </span>
             ))}
-
           </div>
-          {attachOpen && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>
-              {attachPool === null ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
-              ) : attachPool.length === 0 ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
-              ) : (
-                attachPool.map((img) => (
-                  <button
-                    key={img.path}
-                    type="button"
-                    title={img.name}
-                    onClick={() =>
-                      setAttached((a) =>
-                        a.includes(img.path) ? a.filter((x) => x !== img.path) : a.length < 4 ? [...a, img.path] : a,
-                      )
-                    }
-                    style={{
-                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none',
-                      border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
-                    }}
-                  >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
-                  </button>
-                ))
-              )}
-            </div>
-          )}
+        )}
+      </div>
 
-          <div style={{ display: 'none' }}>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) void upload(f)
-                e.target.value = ''
-              }}
-            />
-          </div>
-
-          {/* MAP GALLERY: the session's uploaded/intake images */}
-          {galleryOpen && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>
-              {pool === null ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading session images…</span>
-              ) : pool.length === 0 ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No images in this session yet — upload some in Video idea (source material).</span>
-              ) : (
-                pool.map((img) => (
-                  <button
-                    key={img.path}
-                    type="button"
-                    title={img.path}
-                    onClick={() => mapImage(img.path)}
-                    style={{ padding: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none' }}
-                  >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
-                  </button>
-                ))
-              )}
-            </div>
+      {/* PATH 1 — generate from the notes */}
+      <div style={{ ...clusterLabel, marginBottom: 6 }}>GENERATE — FROM THE NOTES ABOVE</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+        <button type="button" className="core-create" disabled={generating} onClick={generate}>
+          {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
+        </button>
+        <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
+        <select
+          value={ratio}
+          onChange={(e) => setRatio(e.target.value)}
+          title="Canvas ratio for this generation"
+          style={{ background: 'var(--bg-3)', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, fontFamily: 'var(--mono)' }}
+        >
+          <option value="auto">ratio: video</option>
+          <option value="1:1">1:1</option>
+          <option value="16:9">16:9</option>
+          <option value="9:16">9:16</option>
+          <option value="4:3">4:3</option>
+          <option value="3:4">3:4</option>
+        </select>
+        {!isMaster && (
+          <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
+            <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
+            character sheet, blank background
+          </label>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+        <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
+          {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve prompt with AI'}
+        </button>
+        {(detailing || detailed.trim() !== '') && (
+          <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
+        )}
+        <button type="button" style={small} onClick={openAttach}>
+          🖇 Ingredients{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
+        </button>
+        {detailed.trim() !== '' && (
+          <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            generate from
+            <select
+              value={promptSource}
+              onChange={(e) => setPromptSource(e.target.value as 'notes' | 'detailed')}
+              style={{ background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
+            >
+              <option value="detailed">improved prompt</option>
+              <option value="notes">original notes</option>
+            </select>
+          </label>
+        )}
+      </div>
+      {detailed.trim() !== '' && (
+        <textarea
+          value={detailed}
+          onChange={(e) => setDetailed(e.target.value)}
+          rows={4}
+          style={{
+            width: '100%', resize: 'vertical', background: 'rgba(255,255,255,.02)', color: 'var(--ink-2)',
+            border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
+            marginBottom: 6,
+          }}
+        />
+      )}
+      {attached.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+          {attached.map((path) => (
+            <span key={path} style={{ position: 'relative', display: 'inline-block' }}>
+              <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
+              <button
+                type="button"
+                title="Remove ingredient"
+                onClick={() => setAttached((a) => a.filter((x) => x !== path))}
+                style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, lineHeight: '13px', padding: 0, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {attachOpen && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+          {attachPool === null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
+          ) : attachPool.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
+          ) : (
+            attachPool.map((img) => (
+              <button
+                key={img.path}
+                type="button"
+                title={img.name}
+                onClick={() =>
+                  setAttached((a) =>
+                    a.includes(img.path) ? a.filter((x) => x !== img.path) : a.length < 4 ? [...a, img.path] : a,
+                  )
+                }
+                style={{
+                  padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none',
+                  border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
+                }}
+              >
+                <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
+              </button>
+            ))
           )}
         </div>
+      )}
+
+      {/* PATH 2 — bring your own image */}
+      <div style={{ ...clusterLabel, margin: '8px 0 6px' }}>OR ADD YOUR OWN IMAGE</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" style={small} onClick={() => fileRef.current?.click()}>↑ Upload</button>
+        <button type="button" style={small} onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
+        {active && active.kind !== 'generated' && (
+          <button type="button" style={small} disabled={describing} onClick={describe}>
+            {describing ? (<><span className="spin" /> Describing…</>) : '✦ Describe with AI → notes'}
+          </button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void upload(f)
+            e.target.value = ''
+          }}
+        />
       </div>
+      {galleryOpen && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginTop: 8 }}>
+          {pool === null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading session images…</span>
+          ) : pool.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No images in this session yet — upload some in Video idea (source material).</span>
+          ) : (
+            pool.map((img) => (
+              <button
+                key={img.path}
+                type="button"
+                title={img.path}
+                onClick={() => mapImage(img.path)}
+                style={{ padding: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none' }}
+              >
+                <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
