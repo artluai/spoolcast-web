@@ -17,6 +17,9 @@ type RefVersion = {
   file?: string
   path?: string
   prompt?: string
+  // The character/subject prompt: what OTHER prompts import when they
+  // reference this image (the person — never the sheet layout).
+  subject?: string
   model?: string
   at?: string
 }
@@ -60,18 +63,24 @@ const jobErrorMessage = (raw: string): string => {
 export function RefImagePanel({
   refId,
   notes,
+  notesLabel = 'NOTES',
   kind = '',
   fields,
   kitIndex = {},
   onDescribed,
   onNotesChange,
+  onNotesInput,
+  onNotesFocus,
   onToast,
 }: {
   refId: string
   notes: string
+  // Column name for the prompt box label (the panel owns the textarea so it
+  // can toggle between the generation prompt and the character prompt).
+  notesLabel?: string
   kind?: string
-  // The item's editors (REF/KIND/SAVE TO/notes) — rendered to the RIGHT of
-  // the image so the card reads image-first with no dead space.
+  // The item's editors (REF/KIND/SAVE TO) — rendered to the RIGHT of the
+  // image so the card reads image-first with no dead space.
   fields?: React.ReactNode
   // Other kit items' kind + notes, keyed by ref: attached kit images bring
   // their own descriptions into the prompt so "the cast reference" means
@@ -79,8 +88,11 @@ export function RefImagePanel({
   kitIndex?: Record<string, { kind: string; notes: string; section: string }>
   onDescribed: (text: string) => void
   // Replaces the item's notes wholesale — how sheet/attach/improve edit the
-  // one prompt box (onDescribed appends; this overwrites).
+  // one prompt box (onDescribed appends; this overwrites). Snapshots undo.
   onNotesChange?: (text: string) => void
+  // Keystroke-level notes edit (no undo snapshot; pair with onNotesFocus).
+  onNotesInput?: (text: string) => void
+  onNotesFocus?: () => void
   onToast: (message: string) => void
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
@@ -115,6 +127,28 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
+  // Dual-prompt state: charPrompt = the character prompt (imported when this
+  // item is referenced elsewhere); notes stay the generation prompt. sheetMode
+  // makes the next Improve produce BOTH (character first, sheet built from it).
+  const [charPrompt, setCharPrompt] = useState<string | null>(null)
+  const [promptView, setPromptView] = useState<'prompt' | 'character'>('prompt')
+  const [sheetMode, setSheetMode] = useState(false)
+  const dualImprove = !isMaster && (sheetMode || charPrompt !== null)
+
+  const savedSubjectRef = useRef<string | null>(null)
+  const saveSubject = (text: string) => {
+    if (!manifest?.active) return
+    savedSubjectRef.current = text
+    void postAction({ action: 'set_ref_subject', ref: refId, id: manifest.active, text })
+  }
+  // Persist character-prompt edits automatically (debounced) — blur events
+  // are unreliable and the card can close without one.
+  useEffect(() => {
+    if (charPrompt === null || charPrompt === savedSubjectRef.current) return
+    const t = window.setTimeout(() => saveSubject(charPrompt), 800)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [charPrompt])
   // Switching versions swaps the prompt with the image: a generated version
   // carries the exact prompt it was made from, and picking it in HISTORY
   // writes that prompt into the box (uploads/mapped keep the notes as-is).
@@ -143,9 +177,15 @@ export function RefImagePanel({
     setImproveOpen(false)
     setGuidance('')
     setDims('')
+    setCharPrompt(null)
+    setPromptView('prompt')
+    setSheetMode(false)
     // no image yet -> the create section is the whole point, start it open
     loadManifest().then((m) => {
       setCreateOpen(m.versions.length === 0)
+      const act = m.versions.find((v) => v.id === m.active)
+      savedSubjectRef.current = act?.subject ?? null
+      if (act?.subject) setCharPrompt(act.subject)
       // Notes follow the SELECTED image — but only when they are plainly a
       // stale version prompt (empty, or identical to another version's stored
       // prompt). Hand-edited text is never overwritten on open.
@@ -208,15 +248,16 @@ export function RefImagePanel({
   // notes box so the visible text is exactly what is sent. The description is
   // the engine's cached SUBJECT of the item's active image (a character sheet
   // yields the person, never the sheet layout); item notes are the fallback.
-  const subjectsRef = useRef<Record<string, string>>({})
+  // The imported description: the item's stored character prompt if its
+  // active image has one, else its notes. NO automatic AI here — describing
+  // an image is always the explicit ✦ Describe button on that item.
+  const subjectsRef = useRef<Record<string, string | null>>({})
   const fetchSubject = async (ref: string): Promise<string | null> => {
     if (subjectsRef.current[ref] !== undefined) return subjectsRef.current[ref]
-    const out = await postAction<{ text?: string }>({ action: 'ref_subject', ref, allow_cost: true })
-    if (out?.ok && out.data?.text) {
-      subjectsRef.current[ref] = out.data.text
-      return out.data.text
-    }
-    return null
+    const m = await getFileJson<RefManifest>(`source/world-kit-refs/${ref}/manifest.json`)
+    const subject = m?.versions.find((v) => v.id === m.active)?.subject?.trim() || null
+    subjectsRef.current[ref] = subject
+    return subject
   }
 
   const buildRefLines = (paths: string[]) =>
@@ -225,11 +266,11 @@ export function RefImagePanel({
         const item = itemForPath(p)
         if (!item) return `Reference image ${i + 1}: ${p.split('/').pop()}`
         const desc = (await fetchSubject(item.ref)) ?? item.notes.replace(/\s+/g, ' ')
-        return `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${desc}`.trim()
+        const head = `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”`
+        return desc ? `${head}: ${desc}` : `${head}.`
       }),
     )
 
-  const [describingAttach, setDescribingAttach] = useState(false)
   const applyAttached = async (paths: string[]) => {
     if (paths.length === attached.length && paths.every((p, i) => p === attached[i])) return
     setAttached(paths)
@@ -238,9 +279,7 @@ export function RefImagePanel({
       onNotesChange?.(base)
       return
     }
-    setDescribingAttach(true)
     const lines = await buildRefLines(paths)
-    setDescribingAttach(false)
     onNotesChange?.(`${base}\n\n${lines.join('\n')}`)
   }
 
@@ -275,6 +314,7 @@ export function RefImagePanel({
       model: imgModel,
       ...(attached.length ? { ref_images: attached } : {}),
       ...(ratio !== 'auto' ? { aspect_ratio: ratio } : {}),
+      ...(charPrompt?.trim() ? { subject: charPrompt.trim() } : {}),
       allow_cost: true,
     })
     const already = /already running as (\S+)/.exec(out?.details || '')?.[1]
@@ -287,21 +327,51 @@ export function RefImagePanel({
     pollJob(jobId)
   }
 
+  const expand = (text: string, extraGuidance: string) =>
+    postAction<{ text?: string }>({
+      action: 'expand_ref_prompt',
+      text,
+      ...(extraGuidance.trim() ? { guidance: extraGuidance.trim() } : {}),
+      model: txtModel,
+      ...(draftReasoning(txtModel) ? { reasoning: draftReasoning(txtModel) } : {}),
+      allow_cost: true,
+    })
+
   const detailPrompt = async () => {
-    const base = stripRefLines(notes)
+    const base = (dualImprove && charPrompt?.trim()) || stripRefLines(notes)
     if (!base) {
       onToast('Write a short description first — the AI improves it.')
       return
     }
     setDetailing(true)
-    const out = await postAction<{ text?: string }>({
-      action: 'expand_ref_prompt',
-      text: base,
-      ...(guidance.trim() ? { guidance: guidance.trim() } : {}),
-      model: txtModel,
-      ...(draftReasoning(txtModel) ? { reasoning: draftReasoning(txtModel) } : {}),
-      allow_cost: true,
-    })
+    if (dualImprove) {
+      // Two prompts from one click: the CHARACTER prompt (imported when this
+      // item is referenced elsewhere), then the SHEET prompt built from it
+      // (what Generate uses to make the sheet image).
+      const charOut = await expand(
+        base,
+        `Write it as a description of the character only — never mention a reference sheet, panels, multiple views or layout. ${guidance}`,
+      )
+      if (!charOut?.ok || !charOut.data?.text) {
+        setDetailing(false)
+        onToast(`Engine: ${charOut?.error || charOut?.message || 'could not improve the prompt.'}`)
+        return
+      }
+      const sheetOut = await expand(charOut.data.text, SHEET_GUIDANCE)
+      setDetailing(false)
+      if (!sheetOut?.ok || !sheetOut.data?.text) {
+        onToast(`Engine: ${sheetOut?.error || sheetOut?.message || 'could not build the sheet prompt.'}`)
+        return
+      }
+      setCharPrompt(charOut.data.text)
+      saveSubject(charOut.data.text)
+      onNotesChange?.(sheetOut.data.text)
+      setPromptView('prompt')
+      setImproveOpen(false)
+      onToast('Two prompts written — toggle between sheet and character above the text box.')
+      return
+    }
+    const out = await expand(base, guidance)
     setDetailing(false)
     if (out?.ok && out.data?.text) {
       // Rewrite the description in place; the reference-image lines stay.
@@ -419,6 +489,9 @@ export function RefImagePanel({
       return
     }
     syncNotesToVersion(v)
+    savedSubjectRef.current = v.subject ?? null
+    setCharPrompt(v.subject ?? null)
+    setPromptView('prompt')
   }
 
   const small: React.CSSProperties = {
@@ -493,6 +566,56 @@ export function RefImagePanel({
         {fields && (
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center' }}>
+                {charPrompt === null ? (
+                  `${notesLabel} — PROMPT DESCRIPTION`
+                ) : (
+                  <>
+                    {notesLabel} —
+                    {(['prompt', 'character'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setPromptView(v)}
+                        title={v === 'prompt' ? 'What Generate uses to make this item’s image' : 'What other prompts import when they reference this image'}
+                        style={{
+                          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                          fontSize: 11, letterSpacing: 'inherit', fontFamily: 'inherit',
+                          color: promptView === v ? 'var(--ink-1)' : 'var(--ink-3)',
+                          textDecoration: promptView === v ? 'underline' : 'none', textUnderlineOffset: 3,
+                        }}
+                      >
+                        {v === 'prompt' ? 'GENERATION PROMPT' : 'CHARACTER PROMPT'}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+              <textarea
+                value={promptView === 'character' && charPrompt !== null ? charPrompt : notes}
+                onFocus={promptView === 'character' ? undefined : onNotesFocus}
+                onChange={(e) =>
+                  promptView === 'character' && charPrompt !== null
+                    ? setCharPrompt(e.target.value)
+                    : onNotesInput?.(e.target.value)
+                }
+                onBlur={() => {
+                  if (promptView === 'character' && charPrompt !== null) saveSubject(charPrompt)
+                }}
+                rows={5}
+                ref={(el) => {
+                  // Auto-grow to fit — attach/improve write lines in here and
+                  // they must be visible, not hidden behind a scrollbar.
+                  if (el && el.scrollHeight > el.clientHeight) el.style.height = `${el.scrollHeight + 4}px`
+                }}
+                style={{
+                  display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                  color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                  padding: '8px 10px', fontSize: 13, lineHeight: 1.5, marginTop: 3,
+                }}
+              />
+            </div>
       {/* CREATE — collapsed by default; the whole point when no image exists */}
       {!createOpen && (
         <div style={{ marginTop: 4 }}>
@@ -540,7 +663,7 @@ export function RefImagePanel({
                 style={small}
                 title="Rewrite the prompt with AI into a multi-angle character sheet on a blank background"
                 onClick={() => {
-                  setGuidance(SHEET_GUIDANCE)
+                  setSheetMode(true)
                   setImproveOpen(true)
                   // Sheets are wide (multiple angles side by side) — default the
                   // canvas to 16:9; still changeable in the ratio select.
@@ -572,14 +695,15 @@ export function RefImagePanel({
             <button type="button" style={small} onClick={openAttach}>
               🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
-            {describingAttach && (
-              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                <span className="spin" /> describing the attached images…
-              </span>
-            )}
           </div>
           {improveOpen && (
             <div style={{ marginBottom: 6 }}>
+              {dualImprove && (
+                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6 }}>
+                  Makes 2 prompts: <b>character</b> (imported when this item is referenced elsewhere) and{' '}
+                  <b>sheet</b> (what Generate uses for the sheet image). Toggle between them above the text box.
+                </div>
+              )}
               <textarea
                 value={guidance}
                 onChange={(e) => setGuidance(e.target.value)}

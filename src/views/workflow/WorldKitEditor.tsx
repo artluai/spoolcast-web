@@ -435,7 +435,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                               </label>
                             )}
                           </div>
-                          {descIdx !== refIdx && (
+                          {/* With a casting panel, the prompt textarea moves INTO
+                              RefImagePanel (it owns the prompt/character toggle). */}
+                          {descIdx !== refIdx && row[refIdx].trim() === '' && (
                             <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                               {section.columns[descIdx].toUpperCase()} — PROMPT DESCRIPTION
                               <textarea
@@ -465,8 +467,14 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                           refId={row[refIdx].trim()}
                           kind={kindIdx >= 0 ? row[kindIdx] : ''}
                           notes={descIdx !== refIdx ? row[descIdx] : ''}
+                          notesLabel={descIdx !== refIdx ? section.columns[descIdx].toUpperCase() : ''}
                           fields={fieldRows}
                           kitIndex={kitIndex}
+                          onNotesInput={(text) => {
+                            if (descIdx === refIdx) return
+                            setCell(descIdx, text)
+                          }}
+                          onNotesFocus={snapshot}
                           onDescribed={(text) => {
                             if (descIdx === refIdx) return
                             snapshot()
