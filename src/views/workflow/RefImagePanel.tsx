@@ -145,6 +145,10 @@ export function RefImagePanel({
     setDims('')
     // no image yet -> the create section is the whole point, start it open
     loadManifest().then((m) => setCreateOpen(m.versions.length === 0))
+    if (REF_LINE_RE.test(notes)) {
+      REF_LINE_RE.lastIndex = 0
+      void loadAttachPool().then((pool) => prefillAttached(notes, pool))
+    }
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
     }
@@ -192,22 +196,43 @@ export function RefImagePanel({
 
   // The model can't know what "the cast reference" is — each attached image
   // gets a numbered line spelling out what it contains, written INTO the
-  // notes box so the visible text is exactly what is sent.
-  const refBlock = (paths: string[]) =>
-    paths
-      .map((p, i) => {
-        const item = itemForPath(p)
-        return item
-          ? `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${item.notes.replace(/\s+/g, ' ')}`.trim()
-          : `Reference image ${i + 1}: ${p.split('/').pop()}`
-      })
-      .join('\n')
+  // notes box so the visible text is exactly what is sent. The description is
+  // the engine's cached SUBJECT of the item's active image (a character sheet
+  // yields the person, never the sheet layout); item notes are the fallback.
+  const subjectsRef = useRef<Record<string, string>>({})
+  const fetchSubject = async (ref: string): Promise<string | null> => {
+    if (subjectsRef.current[ref] !== undefined) return subjectsRef.current[ref]
+    const out = await postAction<{ text?: string }>({ action: 'ref_subject', ref, allow_cost: true })
+    if (out?.ok && out.data?.text) {
+      subjectsRef.current[ref] = out.data.text
+      return out.data.text
+    }
+    return null
+  }
 
-  const applyAttached = (paths: string[]) => {
+  const buildRefLines = (paths: string[]) =>
+    Promise.all(
+      paths.map(async (p, i) => {
+        const item = itemForPath(p)
+        if (!item) return `Reference image ${i + 1}: ${p.split('/').pop()}`
+        const desc = (await fetchSubject(item.ref)) ?? item.notes.replace(/\s+/g, ' ')
+        return `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${desc}`.trim()
+      }),
+    )
+
+  const [describingAttach, setDescribingAttach] = useState(false)
+  const applyAttached = async (paths: string[]) => {
     if (paths.length === attached.length && paths.every((p, i) => p === attached[i])) return
     setAttached(paths)
     const base = stripRefLines(notes)
-    onNotesChange?.(paths.length ? `${base}\n\n${refBlock(paths)}` : base)
+    if (!paths.length) {
+      onNotesChange?.(base)
+      return
+    }
+    setDescribingAttach(true)
+    const lines = await buildRefLines(paths)
+    setDescribingAttach(false)
+    onNotesChange?.(`${base}\n\n${lines.join('\n')}`)
   }
 
   // kie.ai rejects prompts over the selected model's documented cap — stop
@@ -223,6 +248,12 @@ export function RefImagePanel({
     if (prompt.length > promptLimit) {
       setGenError(
         `Prompt is ${prompt.length.toLocaleString()} characters — this model accepts at most ${promptLimit.toLocaleString()}. Shorten it (Improve with AI can compress it).`,
+      )
+      return
+    }
+    if (/^Reference image \d+/m.test(prompt) && attached.length === 0) {
+      setGenError(
+        'The prompt mentions reference images but none are attached — attach them under 🖇 Reference images, or delete those lines.',
       )
       return
     }
@@ -306,21 +337,46 @@ export function RefImagePanel({
     }
   }
 
-  const openAttach = async () => {
-    setAttachOpen((v) => !v)
-    if (attachPool === null) {
-      const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
-        apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
-      )
-      // Mapped kit actives share a path with their source image — keep one
-      // entry per path (prefer the kit one, which carries .ref).
-      const seen = new Map<string, PoolImage>()
-      for (const i of out?.data?.images ?? []) {
-        if (i.path.includes(`world-kit-refs/${refId}/`)) continue
-        if (!seen.has(i.path) || i.ref) seen.set(i.path, i)
-      }
-      setAttachPool([...seen.values()])
+  // Session-wide pool (kit actives carry .ref); the gallery filters out the
+  // current item's own images at render time so the cache survives item
+  // switches and the open-time prefill below.
+  const loadAttachPool = async (): Promise<PoolImage[]> => {
+    if (attachPool !== null) return attachPool
+    const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
+      apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
+    )
+    // Mapped kit actives share a path with their source image — keep one
+    // entry per path (prefer the kit one, which carries .ref).
+    const seen = new Map<string, PoolImage>()
+    for (const i of out?.data?.images ?? []) {
+      if (!seen.has(i.path) || i.ref) seen.set(i.path, i)
     }
+    const pool = [...seen.values()]
+    setAttachPool(pool)
+    return pool
+  }
+
+  const openAttach = () => {
+    setAttachOpen((v) => !v)
+    void loadAttachPool()
+  }
+
+  // "Reference image N …" lines in the prompt are the durable record of what
+  // was attached — re-attach those images when the item opens, so the text
+  // and the payload never disagree after a refresh.
+  const prefillAttached = (text: string, pool: PoolImage[]) => {
+    const paths: string[] = []
+    for (const line of text.match(REF_LINE_RE) ?? []) {
+      const named = /“([^”]+)”/.exec(line)?.[1]
+      const file = named ? null : /^Reference image \d+:\s*(.+)$/.exec(line)?.[1]?.trim()
+      const hit = named
+        ? pool.find((i) => i.ref === named)
+        : file
+          ? pool.find((i) => i.name === file || i.path.endsWith(`/${file}`))
+          : undefined
+      if (hit && !paths.includes(hit.path)) paths.push(hit.path)
+    }
+    if (paths.length) setAttached(paths)
   }
 
   const openGallery = async () => {
@@ -507,6 +563,11 @@ export function RefImagePanel({
             <button type="button" style={small} onClick={openAttach}>
               🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
+            {describingAttach && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                <span className="spin" /> describing the attached images…
+              </span>
+            )}
           </div>
           {improveOpen && (
             <div style={{ marginBottom: 6 }}>
@@ -556,7 +617,7 @@ export function RefImagePanel({
               ) : attachPool.length === 0 ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
               ) : (
-                attachPool.map((img) => (
+                attachPool.filter((img) => !img.path.includes(`world-kit-refs/${refId}/`)).map((img) => (
                   <button
                     key={img.path}
                     type="button"
