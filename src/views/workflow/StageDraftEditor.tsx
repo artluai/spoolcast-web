@@ -271,6 +271,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: stageId,
+          // Re-drafting THIS stage overwrites its own file — later steps'
+          // work (e.g. a cast World Kit) survives; only approvals reset.
+          keep_files: true,
         }),
       })
       const out = await res.json().catch(() => null)

@@ -172,7 +172,10 @@ export function WorkflowView({
   const [resetMenu, setResetMenu] = useState(false)
   const [resetConfirm, setResetConfirm] = useState<{ stageId: string; name: string; whole: boolean } | null>(null)
   const [resetting, setResetting] = useState(false)
-  const doReset = async () => {
+  // keepFiles: revoke the approvals (steps re-approve in order) but keep every
+  // file later steps produced — an already-cast World Kit survives an upstream
+  // edit. Without it, downstream produced files are deleted (save point kept).
+  const doReset = async (keepFiles: boolean) => {
     if (!resetConfirm || resetting) return
     setResetting(true)
     try {
@@ -184,6 +187,7 @@ export function WorkflowView({
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: resetConfirm.stageId,
+          ...(keepFiles ? { keep_files: true } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -194,9 +198,11 @@ export function WorkflowView({
       // Drop every cached draft so the editors reload the engine's truth.
       for (const s of orderedSteps) clearStageDrafts(s.sourceId ?? s.id)
       onToast(
-        resetConfirm.whole
-          ? 'Project set back to step 1 — approvals revoked, produced files cleared.'
-          : `“${resetConfirm.name}” and everything after set back to pending.`,
+        keepFiles
+          ? `“${resetConfirm.name}” and everything after need re-approval — all work kept.`
+          : resetConfirm.whole
+            ? 'Project set back to step 1 — approvals revoked, produced files cleared.'
+            : `“${resetConfirm.name}” and everything after set back to pending.`,
       )
       setResetConfirm(null)
     } catch {
@@ -1039,16 +1045,25 @@ export function WorkflowView({
                 </h3>
                 <p>
                   {resetConfirm.whole
-                    ? 'Everything the steps produced is removed and every approval is undone.'
-                    : 'This step and everything after it go back to square one — their approvals are undone and the files they produced are removed.'}{' '}
-                  Your source material and project settings stay, and a save point of everything
-                  removed is kept automatically (the last 5), so it can be brought back if you
-                  change your mind.
+                    ? 'This step and everything after it need approving again. '
+                    : 'This step and everything after it need approving again. '}
+                  <b>Keep the work</b> leaves everything the later steps produced (like an
+                  already-cast World Kit) exactly as it is — you just re-approve each step.{' '}
+                  <b>Delete it</b> clears those files for a fresh start. Your source material and
+                  project settings stay either way, and before anything is deleted a save point is
+                  kept automatically (the last 5), so it can be brought back.
                 </p>
                 <div className="actions">
                   <button onClick={() => setResetConfirm(null)}>Never mind</button>
-                  <button className="primary" onClick={doReset} disabled={resetting}>
-                    {resetting ? 'Working…' : 'Yes, start over'}
+                  <button className="primary" onClick={() => void doReset(true)} disabled={resetting}>
+                    {resetting ? 'Working…' : 'Keep the work — just re-approve'}
+                  </button>
+                  <button
+                    onClick={() => void doReset(false)}
+                    disabled={resetting}
+                    style={{ color: 'var(--red)', borderColor: 'var(--red)' }}
+                  >
+                    {resetting ? 'Working…' : 'Delete it and start fresh'}
                   </button>
                 </div>
               </div>

@@ -730,6 +730,10 @@ function SpoolcastApp() {
                           tenant: 'local',
                           action: 'rewind_stage',
                           stage_id: sourceId,
+                          // Editing one field must never delete later steps' work
+                          // (an already-cast World Kit): revoke approvals only.
+                          // Deleting is reserved for the explicit Start over menu.
+                          keep_files: true,
                         }),
                       })
                       const rwOut = await rw.json().catch(() => null)

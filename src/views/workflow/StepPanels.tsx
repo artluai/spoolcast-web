@@ -1693,6 +1693,9 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           tenant: 'local',
           action: 'rewind_stage',
           stage_id: stepId,
+          // AI-suggest on a passed step rewrites this step only — keep every
+          // later step's files; approvals reset and get re-passed in order.
+          keep_files: true,
         }),
       })
       const out = await res.json().catch(() => null)
