@@ -406,7 +406,7 @@ export function RefImagePanel({
         </div>
       )}
       {createOpen && (
-        <div style={{ position: 'relative', border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: '12px 14px', marginTop: 4 }}>
+        <div style={{ position: 'relative', marginTop: 8 }}>
           <button
             type="button"
             title="Collapse"
@@ -447,7 +447,7 @@ export function RefImagePanel({
             </button>
           </div>
           {improveOpen && (
-            <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginBottom: 6 }}>
+            <div style={{ marginBottom: 6 }}>
               <textarea
                 value={guidance}
                 onChange={(e) => setGuidance(e.target.value)}
@@ -488,7 +488,7 @@ export function RefImagePanel({
             </div>
           )}
           {attachOpen && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
               {attachPool === null ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
               ) : attachPool.length === 0 ? (
@@ -522,7 +522,7 @@ export function RefImagePanel({
               )}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px dashed var(--line, #2a3142)', paddingTop: 10, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
             <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>or add your own:</span>
             <button type="button" style={small} onClick={() => fileRef.current?.click()}>↑ Upload</button>
             <button type="button" style={small} onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
@@ -539,7 +539,7 @@ export function RefImagePanel({
             />
           </div>
           {galleryOpen && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginTop: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {pool === null ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading session images…</span>
               ) : pool.length === 0 ? (

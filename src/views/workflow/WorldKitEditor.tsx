@@ -247,7 +247,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
             }
           }
           return (
-          <div key={si} style={{ padding: '14px 0', borderTop: si > 0 ? '1px solid var(--line, #2a3142)' : undefined }}>
+          <div key={si} style={{ padding: '18px 0' }}>
             {/* CONSISTENT HEADER: title · blurb · + Add pinned right */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>{section.heading}</h3>
