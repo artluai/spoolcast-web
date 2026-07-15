@@ -468,6 +468,9 @@ export function RefImagePanel({
                 onClick={() => {
                   setGuidance(SHEET_GUIDANCE)
                   setImproveOpen(true)
+                  // Sheets are wide (multiple angles side by side) — default the
+                  // canvas to 16:9; still changeable in the ratio select.
+                  setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
                 }}
               >
                 ⊞ Character sheet…
