@@ -115,6 +115,15 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
+  // The notes box mirrors the SELECTED image: a generated version carries the
+  // exact prompt it was made from, so opening the item or switching versions
+  // writes that prompt back into the box (uploads/mapped keep the notes as-is).
+  const syncNotesToVersion = (v: RefVersion | undefined) => {
+    if (v?.kind === 'generated' && v.prompt && v.prompt.trim() !== notes.trim()) {
+      onNotesChange?.(v.prompt)
+    }
+  }
+
   const manifestPath = `source/world-kit-refs/${refId}/manifest.json`
   const loadManifest = () =>
     getFileJson<RefManifest>(manifestPath).then((m) => {
@@ -133,7 +142,10 @@ export function RefImagePanel({
     setGuidance('')
     setDims('')
     // no image yet -> the create section is the whole point, start it open
-    loadManifest().then((m) => setCreateOpen(m.versions.length === 0))
+    loadManifest().then((m) => {
+      setCreateOpen(m.versions.length === 0)
+      syncNotesToVersion(m.versions.find((v) => v.id === m.active))
+    })
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
     }
@@ -330,7 +342,9 @@ export function RefImagePanel({
     if (!out?.ok) {
       onToast(`Engine: ${out?.error || 'could not set the reference.'}`)
       await loadManifest()
+      return
     }
+    syncNotesToVersion(v)
   }
 
   const small: React.CSSProperties = {
