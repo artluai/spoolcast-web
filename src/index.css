@@ -389,7 +389,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
    line inside the header bar, below the title AND the buttons. Without a
    description the header is the untouched default single row; with one, the
    bar wraps and grows by exactly the description line. */
-.detail-head:has(.head-desc) { flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+/* Header with a template description line: wraps to two rows and MUST size
+   from content (height auto beats any inherited constraint) — the desc line
+   may never cross the header's bottom border. Class set from React, not
+   :has(), so the layout can't depend on selector support or HMR half-states. */
+.detail-head.has-desc { flex-wrap: wrap; height: auto; max-height: none; padding-top: 12px; padding-bottom: 12px; }
 .head-desc { flex: 1 1 100%; min-width: 0; margin-top: -4px; color: var(--ink-3); font-size: 12.5px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node-sub { position: absolute; left: 12px; right: 12px; top: 47px; display: block; font-size: 10.5px; line-height: 13px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node.has-progress .node-sub { display: none; }

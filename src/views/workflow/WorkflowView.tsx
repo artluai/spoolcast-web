@@ -274,6 +274,18 @@ export function WorkflowView({
   // must never change another step's. Double-click a handle to reset.
   const [userSizes, setUserSizes] = useState<Record<string, CardSize>>({})
   const userSize = userSizes[activeStep.id] ?? AUTO_CARD_SIZE
+  // FIT CONTENT BY DEFAULT (user rule): entering a step always starts at
+  // automatic height — a dragged height only holds while you stay on the
+  // step, because a remembered height cap silently hides content behind an
+  // inner scrollbar on every later visit. Width prefs persist: width never
+  // hides content; height does.
+  useEffect(() => {
+    setUserSizes((prev) => {
+      const cur = prev[activeStep.id]
+      if (!cur || cur.h == null) return prev
+      return { ...prev, [activeStep.id]: { w: cur.w, h: null } }
+    })
+  }, [activeStep.id])
   const setUserSize = (action: CardSize | ((s: CardSize) => CardSize)) =>
     setUserSizes((all) => {
       const current = all[activeStep.id] ?? AUTO_CARD_SIZE
@@ -876,7 +888,7 @@ export function WorkflowView({
             </>
           ) : null}
           <div
-            className="detail-head"
+            className={`detail-head ${activeStep.description ? 'has-desc' : ''}`}
             onMouseDown={(event) => {
               if (fullView || (event.target as HTMLElement).closest('button')) return
               const card = cardRef.current

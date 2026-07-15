@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc } from '../../lib/worldkit-md'
 import { actionUrl, activeSession } from '../../lib/api'
+import { RefImagePanel } from './RefImagePanel'
 import { useWorkflowStore } from '../../store/workflow'
 
 // Scope tokens (stored in the md) ↔ human labels shown in the per-item picker.
@@ -29,7 +30,10 @@ const SECTION_BLURBS: Record<string, string> = {
  * description, change its save scope (episode default / show / template), or
  * remove it (with an impact warning). Undo / Reset / Raw live in the header.
  */
-export function WorldKitEditor({ stageId, path }: { stageId: string; path: string }) {
+export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; path: string; onToast?: (m: string) => void }) {
+  // Toast plumbing is optional here (StageDraftEditor doesn't thread it yet) —
+  // fall back to a console note rather than swallowing feedback.
+  const toast = onToast ?? ((m: string) => console.info('[world-kit]', m))
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
@@ -230,6 +234,7 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
 
             {section.kind === 'text' && isStyleAnchor ? (
               // Style Anchor is a property block, not an item list — text is correct here.
+              <>
               <textarea
                 value={section.text}
                 onFocus={snapshot}
@@ -245,6 +250,16 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
                   border: '1px solid var(--line, #2a3142)', borderRadius: 8, padding: 10, fontSize: 13, lineHeight: 1.5, marginTop: 8,
                 }}
               />
+              {/* EMPTY FIELDS SAY SO (user rule): blank Style/Anchor lines must
+                  state their meaning instead of dangling as bare markdown. */}
+              {(/\*\*Style:\*\*\s*($|\n)/.test(section.text) || /\*\*Anchor:\*\*\s*($|\n)/.test(section.text)) && (
+                <p style={{ color: 'var(--ink-3)', fontSize: 12, margin: '6px 0 0', lineHeight: 1.5 }}>
+                  No look chosen yet — Style and Anchor are empty. Project setup (Step 01) owns the
+                  visual style; once it's picked there, this block names the look and the reference
+                  every image gets checked against.
+                </p>
+              )}
+              </>
             ) : section.kind === 'text' ? (
               // ITEM SECTION with no items yet: the note reads quietly; + Add
               // lives in the header like everywhere else.
@@ -411,6 +426,20 @@ export function WorldKitEditor({ stageId, path }: { stageId: string; path: strin
                                 }}
                               />
                             </label>
+                          )}
+                          {/* CASTING: generate/upload/map this item's reference
+                              image, with the full pick-from-history filmstrip. */}
+                          {row[refIdx].trim() !== '' && (
+                            <RefImagePanel
+                              refId={row[refIdx].trim()}
+                              notes={descIdx !== refIdx ? row[descIdx] : ''}
+                              onDescribed={(text) => {
+                                if (descIdx === refIdx) return
+                                snapshot()
+                                setCell(descIdx, row[descIdx].trim() ? `${row[descIdx].trim()}\n\n${text}` : text)
+                              }}
+                              onToast={toast}
+                            />
                           )}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                             <button style={btn} onClick={() => setExpanded(null)}>Done</button>
