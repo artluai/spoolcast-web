@@ -432,6 +432,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                           {row[refIdx].trim() !== '' && (
                             <RefImagePanel
                               refId={row[refIdx].trim()}
+                              kind={kindIdx >= 0 ? row[kindIdx] : ''}
                               notes={descIdx !== refIdx ? row[descIdx] : ''}
                               onDescribed={(text) => {
                                 if (descIdx === refIdx) return

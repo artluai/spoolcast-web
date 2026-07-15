@@ -33,11 +33,13 @@ const KIND_BADGE: Record<RefVersion['kind'], string> = {
 export function RefImagePanel({
   refId,
   notes,
+  kind = '',
   onDescribed,
   onToast,
 }: {
   refId: string
   notes: string
+  kind?: string
   onDescribed: (text: string) => void
   onToast: (message: string) => void
 }) {
@@ -51,6 +53,13 @@ export function RefImagePanel({
   const [describing, setDescribing] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [pool, setPool] = useState<PoolImage[] | null>(null)
+  // Character sheet: blank background so the identity composes anywhere.
+  const [sheet, setSheet] = useState(() => /char|person|talent|creator/i.test(kind))
+  // Ingredients: other images (kit actives, intake photos) attached to the
+  // generation — this is how master shots get composed.
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [attachPool, setAttachPool] = useState<PoolImage[] | null>(null)
+  const [attached, setAttached] = useState<string[]>([])
   const fileRef = useRef<HTMLInputElement | null>(null)
   const timerRef = useRef<number | null>(null)
 
@@ -62,6 +71,8 @@ export function RefImagePanel({
     setManifest(null)
     setDetailed('')
     setPromptSource('notes')
+    setAttached([])
+    setAttachOpen(false)
     loadManifest()
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
@@ -98,10 +109,13 @@ export function RefImagePanel({
   }
 
   const generate = async () => {
-    const prompt = (promptSource === 'detailed' && detailed.trim() ? detailed : notes).trim()
+    let prompt = (promptSource === 'detailed' && detailed.trim() ? detailed : notes).trim()
     if (!prompt) {
       onToast('Write a prompt description first — that’s what the image is generated from.')
       return
+    }
+    if (sheet) {
+      prompt += ', isolated on a clean neutral studio background, character reference sheet, no background scene'
     }
     setGenerating(true)
     const out = await postAction<{ stdout?: string }>({
@@ -109,6 +123,7 @@ export function RefImagePanel({
       ref: refId,
       prompt,
       model: imgModel,
+      ...(attached.length ? { ref_images: attached } : {}),
       allow_cost: true,
     })
     const already = /already running as (\S+)/.exec(out?.details || '')?.[1]
@@ -176,6 +191,17 @@ export function RefImagePanel({
       onToast('Image added to this item’s history.')
     } else {
       onToast(`Engine: ${out?.error || 'upload failed.'}`)
+    }
+  }
+
+  const openAttach = async () => {
+    setAttachOpen((v) => !v)
+    if (attachPool === null) {
+      const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
+        apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
+      )
+      // an item can't be its own ingredient
+      setAttachPool((out?.data?.images ?? []).filter((i) => !i.path.includes(`world-kit-refs/${refId}/`)))
     }
   }
 
@@ -280,6 +306,10 @@ export function RefImagePanel({
               {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
             </button>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
+            <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
+              character sheet — blank background
+            </label>
             {detailed.trim() ? (
               <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                 from
@@ -315,6 +345,57 @@ export function RefImagePanel({
                 border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
               }}
             />
+          )}
+
+          {/* ATTACH INGREDIENTS: images the generation composes from */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" style={small} onClick={openAttach}>
+              🖇 Attach images {attachOpen ? '▴' : '▾'}
+            </button>
+            {attached.map((path) => (
+              <span key={path} style={{ position: 'relative', display: 'inline-block' }}>
+                <img src={contentUrl(path)} alt="" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--accent)', display: 'block' }} />
+                <button
+                  type="button"
+                  title="Detach"
+                  onClick={() => setAttached((a) => a.filter((x) => x !== path))}
+                  style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, lineHeight: '13px', padding: 0, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer' }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {attached.length > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>these ride along with the prompt</span>
+            )}
+          </div>
+          {attachOpen && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8 }}>
+              {attachPool === null ? (
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
+              ) : attachPool.length === 0 ? (
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
+              ) : (
+                attachPool.map((img) => (
+                  <button
+                    key={img.path}
+                    type="button"
+                    title={img.name}
+                    onClick={() =>
+                      setAttached((a) =>
+                        a.includes(img.path) ? a.filter((x) => x !== img.path) : a.length < 4 ? [...a, img.path] : a,
+                      )
+                    }
+                    style={{
+                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none',
+                      border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
+                    }}
+                  >
+                    <img src={contentUrl(img.path)} alt="" style={{ width: 76, height: 76, objectFit: 'cover', display: 'block' }} />
+                  </button>
+                ))
+              )}
+            </div>
           )}
 
           {/* UPLOAD / MAP / DESCRIBE row */}
