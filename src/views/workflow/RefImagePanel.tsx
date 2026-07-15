@@ -29,6 +29,16 @@ const KIND_BADGE: Record<RefVersion['kind'], string> = {
   mapped: '↦ mapped',
 }
 
+// ONE text box is the whole prompt: the item's notes are sent verbatim, and
+// every control (sheet checkbox, attach/detach, improve-with-AI) edits that
+// text in place — nothing is appended invisibly at send time.
+const SHEET_SUFFIX =
+  ', isolated on a clean neutral studio background, character reference sheet, no background scene'
+const REF_LINE_RE = /^Reference image \d+.*$/gm
+
+const stripRefLines = (t: string) => t.replace(REF_LINE_RE, '').replace(/\n{3,}/g, '\n\n').trim()
+const existingRefLines = (t: string) => (t.match(REF_LINE_RE) ?? []).join('\n')
+
 export function RefImagePanel({
   refId,
   notes,
@@ -36,6 +46,7 @@ export function RefImagePanel({
   fields,
   kitIndex = {},
   onDescribed,
+  onNotesChange,
   onToast,
 }: {
   refId: string
@@ -49,13 +60,14 @@ export function RefImagePanel({
   // something to the model.
   kitIndex?: Record<string, { kind: string; notes: string; section: string }>
   onDescribed: (text: string) => void
+  // Replaces the item's notes wholesale — how sheet/attach/improve edit the
+  // one prompt box (onDescribed appends; this overwrites).
+  onNotesChange?: (text: string) => void
   onToast: (message: string) => void
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
   const [txtModel, setTxtModel] = useState(DEFAULT_MODEL_ID)
-  const [detailed, setDetailed] = useState('')
-  const [promptSource, setPromptSource] = useState<'notes' | 'detailed'>('notes')
   const [generating, setGenerating] = useState(false)
   const [detailing, setDetailing] = useState(false)
   const [describing, setDescribing] = useState(false)
@@ -63,7 +75,8 @@ export function RefImagePanel({
   const [pool, setPool] = useState<PoolImage[] | null>(null)
   // Masters are full scenes; the character-sheet toggle only fits ingredients.
   const isMaster = /master/i.test(kind)
-  const [sheet, setSheet] = useState(() => !/master/i.test(kind) && /char|person|talent|creator/i.test(kind))
+  // The checkbox mirrors the text: checked ⟺ the suffix is in the notes.
+  const sheet = notes.includes(SHEET_SUFFIX)
   // Canvas ratio for THIS generation ('auto' = the video's ratio). A wide
   // character sheet inside a vertical video is normal.
   const [ratio, setRatio] = useState('auto')
@@ -94,8 +107,6 @@ export function RefImagePanel({
 
   useEffect(() => {
     setManifest(null)
-    setDetailed('')
-    setPromptSource('notes')
     setAttached([])
     setAttachOpen(false)
     setGalleryOpen(false)
@@ -147,31 +158,35 @@ export function RefImagePanel({
     timerRef.current = window.setTimeout(tick, 4000)
   }
 
-  // The ONE place the outgoing prompt is assembled — the preview under the
-  // buttons renders exactly this, so what you read is what is sent.
-  const basePrompt = (promptSource === 'detailed' && detailed.trim() ? detailed : notes).trim()
-  const composePrompt = () => {
-    let prompt = basePrompt
-    if (!prompt) return ''
-    if (sheet && !isMaster) {
-      prompt += ', isolated on a clean neutral studio background, character reference sheet, no background scene'
-    }
-    if (attached.length) {
-      // The model can't know what "the cast reference" is — spell out what
-      // each attached image contains, in the same order the images arrive.
-      const lines = attached.map((p, i) => {
+  // The model can't know what "the cast reference" is — each attached image
+  // gets a numbered line spelling out what it contains, written INTO the
+  // notes box so the visible text is exactly what is sent.
+  const refBlock = (paths: string[]) =>
+    paths
+      .map((p, i) => {
         const item = itemForPath(p)
         return item
-          ? `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${item.notes}`.trim()
+          ? `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”: ${item.notes.replace(/\s+/g, ' ')}`.trim()
           : `Reference image ${i + 1}: ${p.split('/').pop()}`
       })
-      prompt += `\n\n${lines.join('\n')}`
-    }
-    return prompt
+      .join('\n')
+
+  const applyAttached = (paths: string[]) => {
+    if (paths.length === attached.length && paths.every((p, i) => p === attached[i])) return
+    setAttached(paths)
+    const base = stripRefLines(notes)
+    onNotesChange?.(paths.length ? `${base}\n\n${refBlock(paths)}` : base)
+  }
+
+  const toggleSheet = (on: boolean) => {
+    const lines = existingRefLines(notes)
+    const base = stripRefLines(notes).replaceAll(SHEET_SUFFIX, '').trim()
+    const next = (on ? base + SHEET_SUFFIX : base) + (lines ? `\n\n${lines}` : '')
+    onNotesChange?.(next)
   }
 
   const generate = async () => {
-    const prompt = composePrompt()
+    const prompt = notes.trim()
     if (!prompt) {
       onToast('Write a prompt description first — that’s what the image is generated from.')
       return
@@ -197,14 +212,15 @@ export function RefImagePanel({
   }
 
   const detailPrompt = async () => {
-    if (!notes.trim()) {
+    const base = stripRefLines(notes)
+    if (!base) {
       onToast('Write a short description first — the AI improves it.')
       return
     }
     setDetailing(true)
     const out = await postAction<{ text?: string }>({
       action: 'expand_ref_prompt',
-      text: notes,
+      text: base,
       ...(guidance.trim() ? { guidance: guidance.trim() } : {}),
       model: txtModel,
       ...(draftReasoning(txtModel) ? { reasoning: draftReasoning(txtModel) } : {}),
@@ -212,8 +228,9 @@ export function RefImagePanel({
     })
     setDetailing(false)
     if (out?.ok && out.data?.text) {
-      setDetailed(out.data.text)
-      setPromptSource('detailed')
+      // Rewrite the description in place; the reference-image lines stay.
+      const lines = existingRefLines(notes)
+      onNotesChange?.(out.data.text + (lines ? `\n\n${lines}` : ''))
       setImproveOpen(false)
     } else {
       onToast(`Engine: ${out?.error || out?.message || 'could not improve the prompt.'}`)
@@ -259,7 +276,14 @@ export function RefImagePanel({
       const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
         apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
       )
-      setAttachPool((out?.data?.images ?? []).filter((i) => !i.path.includes(`world-kit-refs/${refId}/`)))
+      // Mapped kit actives share a path with their source image — keep one
+      // entry per path (prefer the kit one, which carries .ref).
+      const seen = new Map<string, PoolImage>()
+      for (const i of out?.data?.images ?? []) {
+        if (i.path.includes(`world-kit-refs/${refId}/`)) continue
+        if (!seen.has(i.path) || i.ref) seen.set(i.path, i)
+      }
+      setAttachPool([...seen.values()])
     }
   }
 
@@ -409,7 +433,7 @@ export function RefImagePanel({
             </select>
             {!isMaster && (
               <label style={{ fontSize: 12, color: 'var(--ink-2)', display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
-                <input type="checkbox" checked={sheet} onChange={(e) => setSheet(e.target.checked)} />
+                <input type="checkbox" checked={sheet} onChange={(e) => toggleSheet(e.target.checked)} />
                 character sheet, blank background
               </label>
             )}
@@ -421,19 +445,6 @@ export function RefImagePanel({
             <button type="button" style={small} onClick={openAttach}>
               🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
-            {detailed.trim() !== '' && (
-              <label style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                generate from
-                <select
-                  value={promptSource}
-                  onChange={(e) => setPromptSource(e.target.value as 'notes' | 'detailed')}
-                  style={{ background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
-                >
-                  <option value="detailed">improved prompt</option>
-                  <option value="notes">original notes</option>
-                </select>
-              </label>
-            )}
           </div>
           {improveOpen && (
             <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 8, padding: 8, marginBottom: 6 }}>
@@ -456,18 +467,6 @@ export function RefImagePanel({
               </div>
             </div>
           )}
-          {detailed.trim() !== '' && (
-            <textarea
-              value={detailed}
-              onChange={(e) => setDetailed(e.target.value)}
-              rows={4}
-              style={{
-                width: '100%', resize: 'vertical', background: 'rgba(255,255,255,.02)', color: 'var(--ink-2)',
-                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
-                marginBottom: 6, boxSizing: 'border-box',
-              }}
-            />
-          )}
           {attached.length > 0 && (
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 6 }}>
               {attached.map((path) => (
@@ -479,7 +478,7 @@ export function RefImagePanel({
                   <button
                     type="button"
                     title="Remove reference image"
-                    onClick={() => setAttached((a) => a.filter((x) => x !== path))}
+                    onClick={() => applyAttached(attached.filter((x) => x !== path))}
                     style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, lineHeight: '13px', padding: 0, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer' }}
                   >
                     ×
@@ -501,8 +500,12 @@ export function RefImagePanel({
                     type="button"
                     title={img.name}
                     onClick={() =>
-                      setAttached((a) =>
-                        a.includes(img.path) ? a.filter((x) => x !== img.path) : a.length < 4 ? [...a, img.path] : a,
+                      applyAttached(
+                        attached.includes(img.path)
+                          ? attached.filter((x) => x !== img.path)
+                          : attached.length < 4
+                            ? [...attached, img.path]
+                            : attached,
                       )
                     }
                     style={{
@@ -517,20 +520,6 @@ export function RefImagePanel({
                   </button>
                 ))
               )}
-            </div>
-          )}
-          {basePrompt !== '' && composePrompt() !== basePrompt && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ ...clusterLabel, marginBottom: 4 }}>PROMPT THAT WILL BE SENT</div>
-              <div
-                style={{
-                  whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-3)',
-                  background: 'rgba(255,255,255,.02)', border: '1px dashed var(--line, #2a3142)',
-                  borderRadius: 8, padding: '8px 10px',
-                }}
-              >
-                {composePrompt()}
-              </div>
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px dashed var(--line, #2a3142)', paddingTop: 10, marginTop: 4 }}>

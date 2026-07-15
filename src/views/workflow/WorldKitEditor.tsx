@@ -443,6 +443,11 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                                 onFocus={snapshot}
                                 onChange={(e) => setCell(descIdx, e.target.value)}
                                 rows={5}
+                                ref={(el) => {
+                                  // Auto-grow to fit — attach/improve write lines in here and
+                                  // they must be visible, not hidden behind a scrollbar.
+                                  if (el && el.scrollHeight > el.clientHeight) el.style.height = `${el.scrollHeight + 4}px`
+                                }}
                                 style={{
                                   display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
                                   color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
@@ -466,6 +471,11 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             if (descIdx === refIdx) return
                             snapshot()
                             setCell(descIdx, row[descIdx].trim() ? `${row[descIdx].trim()}\n\n${text}` : text)
+                          }}
+                          onNotesChange={(text) => {
+                            if (descIdx === refIdx) return
+                            snapshot()
+                            setCell(descIdx, text)
                           }}
                           onToast={toast}
                         />

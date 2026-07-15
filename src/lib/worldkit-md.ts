@@ -9,13 +9,15 @@ export type WKSection =
 
 export type WKDoc = { title: string; sections: WKSection[] }
 
+// Cells are single markdown-table lines; real newlines ride as <br> (the
+// standard markdown-table escape) and are decoded back for the editor.
 const parseRow = (line: string): string[] =>
   line
     .trim()
     .replace(/^\|/, '')
     .replace(/\|$/, '')
     .split('|')
-    .map((c) => c.trim())
+    .map((c) => c.trim().replace(/<br\s*\/?>/gi, '\n'))
 
 export function parseWorldKit(md: string): WKDoc {
   const lines = md.split('\n')
@@ -78,7 +80,7 @@ export function serializeWorldKit(doc: WKDoc): string {
     if (s.kind === 'table') {
       parts.push(`| ${s.columns.join(' | ')} |`)
       parts.push(`|${s.columns.map(() => '---').join('|')}|`)
-      for (const r of s.rows) parts.push(`| ${r.map((c) => c.replace(/\|/g, '/')).join(' | ')} |`)
+      for (const r of s.rows) parts.push(`| ${r.map((c) => c.replace(/\|/g, '/').replace(/\n+/g, '<br>')).join(' | ')} |`)
     } else if (s.text) {
       parts.push(s.text)
     }
