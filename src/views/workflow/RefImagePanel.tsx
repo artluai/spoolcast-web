@@ -115,9 +115,11 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
-  // The notes box mirrors the SELECTED image: a generated version carries the
-  // exact prompt it was made from, so opening the item or switching versions
-  // writes that prompt back into the box (uploads/mapped keep the notes as-is).
+  // Switching versions swaps the prompt with the image: a generated version
+  // carries the exact prompt it was made from, and picking it in HISTORY
+  // writes that prompt into the box (uploads/mapped keep the notes as-is).
+  // ONLY on an explicit pick — syncing on open would overwrite edits the user
+  // saved after generating.
   const syncNotesToVersion = (v: RefVersion | undefined) => {
     if (v?.kind === 'generated' && v.prompt && v.prompt.trim() !== notes.trim()) {
       onNotesChange?.(v.prompt)
@@ -142,10 +144,7 @@ export function RefImagePanel({
     setGuidance('')
     setDims('')
     // no image yet -> the create section is the whole point, start it open
-    loadManifest().then((m) => {
-      setCreateOpen(m.versions.length === 0)
-      syncNotesToVersion(m.versions.find((v) => v.id === m.active))
-    })
+    loadManifest().then((m) => setCreateOpen(m.versions.length === 0))
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
     }
