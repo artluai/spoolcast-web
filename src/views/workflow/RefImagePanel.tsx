@@ -127,6 +127,48 @@ export function RefImagePanel({
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
+  // "Less AI" snippet: editable degradation text inserted into the prompt.
+  // Edits save as THIS video's override; a button promotes it to the global
+  // default. Resolution lives engine-side: session -> global -> built-in.
+  const [lessOpen, setLessOpen] = useState(false)
+  const [lessText, setLessText] = useState<string | null>(null)
+  const [lessSource, setLessSource] = useState('')
+  const savedLessRef = useRef<string | null>(null)
+  const lastInsertedRef = useRef('')
+
+  const openLess = () => {
+    setLessOpen((v) => !v)
+    if (lessText === null) {
+      void postAction<{ text?: string; source?: string }>({ action: 'get_prompt_snippet', name: 'less-ai' }).then((out) => {
+        if (out?.ok) {
+          savedLessRef.current = out.data?.text ?? ''
+          setLessText(out.data?.text ?? '')
+          setLessSource(out.data?.source ?? '')
+        }
+      })
+    }
+  }
+  useEffect(() => {
+    if (lessText === null || lessText === savedLessRef.current) return
+    const t = window.setTimeout(() => {
+      savedLessRef.current = lessText
+      setLessSource('session')
+      void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'session', text: lessText })
+    }, 800)
+    return () => window.clearTimeout(t)
+  }, [lessText])
+
+  const insertLess = () => {
+    const text = (lessText ?? '').trim()
+    if (!text) return
+    let base = stripRefLines(notes)
+    const prev = lastInsertedRef.current
+    if (prev && base.includes(prev)) base = base.replace(prev, text).trim()
+    else base = base ? `${base}\n${text}` : text
+    const lines = existingRefLines(notes)
+    onNotesChange?.(base + (lines ? `\n\n${lines}` : ''))
+    lastInsertedRef.current = text
+  }
   // Dual-prompt state: charPrompt = the character prompt (imported when this
   // item is referenced elsewhere); notes stay the generation prompt. sheetMode
   // makes the next Improve produce BOTH (character first, sheet built from it).
@@ -695,6 +737,14 @@ export function RefImagePanel({
             <button type="button" style={small} onClick={openAttach}>
               🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
+            <button
+              type="button"
+              style={small}
+              title="Editable snippet that makes the result look like a casual phone photo instead of a clean AI render"
+              onClick={openLess}
+            >
+              📷 Less AI {lessOpen ? '▴' : '▾'}
+            </button>
           </div>
           {improveOpen && (
             <div style={{ marginBottom: 6 }}>
@@ -720,6 +770,41 @@ export function RefImagePanel({
                   {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
                 </button>
                 <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
+              </div>
+            </div>
+          )}
+          {lessOpen && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6 }}>
+                Added to the prompt as plain text — edit it there like anything else. Edits here save for{' '}
+                <b>this video</b>{lessSource === 'global' ? ' (currently using your saved default)' : lessSource === 'default' ? ' (currently using the built-in text)' : ''}.
+              </div>
+              <textarea
+                value={lessText ?? ''}
+                onChange={(e) => setLessText(e.target.value)}
+                rows={3}
+                placeholder={lessText === null ? 'Loading…' : ''}
+                style={{
+                  width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                  color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                  padding: '7px 9px', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6,
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" style={small} disabled={!lessText?.trim()} onClick={insertLess}>
+                  ＋ Add to prompt
+                </button>
+                <button
+                  type="button"
+                  style={small}
+                  disabled={!lessText?.trim()}
+                  onClick={() => {
+                    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'global', text: (lessText ?? '').trim() })
+                    onToast('Saved as the default for all videos.')
+                  }}
+                >
+                  Save as default for all videos
+                </button>
               </div>
             </div>
           )}
