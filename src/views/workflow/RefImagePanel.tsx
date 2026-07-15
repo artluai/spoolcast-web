@@ -211,10 +211,20 @@ export function RefImagePanel({
     onNotesChange?.(paths.length ? `${base}\n\n${refBlock(paths)}` : base)
   }
 
+  // kie.ai rejects prompts over the selected model's documented cap — stop
+  // before spending the credit, with the counter showing how far over.
+  const promptLimit = IMAGE_MODELS.find((m) => m.id === imgModel)?.maxChars ?? 20000
+
   const generate = async () => {
     const prompt = notes.trim()
     if (!prompt) {
       onToast('Write a prompt description first — that’s what the image is generated from.')
+      return
+    }
+    if (prompt.length > promptLimit) {
+      setGenError(
+        `Prompt is ${prompt.length.toLocaleString()} characters — this model accepts at most ${promptLimit.toLocaleString()}. Shorten it (Improve with AI can compress it).`,
+      )
       return
     }
     setGenError('')
@@ -476,6 +486,15 @@ export function RefImagePanel({
                 ⊞ Character sheet…
               </button>
             )}
+            <span
+              title="Prompt length vs. the selected model's limit"
+              style={{
+                fontSize: 10.5, fontFamily: 'var(--mono)',
+                color: notes.trim().length > promptLimit ? 'var(--red, #e5534b)' : notes.trim().length > promptLimit * 0.8 ? 'var(--amber, #d29922)' : 'var(--ink-3)',
+              }}
+            >
+              {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
+            </span>
           </div>
           {genError !== '' && (
             <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>

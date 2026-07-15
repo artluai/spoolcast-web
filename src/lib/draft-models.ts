@@ -5,7 +5,7 @@
 // credit system lands. `reasoning` overrides the engine default where it
 // saves money (Opus bills its thinking tokens at full output rate — medium is
 // the sweet spot).
-export type DraftModel = { id: string; label: string; cost: string; desc: string; reasoning?: string }
+export type DraftModel = { id: string; label: string; cost: string; desc: string; reasoning?: string; maxChars?: number }
 
 export const PRIMARY_MODELS: DraftModel[] = [
   { id: 'z-ai/glm-5.2', label: 'GLM 5.2', cost: 'Standard cost', desc: 'strong writer — the default' },
