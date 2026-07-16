@@ -433,10 +433,11 @@ export function WorkflowView({
     engineStatus === 'not_started' ? 'Not started' :
     engineStatus === 'ready' ? 'Ready' :
     'Pending'
-  // Width should serve the content: wide is for big editors, grids, and
-  // timelines. Steps that are reading columns or rows/options (setup, the
-  // script's revision chain) stay at normal width.
-  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'pacing', 'voice', 'check'].includes(activeStep.id)
+  // Width should serve the content: wide is for big editors, grids, tables
+  // and timelines. Steps that are reading columns or rows/options (setup)
+  // stay at normal width. The screenplay is wide since it became the
+  // two-column clip table.
+  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'script', 'pacing', 'voice', 'check'].includes(activeStep.id)
   const mediaFitPanel = ['check', 'build'].includes(activeStep.id)
 
   const NODE_W = 172

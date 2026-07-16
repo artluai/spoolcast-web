@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { FeedbackButton } from './FeedbackButton'
@@ -757,11 +757,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     setChain(revs.map((r, k) => (k === i ? { ...r, text } : r)), sel)
                     syncStore(text)
                   }
-                  const cellStyle: React.CSSProperties = {
-                    width: '100%', boxSizing: 'border-box', resize: 'none', background: 'transparent',
-                    color: 'var(--ink-1)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
-                    padding: '7px 9px', fontSize: 13, lineHeight: 1.5,
-                  }
                   const viewToggle = (
                     <div style={{ display: 'flex', marginBottom: 10 }}>
                       <div className="vp-viewtoggle" style={{ marginLeft: 0 }}>
@@ -813,94 +808,130 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       </div>
                     )
                   }
+                  // Cells stay read-only; clicking one expands a MODULE row
+                  // under the clip (same card look as every other module) with
+                  // the big editor + the per-box AI edit. Wide, fullscreen and
+                  // mobile all work — it's just a taller table row.
                   const editableCell = (ci: number, field: 'screen' | 'line') => {
                     const value = doc.clips![ci][field]
                     const key = `${ci}:${field}`
-                    if (editCell === key) {
-                      const runCellAI = async () => {
-                        if (!aiNote.trim() || aiCellBusy) return
-                        setAiCellBusy(true)
-                        try {
-                          const r2 = await post({
-                            action: 'edit_snippet',
-                            allow_cost: true,
-                            model,
-                            text: value,
-                            instruction:
-                              (field === 'line'
-                                ? 'This is a SPOKEN line an influencer says to camera. '
-                                : 'This is an ON-SCREEN visual description. ') + aiNote.trim(),
-                            context: rev.text,
-                          })
-                          const out2 = await r2.json().catch(() => null)
-                          if (out2?.ok && out2.data?.text) {
-                            updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: String(out2.data.text) } : x)))
-                            setAiNote('')
-                          } else {
-                            setErr(out2?.message || out2?.error || 'The AI edit failed.')
-                          }
-                        } catch {
-                          setErr('Could not reach the engine.')
-                        } finally {
-                          setAiCellBusy(false)
-                        }
-                      }
-                      return (
-                        <div
-                          onBlur={(e) => {
-                            // Close only when focus truly leaves the cell — the
-                            // AI note input and button live inside it.
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                              setEditCell(null)
-                              setAiNote('')
-                            }
-                          }}
-                        >
-                          <textarea
-                            autoFocus
-                            value={value}
-                            rows={Math.max(2, Math.ceil(value.length / 60))}
-                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
-                            style={{ ...cellStyle, minHeight: 44 }}
-                          />
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
-                            <input
-                              value={aiNote}
-                              onChange={(e) => setAiNote(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') void runCellAI()
-                              }}
-                              placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
-                              style={{
-                                flex: 1, background: 'transparent', color: 'var(--ink-2)', fontSize: 12,
-                                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '5px 8px',
-                              }}
-                            />
-                            <button
-                              type="button"
-                              disabled={!aiNote.trim() || aiCellBusy}
-                              title="AI rewrites just this box — uses model credits"
-                              onClick={() => void runCellAI()}
-                              style={{
-                                background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
-                                borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    }
+                    const active = editCell === key
                     const empty = !value.trim()
                     return (
                       <span
                         title="Click to edit"
-                        onClick={() => setEditCell(key)}
-                        style={{ display: 'block', cursor: 'text', lineHeight: 1.5, color: empty ? 'var(--ink-3)' : undefined, fontStyle: empty ? 'italic' : undefined }}
+                        onClick={() => {
+                          setEditCell(active ? null : key)
+                          setAiNote('')
+                        }}
+                        style={{
+                          display: 'block', cursor: 'text', lineHeight: 1.5,
+                          color: empty ? 'var(--ink-3)' : undefined, fontStyle: empty ? 'italic' : undefined,
+                          ...(active ? { boxShadow: '-6px 0 0 var(--bg), -8px 0 0 var(--accent)', color: 'var(--ink-1)' } : {}),
+                        }}
                       >
                         {value.trim() || (field === 'line' ? '(silent)' : '(empty — a re-draft with AI writes these)')}
                       </span>
+                    )
+                  }
+                  const editorRow = (ci: number) => {
+                    const field = (editCell?.split(':')[1] ?? 'line') as 'screen' | 'line'
+                    const value = doc.clips![ci][field]
+                    const runCellAI = async () => {
+                      if (!aiNote.trim() || aiCellBusy) return
+                      setAiCellBusy(true)
+                      try {
+                        const r2 = await post({
+                          action: 'edit_snippet',
+                          allow_cost: true,
+                          model,
+                          text: value,
+                          instruction:
+                            (field === 'line'
+                              ? 'This is a SPOKEN line an influencer says to camera. '
+                              : 'This is an ON-SCREEN visual description. ') + aiNote.trim(),
+                          context: rev.text,
+                        })
+                        const out2 = await r2.json().catch(() => null)
+                        if (out2?.ok && out2.data?.text) {
+                          updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: String(out2.data.text) } : x)))
+                          setAiNote('')
+                        } else {
+                          setErr(out2?.message || out2?.error || 'The AI edit failed.')
+                        }
+                      } catch {
+                        setErr('Could not reach the engine.')
+                      } finally {
+                        setAiCellBusy(false)
+                      }
+                    }
+                    const small: React.CSSProperties = {
+                      background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
+                      borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
+                    }
+                    return (
+                      <tr key={`${ci}:editor`}>
+                        <td colSpan={4} style={{ padding: '2px 10px 14px', borderTop: 'none' }}>
+                          <div
+                            onBlur={(e) => {
+                              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                setEditCell(null)
+                                setAiNote('')
+                              }
+                            }}
+                            style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, background: 'rgba(255,255,255,.02)' }}
+                          >
+                            <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 7 }}>
+                              CLIP {ci + 1} — {field === 'line' ? 'SPOKEN LINE (EMPTY = SILENT)' : 'ON SCREEN'}
+                            </div>
+                            <textarea
+                              autoFocus
+                              value={value}
+                              rows={Math.max(5, Math.ceil(value.length / 80))}
+                              placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
+                              onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                              style={{
+                                width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                                color: 'var(--ink-1)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
+                                padding: '10px 12px', fontSize: 13.5, lineHeight: 1.6,
+                              }}
+                            />
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                              <input
+                                value={aiNote}
+                                onChange={(e) => setAiNote(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void runCellAI()
+                                }}
+                                placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
+                                style={{
+                                  flex: '1 1 260px', background: 'transparent', color: 'var(--ink-2)', fontSize: 12.5,
+                                  border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '7px 9px',
+                                }}
+                              />
+                              <button
+                                type="button"
+                                disabled={!aiNote.trim() || aiCellBusy}
+                                title="AI rewrites just this box — uses model credits"
+                                onClick={() => void runCellAI()}
+                                style={small}
+                              >
+                                {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
+                              </button>
+                              <button
+                                type="button"
+                                style={small}
+                                onClick={() => {
+                                  setEditCell(null)
+                                  setAiNote('')
+                                }}
+                              >
+                                Done
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     )
                   }
                   return (
@@ -918,21 +949,24 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           </thead>
                           <tbody>
                             {doc.clips.map((_, ci) => (
-                              <tr key={ci}>
-                                <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{ci + 1}</td>
-                                <td>{editableCell(ci, 'screen')}</td>
-                                <td>{editableCell(ci, 'line')}</td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    title="Remove this clip"
-                                    onClick={() => updateClips(doc.clips!.filter((_, k) => k !== ci))}
-                                    style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 13, padding: 0 }}
-                                  >
-                                    ×
-                                  </button>
-                                </td>
-                              </tr>
+                              <Fragment key={ci}>
+                                <tr>
+                                  <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{ci + 1}</td>
+                                  <td>{editableCell(ci, 'screen')}</td>
+                                  <td>{editableCell(ci, 'line')}</td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      title="Remove this clip"
+                                      onClick={() => updateClips(doc.clips!.filter((_, k) => k !== ci))}
+                                      style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 13, padding: 0 }}
+                                    >
+                                      ×
+                                    </button>
+                                  </td>
+                                </tr>
+                                {editCell?.startsWith(`${ci}:`) && editorRow(ci)}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
