@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { FeedbackButton } from './FeedbackButton'
+import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
@@ -841,6 +842,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       )}
         </div>
       </div>
+      <RulesPanel step="shot_list_json" />
     </div>
   )
 }

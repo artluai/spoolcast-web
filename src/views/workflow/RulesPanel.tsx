@@ -98,7 +98,8 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
         <div style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</div>
       ) : rules.length === 0 ? (
         <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 8 }}>
-          No rules yet — e.g. “talks like a young woman her age, never pushy, no technical jargon”.
+          Rules you add here steer every AI draft of this step, and the review holds the result to
+          them. Save one for this video, the series, or every video of this kind.
         </div>
       ) : (
         rules.map((r) => (
