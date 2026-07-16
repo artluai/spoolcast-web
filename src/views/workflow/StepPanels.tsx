@@ -1287,7 +1287,7 @@ export function Step01Flow({ stepId }: { stepId: string }) {
   const setS1: React.Dispatch<React.SetStateAction<S1>> = (updater) => storeSetS1(stepId, updater)
   const active =
     s1.editing ||
-    (!s1.narrator ? 'narrator' : !s1.style ? 'style' : !s1.output ? 'output' : '')
+    (!s1.narrator ? 'narrator' : !s1.style ? 'style' : !s1.output ? 'output' : !s1.medium ? 'medium' : '')
   const setField = (field: string, value: string | number) =>
     setS1((current) => ({ ...current, [field]: value, editing: '' }))
   const editField = (field: string) =>
@@ -1388,6 +1388,37 @@ export function Step01Flow({ stepId }: { stepId: string }) {
         )
       ) : null}
       {s1.output ? (
+        s1.medium && active !== 'medium' ? (
+          <Step01DoneRow
+            field="medium"
+            title="Shots"
+            value={
+              s1.medium === 'video' ? 'Generated video' : s1.medium === 'image' ? 'Still images' : 'Mix of both'
+            }
+            onEdit={editField}
+          />
+        ) : (
+          <div className="s1-question active">
+            <div className="s1-q-head">
+              <span className="s1-q-title">How is it shot?</span>
+            </div>
+            <div className="s1-pills">
+              {[
+                ['video', 'A', 'Video', 'motion — costs the most'],
+                ['image', 'B', 'Stills', 'held frames — cheapest'],
+                ['mix', 'C', 'Mix', 'per shot, you decide at step 06'],
+              ].map((item) => (
+                <Pill key={item[0]} selected={s1.medium === item[0]} onClick={() => setField('medium', item[0])}>
+                  <span className="opt-num">{item[1]}</span>
+                  <span className="name">{item[2]}</span>
+                  <span className="desc">{item[3]}</span>
+                </Pill>
+              ))}
+            </div>
+          </div>
+        )
+      ) : null}
+      {s1.medium ? (
         active === 'length' ? (
           <div className="s1-question active s1-length-q">
             <div className="s1-q-head">
@@ -2004,9 +2035,14 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
         try {
           const cfg = JSON.parse(out.data.content)
           const len = Number(cfg?.target_length_s)
+          const medium = String(cfg?.shot_medium || '')
           const store = useWorkflowStore.getState()
-          if (Number.isFinite(len) && len > 0 && !store.dirtySteps[stepId]) {
-            seedDrafts({ s1: { ...store.s1, length: len } })
+          if (store.dirtySteps[stepId]) return
+          const next = { ...store.s1 }
+          if (Number.isFinite(len) && len > 0) next.length = len
+          if (medium === 'video' || medium === 'image' || medium === 'mix') next.medium = medium
+          if (next.length !== store.s1.length || next.medium !== store.s1.medium) {
+            seedDrafts({ s1: next })
           }
         } catch {
           /* unreadable session.json — keep the default */
@@ -2021,6 +2057,7 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
   // The "not inherited" explanation lives in the tooltip.
   const fill = `${Math.round((((s1.length || 300) - 30) / (600 - 30)) * 100)}%`
   return (
+    <>
     <div
       title="Not inherited from the show — structure, script, and visuals are planned to this length"
       style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}
@@ -2048,6 +2085,34 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
         <span className="ap-spark">✦</span> Let AI decide
       </button>
     </div>
+    {/* The shot medium: a cost decision that also fixes every clip's legal
+        duration from step 06 on. Blank = the ad/explainer template's normal. */}
+    <div
+      title="Video clips cost far more than stills, and the choice sets each shot's legal length"
+      style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}
+    >
+      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Shots</span>
+      <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+        {[
+          ['video', 'Video', 'every shot is generated motion'],
+          ['image', 'Stills', 'every shot is a held frame'],
+          ['mix', 'Mix', 'chosen per clip at step 06'],
+        ].map(([id, label, hint]) => (
+          <button
+            key={id}
+            className={`ai-btn ${s1.medium === id ? 'sel' : ''}`}
+            title={hint}
+            onClick={() => setS1((c) => ({ ...c, medium: c.medium === id ? '' : id }))}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <b style={{ fontSize: 13, color: s1.medium ? 'var(--ink)' : 'var(--ink-3)', whiteSpace: 'nowrap', minWidth: 92, textAlign: 'right' }}>
+        {s1.medium ? '' : 'Template default'}
+      </b>
+    </div>
+    </>
   )
 }
 

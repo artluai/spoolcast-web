@@ -490,7 +490,11 @@ function SpoolcastApp() {
     await postAction({
       action: 'set_session_fields',
       session: id,
-      fields: { target_length_s: s1Now.length, aspect_ratio: aspect },
+      fields: {
+        target_length_s: s1Now.length,
+        aspect_ratio: aspect,
+        ...(s1Now.medium ? { shot_medium: s1Now.medium } : {}),
+      },
     })
     await postAction({
       action: 'approve_stage',
@@ -748,7 +752,12 @@ function SpoolcastApp() {
                     if (sourceId === 'format_setup') {
                       // Step 1's target length feeds the AI structure drafter's runtime plan.
                       const s1Now = useWorkflowStore.getState().s1
-                      if (s1Now.length > 0) {
+                      const fields: Record<string, unknown> = {}
+                      if (s1Now.length > 0) fields.target_length_s = s1Now.length
+                      // The shot medium sets every clip's legal duration from
+                      // step 06 on — it has to be on disk before the drafters run.
+                      if (s1Now.medium) fields.shot_medium = s1Now.medium
+                      if (Object.keys(fields).length > 0) {
                         await fetch(actionUrl(), {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
@@ -756,7 +765,7 @@ function SpoolcastApp() {
                             session: activeSession(),
                             tenant: 'local',
                             action: 'set_session_fields',
-                            fields: { target_length_s: s1Now.length },
+                            fields,
                           }),
                         }).catch(() => {})
                       }

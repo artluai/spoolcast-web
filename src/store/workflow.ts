@@ -13,6 +13,11 @@ export type S1 = {
   length: number
   projectId: string
   editing: string
+  // 'video' | 'image' | 'mix' — how every shot is made. A cost decision (video
+  // generation far outprices stills) that also sets each clip's legal duration
+  // downstream, so it belongs here at Step 1 rather than at generation.
+  // '' means unset: the engine falls back to the template's normal.
+  medium: string
 }
 
 export type FinalRenderState = 'idle' | 'rendering' | 'done' | 'failed' | 'stale'
@@ -89,6 +94,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     length: 120,
     projectId: 'untitled-01',
     editing: '',
+    medium: '',
   },
   dirtySteps: {},
   stageDrafts: {},
