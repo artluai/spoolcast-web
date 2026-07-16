@@ -177,7 +177,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       const L = listener.trim()
       const S = screenplay.trim()
       let seeded: Rev[] = []
-      if (L && S && displayBody(L) !== displayBody(S)) seeded = [{ label: 'Initial draft', text: listener }, { label: 'Review 1', text: screenplay }]
+      // A CLIP screenplay supersedes the listener prose entirely — the
+      // listener file is its stale ancestor, not a revision worth showing.
+      if (S && parseScreenplay(S).clips !== null) seeded = [{ label: 'Initial draft', text: screenplay }]
+      else if (L && S && displayBody(L) !== displayBody(S)) seeded = [{ label: 'Initial draft', text: listener }, { label: 'Review 1', text: screenplay }]
       else if (S || L) seeded = [{ label: 'Initial draft', text: S ? screenplay : listener }]
       if (seeded.length && useWorkflowStore.getState().stageDrafts[CHAIN_KEY] === undefined) {
         setChain(seeded, seeded.length - 1)
@@ -694,7 +697,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 current script
               </span>
               <span style={{ flex: 1 }} />
-              {rev.text.trim() && parseScreenplay(rev.text).clips === null && (
+              {rev.text.trim() && i === sel && parseScreenplay(rev.text).clips === null && (
                 <button
                   type="button"
                   title="Split the script into clips: each gets an on-screen description plus its spoken line (lines can be empty — silent clips). Free; descriptions start blank — fill them or let a re-draft write them."
