@@ -1225,65 +1225,74 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     Changes {showDiff ? 'on' : 'off'}
                   </button>
                 )}
-                <span style={{ position: 'relative', display: 'inline-flex' }}>
+                {/* THE house split pill: main zone reviews now (all checks —
+                    code audits + AI reviewer grading the step rules); the ▾
+                    expands the note box to re-draft with notes, then review. */}
+                <span style={{ display: 'inline-flex' }}>
                   <button
-                    style={{ ...ghost, borderRadius: '6px 0 0 6px', borderRight: 'none', padding: '6px 8px' }}
+                    className="save-continue"
+                    style={{ width: 'auto', borderRadius: '8px 0 0 8px', padding: '6px 11px', fontSize: 12, borderRight: '1px solid rgba(0,0,0,.3)' }}
                     disabled={!!busy}
-                    title="Review options"
+                    title="Add notes — the AI re-drafts with them, then the review runs"
                     onClick={() => setCheckMenu((v) => !v)}
                   >
-                    ▾
+                    {checkMenu ? '▴' : '▾'}
                   </button>
                   <button
                     className="save-continue"
-                    style={{ width: 'auto', borderRadius: '0 6px 6px 0', minWidth: 100, padding: '6px 14px', fontSize: 12 }}
+                    style={{ width: 'auto', borderRadius: '0 8px 8px 0', minWidth: 128, padding: '6px 14px', fontSize: 12 }}
                     disabled={!!busy}
-                    title="Runs every check: the free code audits plus the AI reviewer grading your step rules — uses model credits"
+                    title="Runs every check on the current script — the code audits plus the AI reviewer grading your step rules · uses model credits"
                     onClick={() => runReview('')}
                   >
-                    {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review'}
+                    {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review with AI'}
                   </button>
-                  {checkMenu ? (
-                    <>
-                      <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
-                      <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 350 }}>
-                        <span className="vp-menu-h">REVIEW</span>
-                        <span style={{ display: 'block', padding: '8px 12px 4px', fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-                          One button, every check: the code audits (free, instant) plus the AI reviewer,
-                          which reads the script like a first-time viewer and grades your step rules —
-                          uses model credits.
-                        </span>
-                        <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 12px 8px' }}>
-                          <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
-                        </span>
-                        <button type="button" onClick={() => runReview('')}>
-                          Run the review
-                        </button>
-                        <span className="vp-menu-div" style={{ display: 'block' }} />
-                        <span className="vp-menu-h">RE-DRAFT WITH AI FIRST</span>
-                        <textarea
-                          rows={2}
-                          value={menuFeedback}
-                          onChange={(e) => setMenuFeedback(e.target.value)}
-                          placeholder="optional: tell the AI what to change…"
-                          style={{
-                            display: 'block', width: 'calc(100% - 24px)', margin: '8px 12px 6px',
-                            background: 'rgba(255,255,255,.02)', color: 'var(--ink-1)',
-                            border: '1px dashed var(--line, #2a3142)', borderRadius: 6,
-                            padding: '7px 9px', fontSize: 12, resize: 'vertical',
-                          }}
-                        />
-                        <button
-                          type="button"
-                          title="AI rewrites the script into a new revision, then the reviews above run on it — uses credits"
-                          onClick={() => runReview(menuFeedback, true)}
-                        >
-                          ✦ Re-draft, then run the reviews
-                        </button>
-                      </span>
-                    </>
-                  ) : null}
                 </span>
+              </div>
+            ) : null}
+            {checkMenu && !busy ? (
+              <div
+                style={{
+                  marginTop: 8, border: '1px dashed var(--line, #2a3142)', borderRadius: 8,
+                  background: 'rgba(255,255,255,.02)',
+                }}
+              >
+                <textarea
+                  autoFocus
+                  rows={3}
+                  value={menuFeedback}
+                  onChange={(e) => setMenuFeedback(e.target.value)}
+                  placeholder="Tell the AI what to change — it re-drafts the script with your notes, then the review runs…"
+                  style={{
+                    display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical',
+                    background: 'transparent', color: 'var(--ink-1)', border: 'none', outline: 'none',
+                    padding: '11px 12px 4px', fontSize: 13, lineHeight: 1.5,
+                  }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px 10px' }}>
+                  <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
+                  <span style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    title="Collapse"
+                    onClick={() => setCheckMenu(false)}
+                    style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12, padding: 2 }}
+                  >
+                    ▴
+                  </button>
+                  <button
+                    type="button"
+                    className="save-continue"
+                    style={{ width: 'auto', padding: '6px 14px', fontSize: 12 }}
+                    title="AI rewrites the script into a new revision with your notes, then every check runs on it — uses credits"
+                    onClick={() => {
+                      setCheckMenu(false)
+                      void runReview(menuFeedback, true)
+                    }}
+                  >
+                    ✦ Re-draft, then review
+                  </button>
+                </div>
               </div>
             ) : null}
 
