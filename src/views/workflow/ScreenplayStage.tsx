@@ -92,6 +92,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [scriptView, setScriptView] = useState(false)
   // Click-to-edit: which table cell is open ('<clipIdx>:screen|line').
   const [editCell, setEditCell] = useState<string | null>(null)
+  // Per-cell AI edit: a note ("shorter, less salesy") rewrites JUST that box.
+  const [aiNote, setAiNote] = useState('')
+  const [aiCellBusy, setAiCellBusy] = useState(false)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
@@ -814,15 +817,79 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     const value = doc.clips![ci][field]
                     const key = `${ci}:${field}`
                     if (editCell === key) {
+                      const runCellAI = async () => {
+                        if (!aiNote.trim() || aiCellBusy) return
+                        setAiCellBusy(true)
+                        try {
+                          const r2 = await post({
+                            action: 'edit_snippet',
+                            allow_cost: true,
+                            model,
+                            text: value,
+                            instruction:
+                              (field === 'line'
+                                ? 'This is a SPOKEN line an influencer says to camera. '
+                                : 'This is an ON-SCREEN visual description. ') + aiNote.trim(),
+                            context: rev.text,
+                          })
+                          const out2 = await r2.json().catch(() => null)
+                          if (out2?.ok && out2.data?.text) {
+                            updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: String(out2.data.text) } : x)))
+                            setAiNote('')
+                          } else {
+                            setErr(out2?.message || out2?.error || 'The AI edit failed.')
+                          }
+                        } catch {
+                          setErr('Could not reach the engine.')
+                        } finally {
+                          setAiCellBusy(false)
+                        }
+                      }
                       return (
-                        <textarea
-                          autoFocus
-                          value={value}
-                          rows={Math.max(2, Math.ceil(value.length / 60))}
-                          onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
-                          onBlur={() => setEditCell(null)}
-                          style={{ ...cellStyle, minHeight: 44 }}
-                        />
+                        <div
+                          onBlur={(e) => {
+                            // Close only when focus truly leaves the cell — the
+                            // AI note input and button live inside it.
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                              setEditCell(null)
+                              setAiNote('')
+                            }
+                          }}
+                        >
+                          <textarea
+                            autoFocus
+                            value={value}
+                            rows={Math.max(2, Math.ceil(value.length / 60))}
+                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                            style={{ ...cellStyle, minHeight: 44 }}
+                          />
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+                            <input
+                              value={aiNote}
+                              onChange={(e) => setAiNote(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void runCellAI()
+                              }}
+                              placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
+                              style={{
+                                flex: 1, background: 'transparent', color: 'var(--ink-2)', fontSize: 12,
+                                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '5px 8px',
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={!aiNote.trim() || aiCellBusy}
+                              title="AI rewrites just this box — uses model credits"
+                              onClick={() => void runCellAI()}
+                              style={{
+                                background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
+                                borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
+                            </button>
+                          </div>
+                        </div>
                       )
                     }
                     const empty = !value.trim()
