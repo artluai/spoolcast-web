@@ -127,6 +127,9 @@ export function OnboardingView({
           length: lengthMode === 'ai' ? 0 : length,
           projectId: name.trim() || 'untitled-01',
           editing: '',
+          // Onboarding doesn't ask — step 1 does, and blank means the
+          // template's normal.
+          medium: '',
         },
         ideaBrief: about.trim(),
         goal:

@@ -157,7 +157,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     set(() => ({
       ideaBrief: '',
       goal: { text: '', mode: '' },
-      s1: { narrator: '', style: '', output: '', length: 120, projectId: 'untitled-01', editing: '' },
+      s1: { narrator: '', style: '', output: '', length: 120, projectId: 'untitled-01', editing: '', medium: '' },
       dirtySteps: {},
       stageDrafts: {},
       stageProcesses: {},

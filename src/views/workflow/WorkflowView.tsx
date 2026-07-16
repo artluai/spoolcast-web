@@ -266,6 +266,7 @@ export function WorkflowView({
               length: 120,
               projectId: 'untitled-01',
               editing: '',
+              medium: '',
             },
             ideaBrief: '', // ZERO DUMMY DATA RULE: Always start blank if no seed
             goal: { text: '', mode: '' }, // ZERO DUMMY DATA RULE: Always start blank if no seed

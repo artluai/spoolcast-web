@@ -1096,7 +1096,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       {editCell && cellRect && aiOpen && editorPopup(Number(editCell.split(':')[0]))}
                       <button
                         type="button"
-                        onClick={() => updateClips([...doc.clips!, { screen: '', line: '' }])}
+                        onClick={() => updateClips([...doc.clips!, { screen: '', line: '', shot: '' }])}
                         style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer', marginTop: 8 }}
                       >
                         ＋ clip

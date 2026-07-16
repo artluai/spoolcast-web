@@ -76,6 +76,7 @@ export type OnboardSeed = {
     length: number
     projectId: string
     editing: string
+    medium: string
   }
   ideaBrief: string
   goal: { text: string; mode: '' | 'ai' | 'skip' }
