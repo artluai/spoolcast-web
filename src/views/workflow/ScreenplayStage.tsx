@@ -330,11 +330,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setErr('Could not save the script to the engine.')
       return null
     }
-    // CLIPS ARE THE NATIVE FORMAT: the first draft comes out as clips
-    // (description + optional line per clip) drafted from the upstream
-    // artifacts — wordless and wordy videos flow identically. Legacy prose
-    // sessions keep prose across re-drafts until converted.
-    const wantClips = initial || parseScreenplay(current).clips !== null
+    // CLIPS ARE THE NATIVE FORMAT — every AI draft comes out as clips
+    // (description + optional line per clip). Prose only ever appears as
+    // INPUT (old sessions, stale listener files after a start-over); the
+    // next draft always converts it, so the format can't regress.
     const r = await post({
       action: 'draft_stage',
       stage_id: stageId,
@@ -343,7 +342,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       model,
       ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-      ...(wantClips ? { clips: true } : {}),
+      clips: true,
     })
     const out = await r.json().catch(() => null)
     if (!r.ok || out?.ok === false) {
@@ -883,12 +882,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           />
                           <button
                             type="button"
+                            className="save-continue"
                             title="Give the AI a note — it rewrites just this box"
                             onClick={() => setAiOpen((v) => !v)}
-                            style={{
-                              marginTop: 6, background: 'var(--bg-3)', border: '1px solid var(--line-2)',
-                              color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer',
-                            }}
+                            style={{ marginTop: 6, width: 'auto', padding: '6px 12px', fontSize: 12 }}
                           >
                             ✦ Improve with AI {aiOpen ? '▴' : '▾'}
                           </button>
@@ -1021,10 +1018,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
                             <button
                               type="button"
+                              className="save-continue"
                               disabled={!aiNote.trim() || aiCellBusy}
                               title="AI rewrites just the outlined box — uses model credits"
                               onClick={() => void runCellAI()}
-                              style={small}
+                              style={{ width: 'auto', padding: '6px 12px', fontSize: 12 }}
                             >
                               {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
                             </button>

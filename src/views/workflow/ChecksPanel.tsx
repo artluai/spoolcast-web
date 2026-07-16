@@ -199,7 +199,14 @@ export function ChecksPanel({ onToast }: { onToast?: (m: string) => void }) {
         >
           ＋ Add
         </button>
-        <button type="button" style={smallBtn} disabled={suggesting} onClick={() => void suggest()} title="AI reads what this video is about and proposes checks — uses model credits">
+        <button
+          type="button"
+          className="save-continue"
+          style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
+          disabled={suggesting}
+          onClick={() => void suggest()}
+          title="AI reads what this video is about and proposes checks — uses model credits"
+        >
           {suggesting ? (<><span className="spin" /> Suggesting…</>) : '✦ Suggest checks with AI'}
         </button>
       </div>

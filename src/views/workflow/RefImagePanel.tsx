@@ -754,12 +754,18 @@ export function RefImagePanel({
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" style={small} onClick={() => setImproveOpen((v) => !v)}>
+            <button
+              type="button"
+              className="save-continue"
+              style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
+              onClick={() => setImproveOpen((v) => !v)}
+            >
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
             </button>
             <button
               type="button"
-              style={small}
+              className="save-continue"
+              style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
               title="Opens Improve with the saved instruction pre-filled — the AI rewrites the prompt to read like a casual phone snapshot instead of a clean AI render"
               onClick={openLessMode}
             >
@@ -789,7 +795,13 @@ export function RefImagePanel({
                 }}
               />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="button" style={small} disabled={detailing} onClick={detailPrompt}>
+                <button
+                  type="button"
+                  className="save-continue"
+                  style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
+                  disabled={detailing}
+                  onClick={detailPrompt}
+                >
                   {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
                 </button>
                 <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
