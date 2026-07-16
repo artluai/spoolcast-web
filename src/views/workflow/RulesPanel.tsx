@@ -24,6 +24,8 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
   const [newScope, setNewScope] = useState<Rule['scope']>('series')
   const [editing, setEditing] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestions, setSuggestions] = useState<{ id: string; text: string }[]>([])
 
   const load = () =>
     postAction<{ rules?: Rule[] }>({ action: 'get_rules', step }).then((out) => {
@@ -60,6 +62,14 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
     const out = await postAction({ action: 'set_rule', scope, id: slugify(t), step, text: t })
     if (out?.ok) await load()
     else onToast?.(`Engine: ${out?.error || 'could not save the rule.'}`)
+  }
+
+  const suggest = async () => {
+    setSuggesting(true)
+    const out = await postAction<{ suggestions?: { id: string; text: string }[] }>({ action: 'suggest_rules', step, allow_cost: true })
+    setSuggesting(false)
+    if (out?.ok) setSuggestions(out.data?.suggestions ?? [])
+    else onToast?.(`Engine: ${out?.error || out?.message || 'could not suggest rules.'}`)
   }
 
   const onCount = rules?.filter((r) => r.enabled).length ?? 0
@@ -177,7 +187,50 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
         >
           ＋ Add
         </button>
+        <button
+          type="button"
+          className="save-continue"
+          style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
+          disabled={suggesting}
+          onClick={() => void suggest()}
+          title="AI reads what this video is about and proposes rules for this step — uses model credits"
+        >
+          {suggesting ? (<><span className="spin" /> Suggesting…</>) : '✦ Suggest rules with AI'}
+        </button>
       </div>
+      {suggestions.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
+            SUGGESTIONS — SAVE THE ONES YOU WANT
+          </div>
+          {suggestions.map((sg) => (
+            <div key={sg.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+              <span style={{ flex: '1 1 300px', fontSize: 12.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{sg.text}</span>
+              {(['video', 'series', 'template'] as const).map((sc) => (
+                <button
+                  key={sc}
+                  type="button"
+                  style={{ ...smallBtn, padding: '3px 7px', fontSize: 10.5 }}
+                  onClick={async () => {
+                    await add(sg.text, sc)
+                    setSuggestions((ss) => ss.filter((x) => x.id !== sg.id))
+                  }}
+                >
+                  ＋ {SCOPE_LABEL[sc]}
+                </button>
+              ))}
+              <button
+                type="button"
+                title="Dismiss"
+                onClick={() => setSuggestions((ss) => ss.filter((x) => x.id !== sg.id))}
+                style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12 }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

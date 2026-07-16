@@ -7,7 +7,6 @@ import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
-import { ChecksPanel } from './ChecksPanel'
 import { RulesPanel } from './RulesPanel'
 import { parseScreenplay, serializeScreenplay, proseToClips, spokenWordCount, type Clip } from '../../lib/screenplay-md'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
@@ -1457,10 +1456,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           </div>
         )
       })}
-      {/* Steering + grading, side by side: rules ride inside every script
-          draft; checks are what the review grades afterwards. */}
+      {/* ONE quality list: rules steer every draft of this step AND the
+          review grades against them. */}
       <RulesPanel step={stageId} />
-      <ChecksPanel />
     </div>
   )
 }

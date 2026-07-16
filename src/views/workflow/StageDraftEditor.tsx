@@ -7,7 +7,6 @@ import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
-import { ChecksPanel } from './ChecksPanel'
 import { RulesPanel } from './RulesPanel'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
@@ -470,11 +469,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
-      {/* Step 04 owns the checklist view: by now the video's type and message
-          are known, and the checks can shape everything drafted after. */}
-      {stageId === 'structure' && <ChecksPanel />}
-      {/* Every AI-drafted step gets its RULES panel — steering that rides
-          inside each draft (checks grade afterwards). */}
+      {/* Every AI-drafted step gets its RULES panel — one quality list:
+          rules steer each draft AND the step's review grades against them. */}
       {cfg?.aiDraft && <RulesPanel step={stageId} />}
     </div>
   )
