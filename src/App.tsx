@@ -832,6 +832,12 @@ function SpoolcastApp() {
                           }),
                         })
                         if (!so.ok) {
+                          // Not every contract declares both files (the ad
+                          // contract has only screenplay-v3.md) — an
+                          // undeclared-output rejection is fine to skip; any
+                          // other failure still blocks the approval.
+                          const soOut = await so.json().catch(() => null)
+                          if (String(soOut?.error || '').includes('not a declared output')) continue
                           setToast(`Could not save ${path} to the engine.`)
                           return false
                         }
