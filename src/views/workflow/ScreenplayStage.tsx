@@ -94,13 +94,16 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   // Click-to-edit: which table cell is open ('<clipIdx>:screen|line').
   const [editCell, setEditCell] = useState<string | null>(null)
   // Per-cell AI edit: a note ("shorter, less salesy") rewrites JUST that box.
+  // The tethered notepad opens only from the cell's "Improve with AI ▾".
   const [aiNote, setAiNote] = useState('')
+  const [aiOpen, setAiOpen] = useState(false)
   const [aiCellBusy, setAiCellBusy] = useState(false)
   // The AI-note POPUP tethers to the cell being edited (the same dashed-line
   // language as the detail card ↔ node tether) — track the cell's viewport
   // rect while open so the card and its string follow scrolling/resizes.
   const [cellRect, setCellRect] = useState<DOMRect | null>(null)
   useEffect(() => {
+    setAiOpen(false) // the notepad opens per cell, from its own button
     if (!editCell) {
       setCellRect(null)
       return
@@ -853,31 +856,43 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     const active = editCell === key
                     if (active) {
                       // Edit IN PLACE — the cell becomes the editor, wearing a
-                      // strong accent outline; the tethered popup only holds
-                      // the AI note.
+                      // strong accent outline. "Improve with AI ▾" opens the
+                      // tethered notepad.
                       return (
-                        <textarea
-                          autoFocus
-                          data-clipcell={key}
-                          data-clipedit="1"
-                          value={value}
-                          rows={Math.max(3, Math.ceil(value.length / 55))}
-                          placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
-                          onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setEditCell(null)
-                              setAiNote('')
-                            }
-                          }}
-                          style={{
-                            width: '100%', boxSizing: 'border-box', resize: 'vertical', display: 'block',
-                            background: 'rgba(122,162,255,.05)', color: 'var(--ink-1)', fontFamily: 'inherit',
-                            border: '1.5px solid var(--accent)', borderRadius: 8,
-                            boxShadow: '0 0 0 3px rgba(122,162,255,.16)',
-                            padding: '8px 10px', fontSize: 13, lineHeight: 1.5,
-                          }}
-                        />
+                        <div data-clipedit="1">
+                          <textarea
+                            autoFocus
+                            data-clipcell={key}
+                            value={value}
+                            rows={Math.max(3, Math.ceil(value.length / 55))}
+                            placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
+                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                setEditCell(null)
+                                setAiNote('')
+                              }
+                            }}
+                            style={{
+                              width: '100%', boxSizing: 'border-box', resize: 'vertical', display: 'block',
+                              background: 'rgba(122,162,255,.05)', color: 'var(--ink-1)', fontFamily: 'inherit',
+                              border: '1.5px solid var(--accent)', borderRadius: 8,
+                              boxShadow: '0 0 0 3px rgba(122,162,255,.16)',
+                              padding: '8px 10px', fontSize: 13, lineHeight: 1.5,
+                            }}
+                          />
+                          <button
+                            type="button"
+                            title="Give the AI a note — it rewrites just this box"
+                            onClick={() => setAiOpen((v) => !v)}
+                            style={{
+                              marginTop: 6, background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                              color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer',
+                            }}
+                          >
+                            ✦ Improve with AI {aiOpen ? '▴' : '▾'}
+                          </button>
+                        </div>
                       )
                     }
                     const empty = !value.trim()
@@ -984,22 +999,26 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                             padding: 14,
                           }}
                         >
-                          <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 7 }}>
-                            CLIP {ci + 1} — AI EDITS JUST THE OUTLINED BOX · TYPE THERE TO EDIT BY HAND
-                          </div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <input
-                              value={aiNote}
-                              onChange={(e) => setAiNote(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') void runCellAI()
-                              }}
-                              placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
-                              style={{
-                                flex: '1 1 220px', background: 'transparent', color: 'var(--ink-2)', fontSize: 12.5,
-                                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '7px 9px',
-                              }}
-                            />
+                          <textarea
+                            autoFocus
+                            value={aiNote}
+                            rows={4}
+                            onChange={(e) => setAiNote(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                void runCellAI()
+                              }
+                            }}
+                            placeholder="tell the AI what to change — e.g. “shorter, less salesy, sounds like written ad copy — make it something she'd actually say”…"
+                            style={{
+                              width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                              color: 'var(--ink-1)', fontSize: 13, lineHeight: 1.55, fontFamily: 'inherit',
+                              border: '1px solid var(--line, #2a3142)', borderRadius: 8, padding: '9px 11px',
+                              marginBottom: 8,
+                            }}
+                          />
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
                             <button
                               type="button"
                               disabled={!aiNote.trim() || aiCellBusy}
@@ -1061,7 +1080,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           </tbody>
                         </table>
                       </div>
-                      {editCell && cellRect && editorPopup(Number(editCell.split(':')[0]))}
+                      {editCell && cellRect && aiOpen && editorPopup(Number(editCell.split(':')[0]))}
                       <button
                         type="button"
                         onClick={() => updateClips([...doc.clips!, { screen: '', line: '' }])}
