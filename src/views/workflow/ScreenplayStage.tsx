@@ -85,6 +85,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setChain = (nextRevs: Rev[], nextSel: number) =>
     seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs: nextRevs, sel: nextSel }))
   const [editing, setEditing] = useState(false)
+  // Clip screenplays have two views: "screenplay" (the two-column clip
+  // editor — structure changes happen here) and "script" (the spoken lines
+  // as flowing paragraphs — rewrite the words here; one paragraph per
+  // spoken clip, so edits map back to their clip).
+  const [scriptView, setScriptView] = useState(false)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
@@ -279,16 +284,20 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setErr('Could not save the script to the engine.')
       return null
     }
+    // CLIPS ARE THE NATIVE FORMAT: the first draft comes out as clips
+    // (description + optional line per clip) drafted from the upstream
+    // artifacts — wordless and wordy videos flow identically. Legacy prose
+    // sessions keep prose across re-drafts until converted.
+    const wantClips = initial || parseScreenplay(current).clips !== null
     const r = await post({
       action: 'draft_stage',
       stage_id: stageId,
-      variant: initial ? 'listener' : 'screenplay',
+      variant: 'screenplay',
       allow_cost: true,
       model,
       ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-      // A clip-based screenplay stays clip-based across AI revisions.
-      ...(parseScreenplay(current).clips !== null ? { clips: true } : {}),
+      ...(wantClips ? { clips: true } : {}),
     })
     const out = await r.json().catch(() => null)
     if (!r.ok || out?.ok === false) {
@@ -299,7 +308,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setErr(out?.message || out?.error || 'Drafting failed.')
       return null
     }
-    const file = initial ? FILE_LISTENER : FILE_SCREENPLAY
+    const file = FILE_SCREENPLAY
     const fr = await fetch(fileUrl(file))
     const fileOut = await fr.json().catch(() => null)
     const text = fileOut?.ok && fileOut.data?.exists ? String(fileOut.data.content) : ''
@@ -745,8 +754,58 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     color: 'var(--ink-1)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
                     padding: '7px 9px', fontSize: 13, lineHeight: 1.5,
                   }
+                  const viewToggle = (
+                    <div style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: 10, letterSpacing: '.1em', fontFamily: 'var(--mono)' }}>
+                      {([['screenplay', false], ['script', true]] as const).map(([label, v]) => (
+                        <button
+                          key={label}
+                          type="button"
+                          title={v ? 'Just the spoken words, as flowing text — rewrite lines here' : 'Clips: what’s on screen + what’s spoken — add/remove/reorder here'}
+                          onClick={() => setScriptView(v)}
+                          style={{
+                            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                            fontSize: 10, letterSpacing: 'inherit', fontFamily: 'inherit',
+                            color: scriptView === v ? 'var(--ink-1)' : 'var(--ink-3)',
+                            textDecoration: scriptView === v ? 'underline' : 'none', textUnderlineOffset: 3,
+                          }}
+                        >
+                          {label.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                  if (scriptView) {
+                    const spoken = doc.clips.map((c, ci) => ({ c, ci })).filter((x) => x.c.line.trim())
+                    return (
+                      <div style={{ marginTop: 10 }}>
+                        {viewToggle}
+                        {spoken.length === 0 ? (
+                          <p style={{ color: 'var(--ink-3)', fontSize: 13 }}>No spoken lines — this video is silent. Switch to SCREENPLAY to see the clips.</p>
+                        ) : (
+                          spoken.map(({ c, ci }) => (
+                            <textarea
+                              key={ci}
+                              value={c.line}
+                              rows={Math.max(2, Math.ceil(c.line.length / 90))}
+                              onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, line: e.target.value } : x)))}
+                              title={`Clip ${ci + 1} — on screen: ${c.screen || '(no description yet)'}`}
+                              style={{
+                                display: 'block', width: '100%', boxSizing: 'border-box', resize: 'none',
+                                background: 'transparent', color: 'var(--ink-1)', border: 'none', outline: 'none',
+                                fontSize: 15, lineHeight: 1.6, marginBottom: 10, padding: 0, fontFamily: 'inherit',
+                              }}
+                            />
+                          ))
+                        )}
+                        <p style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 4 }}>
+                          One paragraph per spoken clip — rewrite words here; add/remove clips in the SCREENPLAY view.
+                        </p>
+                      </div>
+                    )
+                  }
                   return (
                     <div style={{ marginTop: 10 }}>
+                      {viewToggle}
                       <div style={{ display: 'flex', gap: 8, fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
                         <span style={{ width: 22 }} />
                         <span style={{ flex: 1 }}>ON SCREEN</span>
