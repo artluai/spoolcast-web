@@ -2,14 +2,20 @@
 //
 // Legacy (all existing sessions):    # title / [Voice source:] / ## Narration / prose
 // Clip-based (wordless & mixed):     …same, PLUS a `## Clips` table:
-//   | # | On screen | Spoken line |
+//   | # | On screen | Spoken line | Shot |
+// Shot is 'video' | 'image' — the medium, which decides the clip's legal
+// duration (a video clip is bound to its model's range, a still is not) and so
+// must be settled here, before pacing. Clip tables written before the column
+// existed parse with shot '' ; the engine's shot_medium.py resolves that
+// against the project policy, so never invent a default in the UI.
 // When clips exist they are the source of truth; the Narration section is
 // REGENERATED from the non-empty spoken lines on every serialize, so every
 // prose consumer (audits, voice, pacing drafter) keeps reading spoken text.
 // The engine mirror of this format lives in scripts/draft_screenplay.py
 // (render_clips_file) — keep them in sync.
 
-export type Clip = { screen: string; line: string }
+export type ShotMedium = 'video' | 'image'
+export type Clip = { screen: string; line: string; shot: ShotMedium | '' }
 
 export type ScreenplayDoc = {
   title: string
@@ -57,7 +63,13 @@ export function parseScreenplay(text: string): ScreenplayDoc {
       const cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
       if (cells.length < 3) continue
       if (/^#$/.test(cells[0]) || /^-+$/.test(cells[0])) continue // header/separator
-      clips!.push({ screen: cells[1] ?? '', line: cells[2] ?? '' })
+      const shot = (cells[3] ?? '').toLowerCase()
+      clips!.push({
+        screen: cells[1] ?? '',
+        line: cells[2] ?? '',
+        // '' for pre-column tables — resolved against the project policy, not here.
+        shot: shot === 'video' || shot === 'image' ? shot : '',
+      })
     }
   }
   return { title, voiceLine, narration: narration.join('\n').trim(), clips }
@@ -74,10 +86,12 @@ export function serializeScreenplay(doc: ScreenplayDoc): string {
     .map((c) => c.line.trim())
     .filter(Boolean)
     .join('\n\n')
-  const rows = doc.clips.map((c, i) => `| ${i + 1} | ${cell(c.screen)} | ${cell(c.line)} |`).join('\n')
+  const rows = doc.clips
+    .map((c, i) => `| ${i + 1} | ${cell(c.screen)} | ${cell(c.line)} | ${c.shot} |`)
+    .join('\n')
   return (
     `# ${doc.title}\n\n${voice}## Narration\n\n${narration}\n\n` +
-    `## Clips\n\n| # | On screen | Spoken line |\n|---|---|---|\n${rows}\n`
+    `## Clips\n\n| # | On screen | Spoken line | Shot |\n|---|---|---|---|\n${rows}\n`
   )
 }
 
@@ -85,7 +99,7 @@ export function serializeScreenplay(doc: ScreenplayDoc): string {
 // line with an empty on-screen description (the user or the AI fills those).
 export function proseToClips(doc: ScreenplayDoc): ScreenplayDoc {
   const paras = doc.narration.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean)
-  return { ...doc, clips: paras.map((p) => ({ screen: '', line: p })) }
+  return { ...doc, clips: paras.map((p) => ({ screen: '', line: p, shot: '' as const })) }
 }
 
 export function spokenWordCount(text: string): number {
