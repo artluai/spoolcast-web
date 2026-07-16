@@ -7,6 +7,7 @@ import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
+import { ChecksPanel } from './ChecksPanel'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
@@ -467,6 +468,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
+      {/* Step 04 owns the checklist view: by now the video's type and message
+          are known, and the checks can shape everything drafted after. */}
+      {stageId === 'structure' && <ChecksPanel />}
     </div>
   )
 }
