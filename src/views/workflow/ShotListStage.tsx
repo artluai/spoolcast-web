@@ -25,6 +25,8 @@ type Chunk = {
   frame_design_receipt?: { first_read?: string; physical_action?: string; visual_contrast?: string; detail_anchors?: string[] }
   beats?: Beat[]
   overlays?: { id?: string; source?: string; trigger?: string; duration_s?: number }[]
+  // Compiler-set on SILENT chunks (Σ image holds) — no audio will supply it.
+  duration_s?: number
   reaction_candidate?: boolean
   reaction_note?: string
   [k: string]: unknown
@@ -96,8 +98,13 @@ type XlsxPreview = { sheets: XlsxPreviewSheet[] }
 const WORDS_PER_SEC = 2.5
 const FILE_PATH = 'shot-list/shot-list.json'
 
-const estSec = (c: Chunk) =>
-  Math.max(1, (c.beats ?? []).reduce((n, b) => n + (b.narration ?? '').split(/\s+/).filter(Boolean).length, 0) / WORDS_PER_SEC)
+const estSec = (c: Chunk) => {
+  const words = (c.beats ?? []).reduce((n, b) => n + (b.narration ?? '').split(/\s+/).filter(Boolean).length, 0)
+  // SILENT CHUNK (no spoken words): the compiler carries its planned
+  // duration (Σ image holds) — words ÷ rate would wrongly say ~0.
+  if (words === 0) return Math.max(1, Number(c.duration_s ?? 0) || 3)
+  return Math.max(1, words / WORDS_PER_SEC)
+}
 const fmtTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
 const eventStart = (event: BaseLayerEvent) => Number(event.start_s ?? 0)
