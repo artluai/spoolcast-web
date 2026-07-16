@@ -1256,9 +1256,19 @@ export function WorkflowView({
                         ? goal.text.trim().length > 0 || goal.mode === 'ai' || goal.mode === 'skip'
                         : isDraftStage(activeStep)
                           ? hasStageDraft(activeStep)
-                          : activeStep.id === 'script' || activeStep.id === 'check'
-                            ? isComplete(activeStep)
-                            : true
+                          : activeStep.id === 'script'
+                            ? (() => {
+                                // 'ready' = the ACTIVE stage with no engine blockers:
+                                // files exist and the rule checks pass (failing checks
+                                // put blockers on the report → status 'blocked'). The
+                                // approve click is what turns ready into approved — it
+                                // can't require 'approved' beforehand.
+                                const n = nodes.find((x) => x.id === activeStep.sourceId)
+                                return n?.status === 'ready' || n?.status === 'passed' || n?.status === 'approved'
+                              })()
+                            : activeStep.id === 'check'
+                              ? isComplete(activeStep)
+                              : true
                         
                 const priorsComplete = orderedSteps.slice(0, selectableIndex).every(isComplete)
                 const stepComplete = currentInputComplete && priorsComplete
@@ -1356,7 +1366,9 @@ export function WorkflowView({
                           : isAlreadyApproved && !dirty && stepComplete
                             ? (isLast ? 'Step is complete.' : 'Step is complete. Go to the next step.')
                             : !stepComplete
-                              ? activeStep.id === 'script'
+                              ? !priorsComplete || currentNode?.status === 'not_started'
+                                ? 'Approve the earlier steps first — this one unlocks after them'
+                                : activeStep.id === 'script'
                                 ? 'The rule checks must pass — or be skipped — before this step can be approved'
                                 : activeStep.id === 'check'
                                   ? (finalRender === 'stale'
