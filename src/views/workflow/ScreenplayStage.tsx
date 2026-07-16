@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { FeedbackButton } from './FeedbackButton'
@@ -95,6 +96,27 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   // Per-cell AI edit: a note ("shorter, less salesy") rewrites JUST that box.
   const [aiNote, setAiNote] = useState('')
   const [aiCellBusy, setAiCellBusy] = useState(false)
+  // The editor POPUP tethers to the cell being edited (the same dashed-line
+  // language as the detail card ↔ node tether) — track the cell's viewport
+  // rect while open so the card and its string follow scrolling/resizes.
+  const [cellRect, setCellRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!editCell) {
+      setCellRect(null)
+      return
+    }
+    const measure = () => {
+      const el = document.querySelector(`[data-clipcell="${editCell}"]`)
+      setCellRect(el ? el.getBoundingClientRect() : null)
+    }
+    measure()
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
+    return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
+    }
+  }, [editCell])
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
@@ -820,6 +842,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     return (
                       <span
                         title="Click to edit"
+                        data-clipcell={key}
                         onClick={() => {
                           setEditCell(active ? null : key)
                           setAiNote('')
@@ -834,7 +857,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       </span>
                     )
                   }
-                  const editorRow = (ci: number) => {
+                  const editorPopup = (ci: number) => {
+                    if (!cellRect) return null
                     const field = (editCell?.split(':')[1] ?? 'line') as 'screen' | 'line'
                     const value = doc.clips![ci][field]
                     const runCellAI = async () => {
@@ -869,18 +893,63 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
                       borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
                     }
-                    return (
-                      <tr key={`${ci}:editor`}>
-                        <td colSpan={4} style={{ padding: '2px 10px 14px', borderTop: 'none' }}>
-                          <div
-                            onBlur={(e) => {
-                              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setEditCell(null)
-                                setAiNote('')
-                              }
-                            }}
-                            style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, background: 'rgba(255,255,255,.02)' }}
-                          >
+                    // FLOATING MODULE + TETHER: a mini detail-card fixed near
+                    // the cell, joined to it by the same dashed string the
+                    // detail card uses to point at its workflow node.
+                    const vw = document.documentElement.clientWidth || window.innerWidth
+                    const vh = document.documentElement.clientHeight || window.innerHeight
+                    const W = Math.min(560, (vw || 600) - 32)
+                    const GAP = 64
+                    const below = !vh || cellRect.bottom + GAP + 300 < vh || cellRect.top < vh / 2
+                    const left = vw ? Math.min(Math.max(16, cellRect.left + cellRect.width / 2 - W / 2 + 90), Math.max(16, vw - W - 16)) : 40
+                    const cellX = vw ? Math.min(Math.max(cellRect.left + cellRect.width / 2, 24), vw - 24) : cellRect.left + cellRect.width / 2
+                    const cellY = below ? cellRect.bottom + 4 : cellRect.top - 4
+                    const popY = below ? cellRect.bottom + GAP : cellRect.top - GAP
+                    const popX = Math.min(Math.max(cellX - 70, left + 44), left + W - 44)
+                    const my = (cellY + popY) / 2
+                    const d = `M ${cellX} ${cellY} C ${cellX} ${my}, ${popX} ${my}, ${popX} ${popY}`
+                    return createPortal(
+                      <>
+                        <svg style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1001 }}>
+                          <path
+                            className="detail-tether anim"
+                            d={d}
+                            fill="none"
+                            stroke="#7aa2ff"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeDasharray="5 6"
+                            opacity="0.7"
+                          />
+                        </svg>
+                        <div
+                          onBlur={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                              setEditCell(null)
+                              setAiNote('')
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setEditCell(null)
+                              setAiNote('')
+                            }
+                          }}
+                          style={{
+                            position: 'fixed',
+                            left,
+                            width: W,
+                            ...(below ? { top: popY } : { bottom: (vh || 800) - popY }),
+                            maxHeight: vh ? (below ? vh - popY - 16 : popY - 16) : undefined,
+                            overflowY: 'auto',
+                            zIndex: 1002,
+                            border: '1px solid var(--accent)',
+                            borderRadius: 14,
+                            background: 'rgba(17,20,29,.97)',
+                            boxShadow: '0 24px 70px rgba(0,0,0,.55)',
+                            padding: 14,
+                          }}
+                        >
                             <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 7 }}>
                               CLIP {ci + 1} — {field === 'line' ? 'SPOKEN LINE (EMPTY = SILENT)' : 'ON SCREEN'}
                             </div>
@@ -928,10 +997,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                               >
                                 Done
                               </button>
-                            </div>
                           </div>
-                        </td>
-                      </tr>
+                        </div>
+                      </>,
+                      document.body,
                     )
                   }
                   return (
@@ -965,12 +1034,12 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                                     </button>
                                   </td>
                                 </tr>
-                                {editCell?.startsWith(`${ci}:`) && editorRow(ci)}
                               </Fragment>
                             ))}
                           </tbody>
                         </table>
                       </div>
+                      {editCell && cellRect && editorPopup(Number(editCell.split(':')[0]))}
                       <button
                         type="button"
                         onClick={() => updateClips([...doc.clips!, { screen: '', line: '' }])}
