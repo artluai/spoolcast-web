@@ -93,6 +93,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [scriptView, setScriptView] = useState(false)
   // Click-to-edit: which table cell is open ('<clipIdx>:screen|line').
   const [editCell, setEditCell] = useState<string | null>(null)
+  // The open cell edits THIS buffer — rendering the typed text verbatim. The
+  // stored value round-trips through the table format (whitespace normalized),
+  // and rendering that back mid-keystroke threw the caret to the end.
+  const [cellBuffer, setCellBuffer] = useState('')
   // Per-cell AI edit: a note ("shorter, less salesy") rewrites JUST that box.
   // The tethered notepad opens only from the cell's "Improve with AI ▾".
   const [aiNote, setAiNote] = useState('')
@@ -860,16 +864,21 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     if (active) {
                       // Edit IN PLACE — the cell becomes the editor, wearing a
                       // strong accent outline. "Improve with AI ▾" opens the
-                      // tethered notepad.
+                      // tethered notepad. The textarea renders the LOCAL buffer
+                      // so the caret never jumps (the stored copy is normalized
+                      // by the table format on every change).
                       return (
                         <div data-clipedit="1">
                           <textarea
                             autoFocus
                             data-clipcell={key}
-                            value={value}
-                            rows={Math.max(3, Math.ceil(value.length / 55))}
+                            value={cellBuffer}
+                            rows={Math.max(3, Math.ceil(cellBuffer.length / 55))}
                             placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
-                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                            onChange={(e) => {
+                              setCellBuffer(e.target.value)
+                              updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Escape') {
                                 setEditCell(null)
@@ -902,6 +911,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                         title="Click to edit"
                         data-clipcell={key}
                         onClick={() => {
+                          setCellBuffer(value)
                           setEditCell(key)
                           setAiNote('')
                         }}
@@ -936,6 +946,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                         const out2 = await r2.json().catch(() => null)
                         if (out2?.ok && out2.data?.text) {
                           updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: String(out2.data.text) } : x)))
+                          setCellBuffer(String(out2.data.text))
                           setAiNote('')
                         } else {
                           setErr(out2?.message || out2?.error || 'The AI edit failed.')
