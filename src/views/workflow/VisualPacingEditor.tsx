@@ -1024,7 +1024,37 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             return (
               <p className="vp-script-chunk" key={chunk.id}>
                 <span className="vp-script-cid">{chunk.id}</span>
-                {words.map((cw, i) => {
+                {/* Beat-by-beat: spoken beats render their words (drag/tag
+                    anchors keep their global word indices); SILENT beats have
+                    no words, so the timeline text is the image description —
+                    dimmed italics: seen, not heard. Timed by holds. */}
+                {chunk.beats.map((b) => {
+                  if (!b.narration.trim() && b.images.length) {
+                    return (
+                      <span key={`silent:${b.code}`} style={{ fontStyle: 'italic', color: 'var(--ink-3)' }}>
+                        {b.images.map((im) => (
+                          <span key={im.id}>
+                            <span
+                              className="vp-w-tag"
+                              data-img={im.id}
+                              title={`${im.what} — silent clip: no words, timed by its ${im.holdS}s hold`}
+                            >
+                              {im.id}
+                            </span>
+                            <span
+                              className={'vp-w img' + (im.id === activeId ? ' on' : '')}
+                              onMouseEnter={!scriptDrag ? () => setActiveId(im.id) : undefined}
+                              onClick={!scriptDrag ? (e) => openMenu(e, { chunkId: chunk.id, beatCode: b.code, imageId: im.id }) : undefined}
+                            >
+                              {im.what} · {im.holdS}s
+                            </span>{' '}
+                          </span>
+                        ))}
+                      </span>
+                    )
+                  }
+                  return words.map((cw, i) => {
+                    if (cw.beatCode !== b.code) return null
                   const ownerIdx = spans.findIndex((s) => i >= s.from && i <= s.to)
                   const owner = ownerIdx >= 0 ? spans[ownerIdx] : undefined
                   const cls = ['vp-w']
@@ -1063,6 +1093,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       >{cw.w}</span>{' '}
                     </span>
                   )
+                  })
                 })}
               </p>
             )
