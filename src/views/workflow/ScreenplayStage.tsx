@@ -7,6 +7,7 @@ import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { ChecksPanel } from './ChecksPanel'
+import { parseScreenplay, serializeScreenplay, proseToClips, spokenWordCount, type Clip } from '../../lib/screenplay-md'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 const FILE_LISTENER = 'working/listener-draft.md'
@@ -183,11 +184,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   }, [revs.length])
 
   const stats = (text: string) => {
-    const body = text
-      .split('\n')
-      .filter((l) => !l.startsWith('#') && !l.startsWith('Voice source:'))
-      .join(' ')
-    const words = body.split(/\s+/).filter(Boolean).length
+    // Spoken words only — a clip-based screenplay's on-screen descriptions
+    // are seen, not heard, so they don't count toward runtime.
+    const words = spokenWordCount(text)
     const secs = Math.round(words / 2.4)
     return { words, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` }
   }
@@ -288,6 +287,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       model,
       ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+      // A clip-based screenplay stays clip-based across AI revisions.
+      ...(parseScreenplay(current).clips !== null ? { clips: true } : {}),
     })
     const out = await r.json().catch(() => null)
     if (!r.ok || out?.ok === false) {
@@ -684,6 +685,20 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                 current script
               </span>
               <span style={{ flex: 1 }} />
+              {rev.text.trim() && parseScreenplay(rev.text).clips === null && (
+                <button
+                  type="button"
+                  title="Split the script into clips: each gets an on-screen description plus its spoken line (lines can be empty — silent clips). Free; descriptions start blank — fill them or let a re-draft write them."
+                  onClick={() => {
+                    const text = serializeScreenplay(proseToClips(parseScreenplay(rev.text)))
+                    setChain(revs.map((r, k) => (k === i ? { ...r, text } : r)), sel)
+                    syncStore(text)
+                  }}
+                  style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '4px 10px', fontSize: 11.5, cursor: 'pointer' }}
+                >
+                  ⊟ Convert to clips
+                </button>
+              )}
               {rev.text.trim() && (
                 <span style={{ color: 'var(--ink-3)', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
                   {s.words} words · ~{s.time}
@@ -714,7 +729,67 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   ...(busy === 'ai' ? { opacity: 0.4, pointerEvents: 'none' } : {}),
                 }}
               >
-                {editing ? (
+                {(() => {
+                  // CLIP-BASED SCREENPLAY: the revision is a clip table —
+                  // render the two-column editor instead of prose. Every edit
+                  // reserializes the file (Narration regenerated from lines).
+                  const doc = parseScreenplay(rev.text)
+                  if (doc.clips === null) return null
+                  const updateClips = (clips: Clip[]) => {
+                    const text = serializeScreenplay({ ...doc, clips })
+                    setChain(revs.map((r, k) => (k === i ? { ...r, text } : r)), sel)
+                    syncStore(text)
+                  }
+                  const cellStyle: React.CSSProperties = {
+                    width: '100%', boxSizing: 'border-box', resize: 'none', background: 'transparent',
+                    color: 'var(--ink-1)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                    padding: '7px 9px', fontSize: 13, lineHeight: 1.5,
+                  }
+                  return (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
+                        <span style={{ width: 22 }} />
+                        <span style={{ flex: 1 }}>ON SCREEN</span>
+                        <span style={{ flex: 1 }}>SPOKEN LINE — EMPTY = SILENT CLIP</span>
+                        <span style={{ width: 20 }} />
+                      </div>
+                      {doc.clips.map((c, ci) => (
+                        <div key={ci} style={{ display: 'flex', gap: 8, alignItems: 'stretch', marginBottom: 6 }}>
+                          <span style={{ width: 22, fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)', paddingTop: 8 }}>{ci + 1}</span>
+                          <textarea
+                            value={c.screen}
+                            rows={2}
+                            placeholder="What happens on screen…"
+                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, screen: e.target.value } : x)))}
+                            style={{ ...cellStyle, flex: 1 }}
+                          />
+                          <textarea
+                            value={c.line}
+                            rows={2}
+                            placeholder="(silent)"
+                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, line: e.target.value } : x)))}
+                            style={{ ...cellStyle, flex: 1, color: c.line.trim() ? 'var(--ink-1)' : 'var(--ink-3)' }}
+                          />
+                          <button
+                            type="button"
+                            title="Remove this clip"
+                            onClick={() => updateClips(doc.clips!.filter((_, k) => k !== ci))}
+                            style={{ width: 20, background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 13 }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => updateClips([...doc.clips!, { screen: '', line: '' }])}
+                        style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer' }}
+                      >
+                        ＋ clip
+                      </button>
+                    </div>
+                  )
+                })() || (editing ? (
                   <textarea
                     autoFocus
                     value={rev.text}
@@ -806,7 +881,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                   <button type="button" onClick={() => setEditing(true)} style={{ background: 'none', border: 'none', padding: 0, marginTop: 10, color: 'var(--ink-3)', fontSize: 13, cursor: 'pointer' }}>
                     ▸ write it here
                   </button>
-                )}
+                ))}
               </div>
             </div>
 
