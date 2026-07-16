@@ -85,11 +85,13 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setChain = (nextRevs: Rev[], nextSel: number) =>
     seedStageFileDraft(CHAIN_KEY, JSON.stringify({ revs: nextRevs, sel: nextSel }))
   const [editing, setEditing] = useState(false)
-  // Clip screenplays have two views: "screenplay" (the two-column clip
-  // editor — structure changes happen here) and "script" (the spoken lines
-  // as flowing paragraphs — rewrite the words here; one paragraph per
-  // spoken clip, so edits map back to their clip).
+  // Clip screenplays have two views: "screenplay" (the clip table —
+  // structure changes happen here) and "script" (the spoken lines as
+  // flowing paragraphs — rewrite the words here; one paragraph per spoken
+  // clip, so edits map back to their clip).
   const [scriptView, setScriptView] = useState(false)
+  // Click-to-edit: which table cell is open ('<clipIdx>:screen|line').
+  const [editCell, setEditCell] = useState<string | null>(null)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
   const [confirmSkip, setConfirmSkip] = useState(false)
@@ -758,23 +760,25 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     padding: '7px 9px', fontSize: 13, lineHeight: 1.5,
                   }
                   const viewToggle = (
-                    <div style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: 10, letterSpacing: '.1em', fontFamily: 'var(--mono)' }}>
-                      {([['screenplay', false], ['script', true]] as const).map(([label, v]) => (
+                    <div style={{ display: 'flex', marginBottom: 10 }}>
+                      <div className="vp-viewtoggle" style={{ marginLeft: 0 }}>
                         <button
-                          key={label}
                           type="button"
-                          title={v ? 'Just the spoken words, as flowing text — rewrite lines here' : 'Clips: what’s on screen + what’s spoken — add/remove/reorder here'}
-                          onClick={() => setScriptView(v)}
-                          style={{
-                            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                            fontSize: 10, letterSpacing: 'inherit', fontFamily: 'inherit',
-                            color: scriptView === v ? 'var(--ink-1)' : 'var(--ink-3)',
-                            textDecoration: scriptView === v ? 'underline' : 'none', textUnderlineOffset: 3,
-                          }}
+                          className={!scriptView ? 'on' : ''}
+                          title="Clips: what’s on screen + what’s spoken — add/remove clips here"
+                          onClick={() => setScriptView(false)}
                         >
-                          {label.toUpperCase()}
+                          Screenplay
                         </button>
-                      ))}
+                        <button
+                          type="button"
+                          className={scriptView ? 'on' : ''}
+                          title="Just the spoken words, as flowing text — rewrite lines here"
+                          onClick={() => setScriptView(true)}
+                        >
+                          Script
+                        </button>
+                      </div>
                     </div>
                   )
                   if (scriptView) {
@@ -806,46 +810,70 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       </div>
                     )
                   }
+                  const editableCell = (ci: number, field: 'screen' | 'line') => {
+                    const value = doc.clips![ci][field]
+                    const key = `${ci}:${field}`
+                    if (editCell === key) {
+                      return (
+                        <textarea
+                          autoFocus
+                          value={value}
+                          rows={Math.max(2, Math.ceil(value.length / 60))}
+                          onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                          onBlur={() => setEditCell(null)}
+                          style={{ ...cellStyle, minHeight: 44 }}
+                        />
+                      )
+                    }
+                    const empty = !value.trim()
+                    return (
+                      <span
+                        title="Click to edit"
+                        onClick={() => setEditCell(key)}
+                        style={{ display: 'block', cursor: 'text', lineHeight: 1.5, color: empty ? 'var(--ink-3)' : undefined, fontStyle: empty ? 'italic' : undefined }}
+                      >
+                        {value.trim() || (field === 'line' ? '(silent)' : '(empty — a re-draft with AI writes these)')}
+                      </span>
+                    )
+                  }
                   return (
                     <div style={{ marginTop: 10 }}>
                       {viewToggle}
-                      <div style={{ display: 'flex', gap: 8, fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
-                        <span style={{ width: 22 }} />
-                        <span style={{ flex: 1 }}>ON SCREEN</span>
-                        <span style={{ flex: 1 }}>SPOKEN LINE — EMPTY = SILENT CLIP</span>
-                        <span style={{ width: 20 }} />
+                      <div className="table-wrap">
+                        <table className="shots" style={{ minWidth: 640 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ width: 28 }}>#</th>
+                              <th style={{ width: '46%' }}>On screen</th>
+                              <th>Spoken line — empty = silent</th>
+                              <th style={{ width: 24 }} />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {doc.clips.map((_, ci) => (
+                              <tr key={ci}>
+                                <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{ci + 1}</td>
+                                <td>{editableCell(ci, 'screen')}</td>
+                                <td>{editableCell(ci, 'line')}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    title="Remove this clip"
+                                    onClick={() => updateClips(doc.clips!.filter((_, k) => k !== ci))}
+                                    style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 13, padding: 0 }}
+                                  >
+                                    ×
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                      {doc.clips.map((c, ci) => (
-                        <div key={ci} style={{ display: 'flex', gap: 8, alignItems: 'stretch', marginBottom: 6 }}>
-                          <span style={{ width: 22, fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)', paddingTop: 8 }}>{ci + 1}</span>
-                          <textarea
-                            value={c.screen}
-                            rows={2}
-                            placeholder="What happens on screen…"
-                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, screen: e.target.value } : x)))}
-                            style={{ ...cellStyle, flex: 1 }}
-                          />
-                          <textarea
-                            value={c.line}
-                            rows={2}
-                            placeholder="(silent)"
-                            onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, line: e.target.value } : x)))}
-                            style={{ ...cellStyle, flex: 1, color: c.line.trim() ? 'var(--ink-1)' : 'var(--ink-3)' }}
-                          />
-                          <button
-                            type="button"
-                            title="Remove this clip"
-                            onClick={() => updateClips(doc.clips!.filter((_, k) => k !== ci))}
-                            style={{ width: 20, background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 13 }}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
                       <button
                         type="button"
                         onClick={() => updateClips([...doc.clips!, { screen: '', line: '' }])}
-                        style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer' }}
+                        style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer', marginTop: 8 }}
                       >
                         ＋ clip
                       </button>
