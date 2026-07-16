@@ -96,7 +96,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   // Per-cell AI edit: a note ("shorter, less salesy") rewrites JUST that box.
   const [aiNote, setAiNote] = useState('')
   const [aiCellBusy, setAiCellBusy] = useState(false)
-  // The editor POPUP tethers to the cell being edited (the same dashed-line
+  // The AI-note POPUP tethers to the cell being edited (the same dashed-line
   // language as the detail card ↔ node tether) — track the cell's viewport
   // rect while open so the card and its string follow scrolling/resizes.
   const [cellRect, setCellRect] = useState<DOMRect | null>(null)
@@ -116,6 +116,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       window.removeEventListener('scroll', measure, true)
       window.removeEventListener('resize', measure)
     }
+  }, [editCell])
+  // Editing spans TWO surfaces (the in-place cell + the tethered AI note), so
+  // closing is by outside click / Done / Escape — never by blur alone.
+  useEffect(() => {
+    if (!editCell) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      if (t && t.closest('[data-clipedit]')) return
+      setEditCell(null)
+      setAiNote('')
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
   }, [editCell])
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [err, setErr] = useState<string | null>(null)
@@ -838,19 +851,47 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     const value = doc.clips![ci][field]
                     const key = `${ci}:${field}`
                     const active = editCell === key
+                    if (active) {
+                      // Edit IN PLACE — the cell becomes the editor, wearing a
+                      // strong accent outline; the tethered popup only holds
+                      // the AI note.
+                      return (
+                        <textarea
+                          autoFocus
+                          data-clipcell={key}
+                          data-clipedit="1"
+                          value={value}
+                          rows={Math.max(3, Math.ceil(value.length / 55))}
+                          placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
+                          onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setEditCell(null)
+                              setAiNote('')
+                            }
+                          }}
+                          style={{
+                            width: '100%', boxSizing: 'border-box', resize: 'vertical', display: 'block',
+                            background: 'rgba(122,162,255,.05)', color: 'var(--ink-1)', fontFamily: 'inherit',
+                            border: '1.5px solid var(--accent)', borderRadius: 8,
+                            boxShadow: '0 0 0 3px rgba(122,162,255,.16)',
+                            padding: '8px 10px', fontSize: 13, lineHeight: 1.5,
+                          }}
+                        />
+                      )
+                    }
                     const empty = !value.trim()
                     return (
                       <span
                         title="Click to edit"
                         data-clipcell={key}
                         onClick={() => {
-                          setEditCell(active ? null : key)
+                          setEditCell(key)
                           setAiNote('')
                         }}
                         style={{
                           display: 'block', cursor: 'text', lineHeight: 1.5,
                           color: empty ? 'var(--ink-3)' : undefined, fontStyle: empty ? 'italic' : undefined,
-                          ...(active ? { boxShadow: '-6px 0 0 var(--bg), -8px 0 0 var(--accent)', color: 'var(--ink-1)' } : {}),
                         }}
                       >
                         {value.trim() || (field === 'line' ? '(silent)' : '(empty — a re-draft with AI writes these)')}
@@ -898,8 +939,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     // detail card uses to point at its workflow node.
                     const vw = document.documentElement.clientWidth || window.innerWidth
                     const vh = document.documentElement.clientHeight || window.innerHeight
-                    const W = Math.min(560, (vw || 600) - 32)
-                    const GAP = 64
+                    const W = Math.min(480, (vw || 600) - 32)
+                    const GAP = 56
                     const below = !vh || cellRect.bottom + GAP + 300 < vh || cellRect.top < vh / 2
                     const left = vw ? Math.min(Math.max(16, cellRect.left + cellRect.width / 2 - W / 2 + 90), Math.max(16, vw - W - 16)) : 40
                     const cellX = vw ? Math.min(Math.max(cellRect.left + cellRect.width / 2, 24), vw - 24) : cellRect.left + cellRect.width / 2
@@ -923,12 +964,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           />
                         </svg>
                         <div
-                          onBlur={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                              setEditCell(null)
-                              setAiNote('')
-                            }
-                          }}
+                          data-clipedit="1"
                           onKeyDown={(e) => {
                             if (e.key === 'Escape') {
                               setEditCell(null)
@@ -940,8 +976,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                             left,
                             width: W,
                             ...(below ? { top: popY } : { bottom: (vh || 800) - popY }),
-                            maxHeight: vh ? (below ? vh - popY - 16 : popY - 16) : undefined,
-                            overflowY: 'auto',
                             zIndex: 1002,
                             border: '1px solid var(--accent)',
                             borderRadius: 14,
@@ -950,53 +984,41 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                             padding: 14,
                           }}
                         >
-                            <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 7 }}>
-                              CLIP {ci + 1} — {field === 'line' ? 'SPOKEN LINE (EMPTY = SILENT)' : 'ON SCREEN'}
-                            </div>
-                            <textarea
-                              autoFocus
-                              value={value}
-                              rows={Math.max(5, Math.ceil(value.length / 80))}
-                              placeholder={field === 'line' ? 'The exact words she says — leave empty for a silent clip…' : 'What happens on screen…'}
-                              onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [field]: e.target.value } : x)))}
+                          <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 7 }}>
+                            CLIP {ci + 1} — AI EDITS JUST THE OUTLINED BOX · TYPE THERE TO EDIT BY HAND
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <input
+                              value={aiNote}
+                              onChange={(e) => setAiNote(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void runCellAI()
+                              }}
+                              placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
                               style={{
-                                width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
-                                color: 'var(--ink-1)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
-                                padding: '10px 12px', fontSize: 13.5, lineHeight: 1.6,
+                                flex: '1 1 220px', background: 'transparent', color: 'var(--ink-2)', fontSize: 12.5,
+                                border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '7px 9px',
                               }}
                             />
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                              <input
-                                value={aiNote}
-                                onChange={(e) => setAiNote(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') void runCellAI()
-                                }}
-                                placeholder="tell the AI what to change — e.g. “shorter, less salesy”…"
-                                style={{
-                                  flex: '1 1 260px', background: 'transparent', color: 'var(--ink-2)', fontSize: 12.5,
-                                  border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '7px 9px',
-                                }}
-                              />
-                              <button
-                                type="button"
-                                disabled={!aiNote.trim() || aiCellBusy}
-                                title="AI rewrites just this box — uses model credits"
-                                onClick={() => void runCellAI()}
-                                style={small}
-                              >
-                                {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
-                              </button>
-                              <button
-                                type="button"
-                                style={small}
-                                onClick={() => {
-                                  setEditCell(null)
-                                  setAiNote('')
-                                }}
-                              >
-                                Done
-                              </button>
+                            <button
+                              type="button"
+                              disabled={!aiNote.trim() || aiCellBusy}
+                              title="AI rewrites just the outlined box — uses model credits"
+                              onClick={() => void runCellAI()}
+                              style={small}
+                            >
+                              {aiCellBusy ? (<><span className="spin" /> editing…</>) : '✦ AI edit'}
+                            </button>
+                            <button
+                              type="button"
+                              style={small}
+                              onClick={() => {
+                                setEditCell(null)
+                                setAiNote('')
+                              }}
+                            >
+                              Done
+                            </button>
                           </div>
                         </div>
                       </>,
