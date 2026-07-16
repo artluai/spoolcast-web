@@ -142,8 +142,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const [showDiff, setShowDiff] = useState(true)
   // THE REVIEW PIPELINE — one button: run the ticked reviews on the selected
   // script, or (from the menu) have the AI revise it first and review that.
-  const [checkCode, setCheckCode] = useState(true)
-  const [checkAI, setCheckAI] = useState(false)
+  // ONE Review = ALL the checks: the free code audits AND the AI reviewer
+  // that grades the user's step rules. A split ran green while rules sat
+  // unreviewed — no partial modes.
+  const checkCode = true
+  const checkAI = true
   const [checkMenu, setCheckMenu] = useState(false)
   const [menuFeedback, setMenuFeedback] = useState('')
 
@@ -1235,7 +1238,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     className="save-continue"
                     style={{ width: 'auto', borderRadius: '0 6px 6px 0', minWidth: 100, padding: '6px 14px', fontSize: 12 }}
                     disabled={!!busy}
-                    title={`Reviews this script with: ${[checkCode && 'the rulebook check', checkAI && 'the AI reviewer'].filter(Boolean).join(' + ') || 'nothing selected'}`}
+                    title="Runs every check: the free code audits plus the AI reviewer grading your step rules — uses model credits"
                     onClick={() => runReview('')}
                   >
                     {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review'}
@@ -1244,32 +1247,17 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     <>
                       <span className="vp-menu-backdrop" onClick={() => setCheckMenu(false)} />
                       <span className="vp-menu" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, minWidth: 350 }}>
-                        <span className="vp-menu-h">RUN REVIEWS</span>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-                          <input type="checkbox" checked={checkCode} onChange={(e) => setCheckCode(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
-                          <span>
-                            Rulebook check
-                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              instant & free — checks the script against the writing rules (structure, undefined terms, opening, lengths)
-                            </span>
-                          </span>
-                        </label>
-                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-                          <input type="checkbox" checked={checkAI} onChange={(e) => setCheckAI(e.target.checked)} style={{ accentColor: 'var(--ink-2)', marginTop: 2 }} />
-                          <span>
-                            AI reviewer
-                            <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              reads it like a first-time viewer and grades the checks — advisory · uses credits
-                            </span>
-                          </span>
-                        </label>
-                        {checkAI && (
-                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0 12px 8px 32px' }}>
-                            <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
-                          </span>
-                        )}
-                        <button type="button" disabled={!checkCode && !checkAI} onClick={() => runReview('')}>
-                          Run reviews
+                        <span className="vp-menu-h">REVIEW</span>
+                        <span style={{ display: 'block', padding: '8px 12px 4px', fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                          One button, every check: the code audits (free, instant) plus the AI reviewer,
+                          which reads the script like a first-time viewer and grades your step rules —
+                          uses model credits.
+                        </span>
+                        <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 12px 8px' }}>
+                          <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
+                        </span>
+                        <button type="button" onClick={() => runReview('')}>
+                          Run the review
                         </button>
                         <span className="vp-menu-div" style={{ display: 'block' }} />
                         <span className="vp-menu-h">RE-DRAFT WITH AI FIRST</span>
