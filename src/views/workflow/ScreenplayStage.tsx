@@ -6,6 +6,7 @@ import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
+import { ChecksPanel } from './ChecksPanel'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 const FILE_LISTENER = 'working/listener-draft.md'
@@ -204,15 +205,23 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       body: JSON.stringify({ session: activeSession(), tenant: 'local', ...body }),
     })
 
-  // Persist a revision's text to BOTH contract files — one document, one
-  // truth; both checks must always grade the same text.
+  // Persist a revision's text to the contract files — one document, one
+  // truth; every check must grade the same text. Not every contract declares
+  // both files (the ad contract has only screenplay-v3.md): a "not a declared
+  // output" rejection is fine to skip, any other failure is a real error.
   const saveText = async (text: string): Promise<boolean> => {
     if (!text.trim()) return true
-    for (const path of [FILE_LISTENER, FILE_SCREENPLAY]) {
+    let saved = false
+    for (const path of [FILE_SCREENPLAY, FILE_LISTENER]) {
       const r = await post({ action: 'set_stage_output', stage_id: stageId, path, content: text })
-      if (!r.ok) return false
+      if (r.ok) {
+        saved = true
+        continue
+      }
+      const out = await r.json().catch(() => null)
+      if (!String(out?.error || '').includes('not a declared output')) return false
     }
-    return true
+    return saved
   }
   const saveCurrent = () => saveText(current)
 
@@ -340,7 +349,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       if (wantCode) {
         setAiPhase(checkAI ? 'review' : null)
         codeView = await computeCodeAudit(text)
-        if (!checkAI && codeView) {
+        // The audit failing to RUN (e.g. the save was rejected) already set
+        // the error — don't cascade into an AI review of a stale file.
+        if (!codeView) return
+        if (!checkAI) {
           setAudit(codeView)
           setAuditAt(new Date().toLocaleTimeString())
           setAuditRev(idx)
@@ -872,10 +884,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           <span>
                             AI reviewer
                             <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>
-                              reads it like a first-time viewer — judgment notes, advisory · uses credits
+                              reads it like a first-time viewer and grades the checks — advisory · uses credits
                             </span>
                           </span>
                         </label>
+                        {checkAI && (
+                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0 12px 8px 32px' }}>
+                            <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
+                          </span>
+                        )}
                         <button type="button" disabled={!checkCode && !checkAI} onClick={() => runReview('')}>
                           Run reviews
                         </button>
@@ -1063,6 +1080,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           </div>
         )
       })}
+      {/* The checklist the AI reviewer grades against — same registry as the
+          step-04 panel (template / series / this video), collapsed by default. */}
+      <ChecksPanel />
     </div>
   )
 }
