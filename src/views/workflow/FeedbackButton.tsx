@@ -27,6 +27,7 @@ export function FeedbackButton({
   placeholder = 'Tell the AI what to change — e.g. “easier to understand”, “shorter”, “more dramatic”…',
   rulesFocus = 'series-rules',
   historyKey,
+  ruleStep,
   onRun,
 }: {
   label: string
@@ -40,6 +41,9 @@ export function FeedbackButton({
   rulesFocus?: string
   // Persist notes under this snippet name (lowercase/dash) to enable history.
   historyKey?: string
+  // Engine stage id: "save as a permanent rule" files into THIS step's rules
+  // (series scope, template as fallback) instead of the legacy series rulebook.
+  ruleStep?: string
   onRun: (feedback: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -237,10 +241,24 @@ export function FeedbackButton({
           onClick={async () => {
             setRuleNote(null)
             if (asRule && feedback.trim()) {
-              const res = await appendUserRule(SERIES_RULES_ID, feedback)
-              if (!res.ok) {
-                setRuleNote(res.error)
-                return // don't run on a failed rule save — the user asked for both
+              if (ruleStep) {
+                // File into THIS step's rules so every future draft of the
+                // step obeys it (series first, template when no series).
+                const id = feedback.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'rule'
+                let res2 = await postAction({ action: 'set_rule', scope: 'series', id, step: ruleStep, text: feedback.trim() })
+                if (!res2?.ok) {
+                  res2 = await postAction({ action: 'set_rule', scope: 'template', id, step: ruleStep, text: feedback.trim() })
+                }
+                if (!res2?.ok) {
+                  setRuleNote(res2?.error || 'Could not save the rule.')
+                  return // don't run on a failed rule save — the user asked for both
+                }
+              } else {
+                const res = await appendUserRule(SERIES_RULES_ID, feedback)
+                if (!res.ok) {
+                  setRuleNote(res.error)
+                  return // don't run on a failed rule save — the user asked for both
+                }
               }
             }
             run(feedback)

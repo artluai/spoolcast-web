@@ -8,6 +8,7 @@ import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 import { ChecksPanel } from './ChecksPanel'
+import { RulesPanel } from './RulesPanel'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
@@ -355,6 +356,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             title="Runs the AI — uses model credits"
             rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
             historyKey={`draft-notes-${stageId.replace(/_/g, '-')}`}
+            ruleStep={stageId}
             onRun={(fb) => runDraft(fb)}
           />
           <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
@@ -471,6 +473,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       {/* Step 04 owns the checklist view: by now the video's type and message
           are known, and the checks can shape everything drafted after. */}
       {stageId === 'structure' && <ChecksPanel />}
+      {/* Every AI-drafted step gets its RULES panel — steering that rides
+          inside each draft (checks grade afterwards). */}
+      {cfg?.aiDraft && <RulesPanel step={stageId} />}
     </div>
   )
 }

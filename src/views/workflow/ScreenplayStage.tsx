@@ -8,6 +8,7 @@ import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { ChecksPanel } from './ChecksPanel'
+import { RulesPanel } from './RulesPanel'
 import { parseScreenplay, serializeScreenplay, proseToClips, spokenWordCount, type Clip } from '../../lib/screenplay-md'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
@@ -683,6 +684,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       {revs.length === 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0' }}>
           <FeedbackButton
+            ruleStep={stageId}
             label="Write it"
             busy={busy === 'ai'}
             disabled={!!busy}
@@ -1424,6 +1426,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             {rev.text.trim() && !confirmSkip && ((audit && !auditStale && !audit.passed) || aiFindings.some((f) => !ignored.has(fkey(f)))) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                 <FeedbackButton
+            ruleStep={stageId}
                   label={ignoredBlocking.length ? 'Fix the rest' : 'Fix these'}
                   busy={busy === 'ai'}
                   disabled={!!busy}
@@ -1454,8 +1457,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           </div>
         )
       })}
-      {/* The checklist the AI reviewer grades against — same registry as the
-          step-04 panel (template / series / this video), collapsed by default. */}
+      {/* Steering + grading, side by side: rules ride inside every script
+          draft; checks are what the review grades afterwards. */}
+      <RulesPanel step={stageId} />
       <ChecksPanel />
     </div>
   )
