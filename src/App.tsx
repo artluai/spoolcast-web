@@ -16,7 +16,7 @@ import {
   stageToStepMap,
   type WorkflowContract,
 } from './lib/workflow-graph'
-import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, postAction, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
+import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
 import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
@@ -948,6 +948,28 @@ function SpoolcastApp() {
                     //     prepares the next one IN THE BACKGROUND. Defined here, but
                     //     STARTED only after the quick status refresh below, so the
                     //     long model call can never queue ahead of it.
+                    // Wait out a queued draft job, returning the same envelope
+                    // shape /api/action used to return so the caller's
+                    // success/failure handling is unchanged. 450 * 2s = 15min,
+                    // matching the engine's own job timeout; a job that outlives
+                    // that reports rather than spinning on forever.
+                    const pollDraftJob = async (jobId: string) => {
+                      for (let i = 0; i < 450; i += 1) {
+                        await new Promise((resolve) => window.setTimeout(resolve, 2000))
+                        const jr = await fetch(jobsUrl(jobId))
+                        const jout = await jr.json().catch(() => null)
+                        if (!jr.ok || jout?.ok === false) {
+                          return { ok: false, message: jout?.message || 'Could not read the draft job.' }
+                        }
+                        const job = jout.data as { status?: string; error?: string; message?: string }
+                        if (job?.status === 'done') return { ok: true }
+                        if (job?.status === 'failed') {
+                          return { ok: false, error: job.error, message: job.message }
+                        }
+                      }
+                      return { ok: false, message: 'The draft is still running — check the step in a moment.' }
+                    }
+
                     const startHandoff = () => {
                     if (opts?.aiHandoff && (sourceId === 'structure' || sourceId === 'world_kit' || sourceId === 'screenplay_plan' || sourceId === 'visual_pacing')) {
                       const handoff =
@@ -961,19 +983,29 @@ function SpoolcastApp() {
                       useWorkflowStore.getState().setHandoff({ stageId: handoff.stage_id, label: handoff.busy })
                       ;(async () => {
                         try {
-                          const r = await fetch(actionUrl(), {
+                          // THROUGH THE JOB QUEUE, like the manual draft button.
+                          // This used to POST /api/action, whose draft path is
+                          // capped at 180s — but a GLM 5.2 draft really takes
+                          // 3-5 minutes (measured: 183s, 230s, 319s), so the
+                          // hand-off timed out EVERY time and quietly built
+                          // nothing. Jobs get JOB_TIMEOUT_S (900s).
+                          const r = await fetch(jobsUrl(), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                               session: activeSession(),
                               tenant: 'local',
-                              action: 'draft_stage',
+                              kind: 'draft_stage',
                               stage_id: handoff.stage_id,
                               ...(handoff.variant ? { variant: handoff.variant } : {}),
                               allow_cost: true,
                             }),
                           })
-                          const out = await r.json().catch(() => null)
+                          const queued = await r.json().catch(() => null)
+                          let out = queued
+                          if (r.ok && queued?.ok !== false && queued?.data?.id) {
+                            out = await pollDraftJob(String(queued.data.id))
+                          }
                           if (r.ok && out?.ok !== false) {
                             // Drop cached drafts so the step loads the fresh file.
                             useWorkflowStore.getState().clearStageDrafts(handoff.stage_id)
