@@ -23,9 +23,10 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay } from '../../lib/screenplay-md'
-import { IMAGE_MODELS } from '../../lib/image-models'
+import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
+import { ModelPicker } from './ModelPicker'
 import { TimelineScroller } from './TimelineScroller'
 
 // The Visual Pacing panel, made real: the timeline/table/script views are a
@@ -232,6 +233,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // real kit object and gets a real card; it just has no image yet.
   type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string; active_prompt?: string; active_model?: string }
   const [kit, setKit] = useState<KitObject[]>([])
+  // The session's raw source pool (intake uploads, external assets). Images
+  // here that no kit object maps yet show on the board as importable cards —
+  // the shoe's side/detail views were sitting in external-assets, visible in
+  // prompts but never importable from the board.
+  const [srcPool, setSrcPool] = useState<{ path: string; ref?: string }[]>([])
+  const isDisplayable = (p: string) => /\.(png|jpe?g|webp)$/i.test(p)
   useEffect(() => {
     let live = true
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
@@ -240,23 +247,29 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         if (!live) return
         if (!Array.isArray(out?.data?.kit)) return
         const kitArr = out.data.kit as KitObject[]
+        const srcArr = (Array.isArray(out.data.images) ? out.data.images : []) as { path: string; ref?: string }[]
         setKit(kitArr)
+        setSrcPool(srcArr)
         // Measure every image OFF-DOM in one batch and commit ratios once.
         // Measuring via the cards' own onLoad re-packed the wall per image,
         // React remounted the migrating cards, their loads restarted, and
         // the loop meant no image ever finished. One batch, one commit.
+        // Source-pool images key their ratio by PATH (that is their name on
+        // the board until they are imported).
+        const toMeasure = [
+          ...kitArr.filter((k) => k.image_path).map((k) => ({ key: k.name, path: k.image_path })),
+          ...srcArr.filter((s) => !s.ref && isDisplayable(s.path)).map((s) => ({ key: s.path, path: s.path })),
+        ]
         Promise.allSettled(
-          kitArr
-            .filter((k) => k.image_path)
-            .map(
-              (k) =>
-                new Promise<[string, number]>((resolve, reject) => {
-                  const im = new Image()
-                  im.onload = () => resolve([k.name, im.naturalHeight / im.naturalWidth || 1.25])
-                  im.onerror = reject
-                  im.src = contentUrl(k.image_path)
-                }),
-            ),
+          toMeasure.map(
+            (m) =>
+              new Promise<[string, number]>((resolve, reject) => {
+                const im = new Image()
+                im.onload = () => resolve([m.key, im.naturalHeight / im.naturalWidth || 1.25])
+                im.onerror = reject
+                im.src = contentUrl(m.path)
+              }),
+          ),
         ).then((results) => {
           if (!live) return
           const next: Record<string, number> = {}
@@ -282,14 +295,52 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // null = no user preference yet: hidden by default on the mapping board
   // (the board is the star there), shown by default on script/table.
   const [tlOpen, setTlOpen] = useState<boolean | null>(null)
-  // MASTER VARIANT creation: same shot, one deliberate change, generated
-  // with the master's picked image as the base reference.
+  // VARIANT creation: any kit object can get one — same setup, one
+  // deliberate change. An image-backed base generates with its picked image
+  // as the base reference; a prompt-only base varies the prompt itself.
   const [variantFor, setVariantFor] = useState<KitObject | null>(null)
   const [vName, setVName] = useState('')
   const [vInstr, setVInstr] = useState('')
+  // Extra references travel as session-relative IMAGE PATHS (not kit names):
+  // kit refs, imported sources and fresh uploads all fit the same list.
   const [vExtras, setVExtras] = useState<string[]>([])
   const [vExtrasOpen, setVExtrasOpen] = useState(false)
+  const [vUploads, setVUploads] = useState<{ path: string; name: string }[]>([])
   const [vModel, setVModel] = useState('')
+  // User-driven size (drag any edge or corner); height stays content-auto
+  // until the first resize touches it.
+  const [vSize, setVSize] = useState<{ w: number; h: number | null }>({ w: 680, h: null })
+  const vModalRef = useRef<HTMLDivElement>(null)
+  const onVResize = (e: React.PointerEvent, dir: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = vModalRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const start = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height, px: rect.left, py: rect.top }
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - start.x
+      const dy = ev.clientY - start.y
+      let w = start.w
+      let h = start.h
+      if (dir.includes('e')) w = start.w + dx
+      if (dir.includes('w')) w = start.w - dx
+      if (dir.includes('s')) h = start.h + dy
+      if (dir.includes('n')) h = start.h - dy
+      w = Math.min(Math.max(w, 460), Math.max(460, (window.innerWidth || 1600) - 24))
+      h = Math.min(Math.max(h, 300), Math.max(300, (window.innerHeight || 1000) - 24))
+      setVSize({ w: Math.round(w), h: Math.round(h) })
+      setVPos({
+        x: dir.includes('w') ? start.px + (start.w - w) : start.px,
+        y: dir.includes('n') ? start.py + (start.h - h) : start.py,
+      })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   // The module floats OVER the board (no dim): draggable by its header, a
   // dashed thread ties it to the master card it edits.
   const [vPos, setVPos] = useState<{ x: number; y: number } | null>(null)
@@ -315,7 +366,57 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const refetchKit = async () => {
     const out = await fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
+    if (Array.isArray(out?.data?.images)) setSrcPool(out.data.images)
     return (out?.data?.kit ?? []) as KitObject[]
+  }
+  // IMPORT a raw source image into the World Kit (registry row + mapped
+  // manifest) — after this it is a normal kit object: attachable, variantable.
+  const [importingSrc, setImportingSrc] = useState('')
+  const importSource = async (path: string) => {
+    if (importingSrc) return
+    setImportingSrc(path)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'import_source_ref', path }),
+      })
+      const out = await r.json().catch(() => null)
+      if (r.ok && out?.ok !== false) {
+        const name = out?.data?.name as string | undefined
+        // The ratio was measured under the path key; the imported object is
+        // the same pixels under its new name.
+        if (name) setImgRatios((cur) => (cur[path] != null ? { ...cur, [name]: cur[path] } : cur))
+        await refetchKit()
+      }
+    } catch {
+      /* engine offline — the card stays importable */
+    } finally {
+      setImportingSrc('')
+    }
+  }
+  // Upload the user's own reference image into the session source pool; the
+  // returned path slots straight into the variant's extra references.
+  const uploadExtraRef = async (file: File) => {
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '-')
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const rd = new FileReader()
+      rd.onload = () => resolve(String(rd.result).split(',')[1] || '')
+      rd.onerror = reject
+      rd.readAsDataURL(file)
+    })
+    const r = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'upload_file', filename: safeName, content: b64 }),
+    }).then((x) => x.json()).catch(() => null)
+    if (r?.ok) {
+      const rel = `source/${safeName}`
+      setVUploads((cur) => (cur.some((u) => u.path === rel) ? cur : [...cur, { path: rel, name: safeName }]))
+      setVExtras((cur) => (cur.includes(rel) ? cur : [...cur, rel]))
+    } else {
+      setVErr(r?.error || 'Upload failed.')
+    }
   }
   const createVariant = async () => {
     if (!variantFor || !vInstr.trim()) return
@@ -332,10 +433,15 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       setVErr(reg?.error || 'Could not register the variant.')
       return
     }
-    setVBusy('Generating — the master is the base reference…')
-    const prompt =
-      `Use reference image 1 as the exact base shot: same person, same clothes, same setting, same framing, same light, same casual phone-camera look. ` +
-      `ONE change only: ${vInstr.trim()}. Everything else stays exactly identical to the reference.`
+    const baseIsImage = !!variantFor.image_path
+    setVBusy(baseIsImage ? 'Generating — the base image is reference 1…' : 'Generating — from the base prompt…')
+    // Image-backed base: the picked image IS the shot, one change. Prompt-only
+    // base: the variant is a change to the prompt itself.
+    const basePrompt = (variantFor.active_prompt || variantFor.notes || '').trim()
+    const prompt = baseIsImage
+      ? `Use reference image 1 as the exact base shot: same person, same clothes, same setting, same framing, same light, same casual phone-camera look. ` +
+        `ONE change only: ${vInstr.trim()}. Everything else stays exactly identical to the reference.`
+      : `${basePrompt}\n\nONE deliberate change from the description above: ${vInstr.trim()}. Everything else stays exactly as described.`
     const gen = await fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -345,8 +451,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         action: 'generate_worldkit_ref',
         ref: name,
         prompt,
-        ...(vModel ? { model: vModel } : {}),
-        ref_images: [variantFor.image_path, ...vExtras.map((n) => kit.find((k) => k.name === n)?.image_path).filter(Boolean)],
+        // Exactly what the picker shows: explicit choice > base's model > default.
+        model: vModel || variantFor.active_model || DEFAULT_IMAGE_MODEL_ID,
+        ref_images: [...(baseIsImage ? [variantFor.image_path] : []), ...vExtras],
         allow_cost: true,
       }),
     }).then((r) => r.json()).catch(() => null)
@@ -364,6 +471,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         setVName('')
         setVInstr('')
         setVExtras([])
+        setVUploads([])
         return
       }
       setVBusy(`Generating… (~${Math.round(((i + 1) * 6) / 60)}min)`)
@@ -374,6 +482,24 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const tlShown = tlOpen ?? view !== 'map'
   const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
   const boardRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  // The host .detail-card clips with overflow:hidden, and any overflow value
+  // other than visible traps position:sticky inside the card — the World Kit
+  // and the timeline bar can then never pin to the real scroller. Lift the
+  // clip while this editor is mounted (fullscreen mode scrolls the card
+  // itself, so it keeps its own overflow).
+  // No dep array: the first render can be the no-draft early return (root div
+  // absent, ref null), so a mount-only effect would never see the host.
+  useEffect(() => {
+    const host = rootRef.current?.closest('.detail-card') as HTMLElement | null
+    if (!host) return
+    host.classList.add('vp-sticky-host')
+    // The step header is itself sticky at the top of the scroller; our own
+    // sticky pieces (kit, timeline) must pin BELOW it, not slide under it.
+    const head = host.querySelector<HTMLElement>('.detail-head')
+    if (head) host.style.setProperty('--vp-head-h', `${head.offsetHeight}px`)
+    return () => host.classList.remove('vp-sticky-host')
+  })
   const measureThreads = () => {
     const board = boardRef.current
     if (!board) return
@@ -471,48 +597,71 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const scroller = board?.closest('.workflow-view') as HTMLElement | null
     if (!board || !kitEl || !scroller) return
     // The height budget must come from the REAL window, however this app is
-    // hosted — users don't send screenshots of their vh. Take the largest
-    // credible viewport measure, subtract where the kit actually starts.
+    // hosted — users don't send screenshots of their vh. The kit is sticky
+    // inside the workflow scroller, so the honest budget is the scroller's
+    // VISIBLE span: once the user scrolls the board to the top, the kit can
+    // use all of it. Subtracting the kit's pre-scroll page position (the old
+    // formula) permanently gave away everything above the board.
     const vh = Math.max(
       window.innerHeight || 0,
       document.documentElement.clientHeight || 0,
       window.visualViewport?.height || 0,
-      620,
     )
-    const kitTop = Math.max(0, kitEl.getBoundingClientRect().top)
-    const H = Math.max(420, Math.round(vh - Math.min(kitTop, vh * 0.4) - 56))
+    const sRect = scroller.getBoundingClientRect()
+    let span = 0
+    if (sRect.height > 0) {
+      const top = Math.max(sRect.top, 0)
+      const bottom = vh > 0 ? Math.min(sRect.bottom, vh) : sRect.bottom
+      span = bottom - top
+    }
+    if (span <= 0) span = vh || 660
+    // The sticky step header sits above us inside the same scroller; the kit
+    // pins below it, so its height comes out of the budget.
+    const headH = (board.closest('.detail-card')?.querySelector<HTMLElement>('.detail-head'))?.offsetHeight || 0
+    const H = Math.max(420, Math.round(span - headH - 24))
     kitEl.style.maxHeight = `${H}px`
+    // The shots column flows at natural height and scrolls WITH the page —
+    // capping it to H would make the board's total height equal the kit's,
+    // leaving the sticky kit zero travel (sticky can never pin inside a
+    // parent its own size). The kit stays pinned while shots scroll past.
     const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
-    if (list) list.style.maxHeight = `${H}px`
+    if (list) list.style.maxHeight = ''
     const w = kitEl.clientWidth || 1000
-    const h = H - 26
+    // The wall's budget: kit height minus the column head, minus the bottom
+    // "Show all" row when hidden refs exist (it lives in normal flow now).
+    const h = H - 26 - (hiddenRefs.length ? 36 : 0)
     setKitDims((cur) => (Math.abs(cur.w - w) < 8 && Math.abs(cur.h - h) < 8 ? cur : { w, h }))
     measureThreads()
   }
-  // THE PACKING EQUATION. Given the kit region's real square footage, find
-  // the LARGEST per-image area A such that everything still fits: each image
-  // takes its own width from its own ratio (w = sqrt(A/r), h = w*r; masters
-  // 1.35A; text objects a fixed sensible card), rows shelf-pack across the
-  // region, binary search on A. Wide images come out wide, portraits tall,
-  // squares square — and they are as big as the space mathematically allows.
-  // Text objects are SECOND-CLASS visually: small, fixed, never inflated.
-  // Images are what the space is for.
-  const TEXT_W = 200
-  const TEXT_H = 122
+  // THE PACKING EQUATION — equal square footage. Every image gets the SAME
+  // area A on screen, its shape computed from its own ratio (w = √(A/r),
+  // h = w·r): a portrait and a landscape occupy identical footprint, just
+  // shaped differently. Masters (and their variants) get a deliberately
+  // larger area; prompt-only cards are a fixed box of comparable size, never
+  // inflated — images are what the space is for. Rows shelf-pack across the
+  // region and binary search finds the LARGEST A that still fits the kit's
+  // vertical budget, so images are as big as the space mathematically
+  // allows without vertical scrolling. A gentle per-row justify (clamped
+  // tight) closes the right edge without visibly breaking equal footprint.
+  const GAP = 10
   type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number; x: number; y: number }
   const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
     const W = Math.max(320, kitDims.w)
     const HB = Math.max(240, kitDims.h - 8)
     const layout = (A: number): { rows: Packed[][]; totalH: number } => {
+      // Text cards: a fixed 1.4:1 box at ~70% of the image area — comparable
+      // to its neighbors, but the pictures always read larger.
+      const tw = Math.round(Math.min(W - 8, Math.max(150, Math.sqrt(A * 0.7 * 1.4))))
+      const th = Math.round(Math.max(105, tw / 1.4))
       const rows: Packed[][] = [[]]
       let x = 0
       for (const k of objects) {
-        let w = TEXT_W
-        let h = TEXT_H
+        let w = tw
+        let h = th
         if (k.image_path) {
           const r = imgRatios[k.name] ?? 1.25
-          const area = k.kind === 'master' ? A * 1.35 : A
-          w = Math.min(W - 8, Math.max(96, Math.sqrt(area / r)))
+          const area = k.kind === 'master' || k.kind === 'variant' ? A * 1.5 : A
+          w = Math.min(W - 8, Math.max(90, Math.sqrt(area / r)))
           h = w * r
         }
         if (x > 0 && x + w > W) {
@@ -520,39 +669,37 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           x = 0
         }
         rows[rows.length - 1].push({ k, w, h, x: 0, y: 0 })
-        x += w + 10
+        x += w + GAP
       }
-      // JUSTIFY, IMAGES FIRST: each row ends flush with the right edge, and
-      // ONLY the images stretch to absorb the leftover — text cards stay at
-      // their small fixed size. Scaling text up was the mistake that made
-      // text huge and images small; the space belongs to the pictures.
       let totalH = 0
       for (const row of rows) {
-        const gapW = (row.length - 1) * 10
+        const gapW = (row.length - 1) * GAP
         const imgs = row.filter((it) => it.k.image_path)
         const textW = row.filter((it) => !it.k.image_path).reduce((n, it) => n + it.w, 0)
         const imgW = imgs.reduce((n, it) => n + it.w, 0)
         if (imgW > 0) {
-          const f = Math.min(2.4, Math.max(0.85, (W - gapW - textW) / imgW))
+          // Close the right edge, but never so hard that one row's images
+          // dwarf another's — the old 2.4× clamp was how "equal area" died.
+          const f = Math.min(1.18, Math.max(0.9, (W - gapW - textW) / imgW))
           for (const it of imgs) {
             it.w = Math.round(it.w * f)
             it.h = Math.round(it.h * f)
           }
         }
         let rowH = 0
-        let x = 0
+        let cx = 0
         for (const it of row) {
-          it.x = x
+          it.x = cx
           it.y = totalH
-          x += it.w + 10
+          cx += it.w + GAP
           rowH = Math.max(rowH, it.h)
         }
-        totalH += rowH + 10
+        totalH += rowH + GAP
       }
-      return { rows, totalH: Math.max(0, totalH - 10) }
+      return { rows, totalH: Math.max(0, totalH - GAP) }
     }
     let lo = 7000
-    let hi = 120000
+    let hi = 220000
     let best = layout(lo)
     if (best.totalH > HB) return best // even minimal doesn't fit — show anyway
     for (let i = 0; i < 14; i += 1) {
@@ -613,7 +760,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       shotList?.removeEventListener('scroll', onScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, draft, mapSel, kit, imgRatios])
+  }, [view, draft, mapSel, kit, imgRatios, srcPool, hiddenRefs.length])
 
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
@@ -706,32 +853,44 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // column width); a prompt-only object gets an equally-weighted text card —
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
-    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : 'REFERENCE'
+    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : kind === 'source' ? 'SOURCE' : 'REFERENCE'
   const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number, h?: number, x?: number, y?: number) => {
+    const isSource = k.kind === 'source'
     const sel = images.find((i) => i.id === mapSel)
     const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
     const linkedAtAll = images.some((i) => refsOf(i).includes(k.name))
+    // A source card's "name" is its session path until it is imported.
+    const shownName = k.name.includes('/') ? k.name.split('/').pop()! : k.name
     return (
       <button
         key={k.name}
         type="button"
         data-mapref={k.name}
         style={w ? { position: 'absolute', left: x, top: y, width: w, height: h, overflow: 'hidden' } : undefined}
-        className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' || k.kind === 'variant' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
-        title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
-        onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
+        className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' || k.kind === 'variant' ? 'is-master' : ''} ${isSource ? 'is-source' : ''} ${mapSel && !isSource ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll && !isSource ? 'unlinked' : ''}`}
+        title={isSource ? 'Source image not in the World Kit yet — click to import it' : mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
+        onClick={() => (isSource ? void importSource(k.name) : mapSel && toggleMapRef(mapSel, k.name))}
       >
-        <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}{(k as { group?: string }).group ? ` · ${(k as { group?: string }).group}` : ''}</span>
+        <span className={`vp-map-chip k-${k.kind}`}>
+          {isSource && importingSrc === k.name ? 'IMPORTING…' : kindLabel(k.kind)}
+          {(k as { group?: string }).group ? ` · ${(k as { group?: string }).group}` : ''}
+        </span>
         <span className="vp-map-cardacts" onClick={(e) => e.stopPropagation()}>
           {k.image_path ? (
             <span title="View large" onClick={() => setLightbox(k.image_path)}>⤢</span>
           ) : null}
-          {k.kind === 'master' && k.image_path ? (
+          {!isSource ? (
             <span
-              title="Make a VARIANT — same shot, one deliberate change (this image is the base reference)"
+              title={k.image_path ? 'Make a VARIANT — same shot, one deliberate change (this image is the base reference)' : 'Make a VARIANT of this prompt — one deliberate change to the description'}
               onClick={(e) => {
-                setVariantFor(k)
+                setVariantFor(k as KitObject)
                 setVModel((k as KitObject).active_model || '')
+                setVName('')
+                setVInstr('')
+                setVExtras([])
+                setVUploads([])
+                setVErr('')
+                setVSize({ w: 680, h: null })
                 const card = (e.target as HTMLElement).closest('.vp-map-card')?.getBoundingClientRect()
                 setVPos({ x: Math.max(16, Math.min(window.innerWidth - 700, (card?.left ?? 200) - 690)), y: Math.max(70, (card?.top ?? 120) - 20) })
               }}
@@ -740,11 +899,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <span title="Hide this reference (Show all brings it back)" onClick={() => persistHidden([...hiddenRefs, k.name])}>✕</span>
         </span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
+          <img src={contentUrl(k.image_path)} alt={shownName} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
-        <span className="vp-map-cardname">{k.name}</span>
+        <span className="vp-map-cardname">{isSource ? `${shownName} · click to import` : shownName}</span>
       </button>
     )
   }
@@ -785,7 +944,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     // engine reads this exact text — the structured views come back as soon as
     // it parses again.
     return (
-      <div className="vp panel-flat">
+      <div className="vp panel-flat" ref={rootRef}>
         <div className="ch">
           <h3>Visual pacing — as text</h3>
           <span>working/visual-pacing-plan.md</span>
@@ -1226,7 +1385,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }
 
   return (
-    <div className="vp panel-flat">
+    <div className="vp panel-flat" ref={rootRef}>
       {/* One line of facts — per-section counts live on the dimension lines
           below the timeline. No separate stats row, no divider (clean UI). */}
       <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
@@ -1704,18 +1863,24 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             <div className="vp-map-kithead">
               <span className="vp-map-colhead">World Kit</span>
             </div>
-            {hiddenRefs.length ? (
-              <button type="button" className="vp-map-showall corner" onClick={() => persistHidden([])}>
-                Show all · {hiddenRefs.length} hidden
-              </button>
-            ) : null}
             {(() => {
               const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
               const masters = visible.filter((k) => k.kind === 'master')
-              const sorted = [
+              const ordered = [
                 ...masters.flatMap((m) => [m, ...visible.filter((k) => k.kind === 'variant' && k.variant_of === m.name)]),
                 ...visible.filter((k) => k.kind !== 'master' && !(k.kind === 'variant' && masters.some((m) => m.name === k.variant_of))),
               ]
+              // Session source images no kit object maps yet (external assets,
+              // intake uploads — the shoe's other views live here). They pack
+              // WITH the images, as importable cards.
+              const kitPaths = new Set(kit.map((k) => k.image_path).filter(Boolean))
+              const sources = srcPool
+                .filter((s) => !s.ref && isDisplayable(s.path) && !kitPaths.has(s.path) && !hiddenRefs.includes(s.path))
+                .map((s) => ({ name: s.path, kind: 'source', notes: '', image_path: s.path }))
+              // Images first, text-only refs last: image rows stay pure (every
+              // pixel of row width goes to pictures) and the text cards form
+              // their own bottom rows instead of punching holes.
+              const sorted = [...ordered.filter((k) => k.image_path), ...sources, ...ordered.filter((k) => !k.image_path)]
               const { rows, totalH } = packKit(sorted)
               const items = rows.flat()
               return (
@@ -1724,6 +1889,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 </div>
               )
             })()}
+            {/* Bottom of the section, normal flow — never overlaid on a card. */}
+            {hiddenRefs.length ? (
+              <button type="button" className="vp-map-showall" style={{ margin: '8px auto 0' }} onClick={() => persistHidden([])}>
+                Show all · {hiddenRefs.length} hidden
+              </button>
+            ) : null}
           </div>
 
           {variantFor ? (() => {
@@ -1736,14 +1907,38 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     <path d={`M ${cardRect.left + cardRect.width / 2} ${cardRect.top + cardRect.height / 2} C ${cardRect.left} ${cardRect.top - 40}, ${pos.x + 690} ${pos.y + 120}, ${pos.x + 660} ${pos.y + 90}`} />
                   </svg>
                 ) : null}
-                <div className="vp-edit vp-var-modal" style={{ left: pos.x, top: pos.y }}>
+                <div
+                  className="vp-edit vp-var-modal"
+                  ref={vModalRef}
+                  style={{ left: pos.x, top: pos.y, width: vSize.w, ...(vSize.h ? { height: vSize.h } : {}) }}
+                >
+                  {/* Resize from any edge or corner. */}
+                  {['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((dir) => (
+                    <span key={dir} className={`vp-var-rs vp-var-rs-${dir}`} onPointerDown={(e) => onVResize(e, dir)} />
+                  ))}
                   <div className="vp-var-head" onPointerDown={onVDrag}>
                     <b>Variant of {variantFor.name}</b>
                     <span className="vp-hint">drag to move</span>
+                    <button
+                      type="button"
+                      className="vp-var-close"
+                      title="Cancel"
+                      disabled={!!vBusy}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => setVariantFor(null)}
+                    >✕</button>
                   </div>
+                  <div className="vp-var-scroll">
                   <div className="vp-var-body">
-                    {/* The base image owns the left; everything else rides right. */}
-                    <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} onClick={() => setLightbox(variantFor.image_path)} title="Click to view large" />
+                    {/* The base owns the left: its image — or, for a
+                        prompt-only object, the prompt itself. */}
+                    {variantFor.image_path ? (
+                      <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} onClick={() => setLightbox(variantFor.image_path)} title="Click to view large" />
+                    ) : (
+                      <div className="vp-var-master vp-var-mastertext" title="The base prompt — the variant is one deliberate change to this">
+                        {(variantFor.active_prompt || variantFor.notes || 'Prompt-only reference.')}
+                      </div>
+                    )}
                     <div className="vp-var-fields">
                       <label className="vp-edit-field">What changes (one deliberate change)
                         <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
@@ -1752,50 +1947,73 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                         <button
                           type="button"
                           className="vp-undo"
-                          disabled={!(variantFor as KitObject).active_prompt}
-                          title="Append the prompt that generated the base image"
-                          onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + ((variantFor as KitObject).active_prompt || ''))}
+                          disabled={!((variantFor as KitObject).active_prompt || variantFor.notes)}
+                          title="Append the prompt that made the base"
+                          onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + ((variantFor as KitObject).active_prompt || variantFor.notes || ''))}
                         >
                           Import original prompt
                         </button>
-                        <select className="vp-var-model" value={vModel || (variantFor as KitObject).active_model || ''} onChange={(e) => setVModel(e.target.value)} title="Image model (defaults to the base image's model)">
-                          {IMAGE_MODELS.map((m) => (
-                            <option key={m.id} value={m.id}>{m.label}</option>
-                          ))}
-                          {(variantFor as KitObject).active_model && !IMAGE_MODELS.some((m) => m.id === (variantFor as KitObject).active_model) ? (
-                            <option value={(variantFor as KitObject).active_model}>{(variantFor as KitObject).active_model}</option>
-                          ) : null}
-                        </select>
+                        <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
+                          {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
+                        </button>
+                        <ModelPicker
+                          model={vModel || (variantFor as KitObject).active_model || DEFAULT_IMAGE_MODEL_ID}
+                          onChange={setVModel}
+                          disabled={!!vBusy}
+                          models={IMAGE_MODELS}
+                          primary={IMAGE_MODELS}
+                        />
                       </div>
-                      <label className="vp-edit-field">Variant name
-                        <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
-                      </label>
-                      <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
-                        {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
-                      </button>
                       {vExtrasOpen ? (
                         <div className="vp-var-extras">
                           {kit.filter((k) => k.image_path && k.name !== variantFor.name).map((k) => (
                             <button
                               key={k.name}
                               type="button"
-                              className={`vp-var-xref ${vExtras.includes(k.name) ? 'on' : ''}`}
+                              className={`vp-var-xref ${vExtras.includes(k.image_path) ? 'on' : ''}`}
                               title={k.name}
-                              onClick={() => setVExtras((cur) => (cur.includes(k.name) ? cur.filter((n) => n !== k.name) : [...cur, k.name]))}
+                              onClick={() => setVExtras((cur) => (cur.includes(k.image_path) ? cur.filter((p) => p !== k.image_path) : [...cur, k.image_path]))}
                             >
                               <img src={contentUrl(k.image_path)} alt={k.name} />
                             </button>
                           ))}
+                          {vUploads.map((u) => (
+                            <button
+                              key={u.path}
+                              type="button"
+                              className={`vp-var-xref ${vExtras.includes(u.path) ? 'on' : ''}`}
+                              title={u.name}
+                              onClick={() => setVExtras((cur) => (cur.includes(u.path) ? cur.filter((p) => p !== u.path) : [...cur, u.path]))}
+                            >
+                              <img src={contentUrl(u.path)} alt={u.name} />
+                            </button>
+                          ))}
+                          <label className="vp-var-xref vp-var-upl" title="Upload your own reference image">
+                            ↑ upload
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                e.target.value = ''
+                                if (f) void uploadExtraRef(f)
+                              }}
+                            />
+                          </label>
                         </div>
                       ) : null}
+                      <label className="vp-edit-field">Variant name
+                        <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
+                      </label>
                       {vErr ? <p className="vp-var-err">{vErr}</p> : null}
                       <div className="vp-edit-actions">
                         <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
                           {vBusy || '✦ Generate variant'}
                         </button>
-                        <button type="button" className="vp-undo" disabled={!!vBusy} onClick={() => setVariantFor(null)}>Cancel</button>
                       </div>
                     </div>
+                  </div>
                   </div>
                 </div>
               </>

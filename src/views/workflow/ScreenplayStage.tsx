@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { FeedbackButton } from './FeedbackButton'
-import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore } from '../../store/workflow'
 import { actionUrl, activeSession, fileUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
@@ -196,7 +195,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setAiRev = (v: number | null) => patchReview({ aiRev: v })
   const seededRef = useRef(false)
   const rewindRef = useRef<HTMLDivElement>(null)
-  const sourceWords = useSourceWords()
   useEffect(() => {
     if (needRewind) rewindRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [needRewind])
@@ -682,10 +680,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
-
-      <div style={{ marginBottom: 4 }}>
-        <ThinSourceNote words={sourceWords} />
-      </div>
 
       {revs.length === 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0' }}>

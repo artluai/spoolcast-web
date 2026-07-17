@@ -364,7 +364,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
               job {draftJob?.status || stageProcess?.status}
             </span>
           )}
-          <ThinSourceNote words={sourceWords} />
+          {['input_intake', 'story_lock', 'format_setup'].includes(stageId) && (
+            <ThinSourceNote words={sourceWords} />
+          )}
           {draftError && (
             <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
           )}
