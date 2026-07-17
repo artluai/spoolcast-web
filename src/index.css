@@ -2363,6 +2363,12 @@ body.chat-pinned { padding-right: 380px; }
 .ai-btn:hover { border-color: var(--purple); background: rgba(176, 139, 255, .16); }
 .ai-btn.sel { border-color: var(--purple); background: rgba(176, 139, 255, .2); box-shadow: 0 0 0 2px rgba(176, 139, 255, .25); }
 .ai-btn .ap-spark { color: var(--purple); font-size: 12px; line-height: 1; }
+/* PURPLE MEANS THE AI DECIDES. A plain choice the user makes gets the same
+   shape and none of the colour — sitting next to an .ai-btn, the difference
+   IS the meaning. */
+.pill-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-2); color: var(--ink-2); padding: 9px 15px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.pill-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+.pill-btn.sel { border-color: var(--accent); background: var(--bg-3); color: var(--ink); box-shadow: 0 0 0 2px var(--accent-glow); }
 /* once the AI sub-section is open, grey out the toggle itself (placed after
    .ai-btn so it wins on source order) */
 .tpl-ai-toggle.sel, .tpl-ai-toggle.sel:hover { border-color: var(--line-2); background: var(--bg-2); color: var(--ink-3); box-shadow: none; }

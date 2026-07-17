@@ -1439,7 +1439,7 @@ export function Step01Flow({ stepId }: { stepId: string }) {
             </div>
             <input
               type="range"
-              min={30}
+              min={15}
               max={600}
               step={15}
               value={s1.length || 120}
@@ -2023,6 +2023,35 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
   const seededRef = useRef(false)
   const setS1: React.Dispatch<React.SetStateAction<S1>> = (updater) => storeSetS1(stepId, updater)
 
+  // THE FORMAT ANSWERS THIS, OR NOBODY ASKS IT: video-first templates generate
+  // picture and sound together, so a still cannot carry the audio and the
+  // medium cannot vary (docs/format-templates.md). Only audio-first slots the
+  // visuals into an audio clock, where still-vs-clip is a real parameter.
+  // Mirrors scripts/shot_medium.medium_is_a_choice — keep both in sync.
+  // Hide ONLY for video-first — matching the engine's `!= "video-first"`
+  // exactly. An unknown template (the devlogs predate the field) is a real
+  // choice, not a reason to hide the control the engine would still honour.
+  const [mediumIsAChoice, setMediumIsAChoice] = useState(false)
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
+      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([sess, reg]) => {
+        if (!live || typeof sess?.data?.content !== 'string') return
+        const tpl = String(JSON.parse(sess.data.content)?.template || '')
+        const hit = reg?.data?.templates?.find((t: { id?: string }) => t.id === tpl)
+        setMediumIsAChoice(hit?.format !== 'video-first')
+      })
+      .catch(() => {
+        /* engine offline — stay hidden rather than ask what we can't judge */
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
   // Prefill from the engine's session.json (files are truth) — never clobber
   // an edit in progress.
   useEffect(() => {
@@ -2055,7 +2084,7 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
 
   // One quiet row: label · sleek hairline slider · value · ✦ AI button.
   // The "not inherited" explanation lives in the tooltip.
-  const fill = `${Math.round((((s1.length || 300) - 30) / (600 - 30)) * 100)}%`
+  const fill = `${Math.round((((s1.length || 300) - 15) / (600 - 15)) * 100)}%`
   return (
     <>
     <div
@@ -2066,7 +2095,7 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
       <input
         type="range"
         className="sleek-range"
-        min={30}
+        min={15}
         max={600}
         step={15}
         value={s1.length || 300}
@@ -2085,33 +2114,42 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
         <span className="ap-spark">✦</span> Let AI decide
       </button>
     </div>
-    {/* The shot medium: a cost decision that also fixes every clip's legal
-        duration from step 06 on. Blank = the ad/explainer template's normal. */}
-    <div
-      title="Video clips cost far more than stills, and the choice sets each shot's legal length"
-      style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}
-    >
-      <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Shots</span>
-      <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-        {[
-          ['video', 'Video', 'every shot is generated motion'],
-          ['image', 'Stills', 'every shot is a held frame'],
-          ['mix', 'Mix', 'chosen per clip at step 06'],
-        ].map(([id, label, hint]) => (
-          <button
-            key={id}
-            className={`ai-btn ${s1.medium === id ? 'sel' : ''}`}
-            title={hint}
-            onClick={() => setS1((c) => ({ ...c, medium: c.medium === id ? '' : id }))}
-          >
-            {label}
-          </button>
-        ))}
+    {/* Shots: only asked when the format leaves it open. Video-first generates
+        picture and sound together, so there is nothing to choose. */}
+    {mediumIsAChoice ? (
+      <div
+        title="Video clips cost far more than stills, and the choice sets each shot's legal length"
+        style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}
+      >
+        <span style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>Shots</span>
+        <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+          {[
+            ['image', 'Stills', 'every shot is a held frame — cheapest'],
+            ['video', 'Video', 'every shot is generated motion'],
+          ].map(([id, label, hint]) => (
+            <button
+              key={id}
+              className={`pill-btn ${s1.medium === id ? 'sel' : ''}`}
+              title={hint}
+              onClick={() => setS1((c) => ({ ...c, medium: c.medium === id ? '' : id }))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* "Let AI decide" IS the mix policy — under it the screenplay drafter
+            picks a medium per shot and you can flip any row. Not a third
+            option beside Mix: the same thing said honestly. Purple because the
+            AI really does decide here, the way length=0 defers to step 04. */}
+        <button
+          className={`ai-btn ${s1.medium === 'mix' ? 'sel' : ''}`}
+          title="The AI picks stills or video per shot at the screenplay — you can change any of them"
+          onClick={() => setS1((c) => ({ ...c, medium: c.medium === 'mix' ? '' : 'mix' }))}
+        >
+          <span className="ap-spark">✦</span> Let AI decide
+        </button>
       </div>
-      <b style={{ fontSize: 13, color: s1.medium ? 'var(--ink)' : 'var(--ink-3)', whiteSpace: 'nowrap', minWidth: 92, textAlign: 'right' }}>
-        {s1.medium ? '' : 'Template default'}
-      </b>
-    </div>
+    ) : null}
     </>
   )
 }

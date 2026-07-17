@@ -305,7 +305,7 @@ export function OnboardingView({
               </div>
               <input
                 type="range"
-                min={30}
+                min={15}
                 max={600}
                 step={15}
                 value={length}
