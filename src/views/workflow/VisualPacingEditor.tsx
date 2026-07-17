@@ -22,7 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
-import { actionUrl, activeSession, contentUrl, fileUrl } from '../../lib/api'
+import { actionUrl, activeSession, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -191,18 +191,29 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [editKey])
 
-  // The project's shot medium (session.json, set at step 1). Blank until it
-  // loads, or when the project mixes — shotNoun falls back to "shots".
+  // The project's shot medium and its CLOCK. Two different questions: the
+  // medium is stills-vs-clips, the clock is who owns the timeline. An
+  // audio-first project can use video clips (news-anime-bot does), so the
+  // medium cannot answer whether audio is a separate track.
   // MUST sit above the early return below: hooks run in call order.
   const [shotMedium, setShotMedium] = useState('')
+  const [audioIsSeparate, setAudioIsSeparate] = useState(true)
   useEffect(() => {
     let live = true
-    fetch(fileUrl('session.json'))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((out) => {
-        if (!live || typeof out?.data?.content !== 'string') return
-        const m = String(JSON.parse(out.data.content)?.shot_medium || '')
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
+      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([sess, reg]) => {
+        if (!live || typeof sess?.data?.content !== 'string') return
+        const cfg = JSON.parse(sess.data.content)
+        const m = String(cfg?.shot_medium || '')
         if (m === 'video' || m === 'image') setShotMedium(m)
+        const hit = reg?.data?.templates?.find((t: { id?: string }) => t.id === String(cfg?.template || ''))
+        // Video-first generates picture and sound together, so there is no
+        // separate audio track to show. Default true: an unknown template is
+        // audio-first-shaped, and hiding a real lane is worse than showing it.
+        if (hit?.format === 'video-first') setAudioIsSeparate(false)
       })
       .catch(() => {
         /* engine offline — the neutral word still reads correctly */
@@ -211,6 +222,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       live = false
     }
   }, [])
+
+  // What C001 actually is. Only an audio-first project's chunks are audio.
+  const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
 
   if (!draft.trim()) {
     // One line — if the step is blocked, the blocker card below explains.
@@ -709,7 +723,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       {/* One line of facts — per-section counts live on the dimension lines
           below the timeline. No separate stats row, no divider (clean UI). */}
       <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-        <h3>Visual pacing — {stats.chunks} audio chunks · {stats.images} {shotNoun(stats.images, shotMedium)} · ~{fmtClock(stats.runtimeS)}</h3>
+        <h3>
+          Visual pacing — {audioIsSeparate ? `${stats.chunks} audio chunks · ` : ''}
+          {stats.images} {shotNoun(stats.images, shotMedium)} · ~{fmtClock(stats.runtimeS)}
+        </h3>
         <span>working/visual-pacing-plan.md</span>
       </div>
 
@@ -782,8 +799,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
 
-        {/* "Audio chunks": the narration owns these units — per-template
-            naming can come from the contract once multi-template lands. */}
+        {/* "Audio chunks": the narration owns these units — so the lane only
+            means something when the narration is a separate track. Video-first
+            generates picture and sound together: there is no second timeline to
+            line up against, and drawing one says the audio is separate when it
+            isn't. The chunks stay in the plan (they still group the shots);
+            only the claim that they are an audio track goes away. */}
+        {audioIsSeparate ? (
         <div className="vp-tl-row">
           <span className="vp-tl-label">Audio chunks</span>
           <div className="vp-tl-track ruler">
@@ -800,6 +822,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             ))}
           </div>
         </div>
+        ) : null}
 
         {/* SECTIONS at the bottom: dimension lines (|— opening · 5/9 img —|).
             Click a label to edit name/targets; drag the shared tick to move
@@ -878,7 +901,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     ? (secs[editing.index]?.name ?? 'section')
                     : editing.chunkId}
             </span>
-            <b>{editing.isNew ? 'New' : 'Editing'} {editing.scope === 'chunk' ? 'audio chunk' : editing.scope}</b>
+            <b>{editing.isNew ? 'New' : 'Editing'} {editing.scope === 'chunk' ? chunkWord : editing.scope}</b>
             {editing.scope === 'image' ? <span className="vp-active-hold">in {editing.chunkId} · beat {editing.beatCode}</span> : null}
           </div>
 
@@ -891,7 +914,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <textarea rows={2} value={editing.summary} onChange={(e) => setDraftField({ summary: e.target.value })} placeholder="One line: what this chunk does for the viewer" />
               </label>
               {editing.isNew ? (
-                <label className="vp-edit-field">Narration (the script lines this audio chunk covers)
+                <label className="vp-edit-field">Narration (the script lines this {chunkWord} covers)
                   <textarea rows={2} value={editing.narration} onChange={(e) => setDraftField({ narration: e.target.value })} placeholder="Paste the narration sentence(s) from the script…" />
                 </label>
               ) : null}
@@ -995,10 +1018,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <div className="vp-menu-div" />
               </>
             ) : null}
-            <button type="button" onClick={() => startEditChunk(menu.chunkId)}>Edit audio chunk</button>
-            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'before')}>Add audio chunk before</button>
-            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'after')}>Add audio chunk after</button>
-            <button type="button" className="danger" onClick={() => removeChunk(menu.chunkId)}>Remove audio chunk</button>
+            <button type="button" onClick={() => startEditChunk(menu.chunkId)}>Edit {chunkWord}</button>
+            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'before')}>Add {chunkWord} before</button>
+            <button type="button" onClick={() => startAddChunk(menu.chunkId, 'after')}>Add {chunkWord} after</button>
+            <button type="button" className="danger" onClick={() => removeChunk(menu.chunkId)}>Remove {chunkWord}</button>
           </div>
         </>
       ) : null}
@@ -1024,7 +1047,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: listOverflows ? '24vh' : 0 }}>
           <table className="shots vp-pacing">
             <thead>
-              <tr><th>Start</th><th>Img</th><th>Audio chunk</th><th>Visual</th><th>Hold</th><th></th></tr>
+              {/* "Img" was the devlog spelling; a shot is a clip or a still.
+                  The chunk column only claims to be audio when audio is its
+                  own track. */}
+              <tr><th>Start</th><th>Shot</th><th>{audioIsSeparate ? 'Audio chunk' : 'Scene'}</th><th>Visual</th><th>Hold</th><th></th></tr>
             </thead>
             <tbody>
               {images.map((img) => (
