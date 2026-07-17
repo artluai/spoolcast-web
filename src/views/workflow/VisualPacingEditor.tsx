@@ -265,6 +265,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [vExtras, setVExtras] = useState<string[]>([])
   const [vBusy, setVBusy] = useState('')
   const [vErr, setVErr] = useState('')
+  // Lightbox: any kit/attachment image, full size.
+  const [lightbox, setLightbox] = useState('')
   const refetchKit = async () => {
     const out = await fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
@@ -446,8 +448,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const layout = (A: number): { rows: Packed[][]; totalH: number } => {
       const rows: Packed[][] = [[]]
       let x = 0
-      let rowH = 0
-      let totalH = 0
       for (const k of objects) {
         let w = TEXT_W
         let h = TEXT_H
@@ -458,16 +458,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           h = w * r
         }
         if (x > 0 && x + w > W) {
-          totalH += rowH + 10
           rows.push([])
           x = 0
-          rowH = 0
         }
-        rows[rows.length - 1].push({ k, w: Math.round(w), h: Math.round(h) })
+        rows[rows.length - 1].push({ k, w, h })
         x += w + 10
-        rowH = Math.max(rowH, h)
       }
-      return { rows, totalH: totalH + rowH }
+      // JUSTIFY: scale every row to end flush with the region's right edge —
+      // ragged rows are where the dead space was creeping back in. Text cards
+      // scale too (their width is a layout choice, not content truth).
+      let totalH = 0
+      for (const row of rows) {
+        const used = row.reduce((n, it) => n + it.w, 0)
+        const f = Math.min(1.6, Math.max(0.8, (W - (row.length - 1) * 10) / Math.max(1, used)))
+        let rowH = 0
+        for (const it of row) {
+          it.w = Math.round(it.w * f)
+          it.h = Math.round(it.h * f)
+          rowH = Math.max(rowH, it.h)
+        }
+        totalH += rowH + 10
+      }
+      return { rows, totalH: Math.max(0, totalH - 10) }
     }
     let lo = 7000
     let hi = 120000
@@ -531,7 +543,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       shotList?.removeEventListener('scroll', onScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, draft, mapSel, kit])
+  }, [view, draft, mapSel, kit, imgRatios])
 
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
@@ -625,7 +637,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
     kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : 'REFERENCE'
-  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number) => {
+  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number, h?: number) => {
     const sel = images.find((i) => i.id === mapSel)
     const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
     const linkedAtAll = images.some((i) => refsOf(i).includes(k.name))
@@ -634,34 +646,21 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         key={k.name}
         type="button"
         data-mapref={k.name}
-        style={w ? { width: w } : undefined}
+        style={w ? { width: w, ...(k.image_path ? {} : { height: h }) } : undefined}
         className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' || k.kind === 'variant' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}{(k as { group?: string }).group ? ` · ${(k as { group?: string }).group}` : ''}</span>
-        <span
-          className="vp-map-hide"
-          title="Hide this reference from the board (Show all brings it back)"
-          onClick={(e) => {
-            e.stopPropagation()
-            persistHidden([...hiddenRefs, k.name])
-          }}
-        >
-          hide
+        <span className="vp-map-cardacts" onClick={(e) => e.stopPropagation()}>
+          {k.image_path ? (
+            <span title="View large" onClick={() => setLightbox(k.image_path)}>view</span>
+          ) : null}
+          {k.kind === 'master' && k.image_path ? (
+            <span title="Make a VARIANT of this master — same shot, one deliberate change (generated with this image as the base reference)" onClick={() => setVariantFor(k)}>+ variant</span>
+          ) : null}
+          <span title="Hide this reference from the board (Show all brings it back)" onClick={() => persistHidden([...hiddenRefs, k.name])}>hide</span>
         </span>
-        {k.kind === 'master' && k.image_path ? (
-          <span
-            className="vp-map-mkvariant"
-            title="Make a VARIANT of this master — same shot, one deliberate change (generated with this image as the base reference)"
-            onClick={(e) => {
-              e.stopPropagation()
-              setVariantFor(k)
-            }}
-          >
-            + variant
-          </span>
-        ) : null}
         {k.image_path ? (
           <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
@@ -1340,6 +1339,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <button type="button" className="vp-undo" style={{ marginLeft: 8 }} onClick={() => setTlOpen(!tlShown)}>
           {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
         </button>
+        {view === 'map' ? (
+          <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
+            ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
+          </button>
+        ) : null}
+        {view !== 'map' ? (
         <button
           type="button"
           className="vp-undo"
@@ -1349,6 +1354,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         >
           Edit as text
         </button>
+        ) : null}
       </div>
 
       {tlShown ? (
@@ -1597,7 +1603,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                                 </span>
                                 <span className="vp-map-attname">{name}</span>
                               </div>
-                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(12500)} /> : <span className="vp-map-noimg">{name}</span>}
+                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={sizeToArea(12500)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} /> : <span className="vp-map-noimg">{name}</span>}
                               <div className="vp-map-att-ov">
                                 <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
                                   {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
@@ -1619,16 +1625,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-map-kit">
             <div className="vp-map-kithead">
               <span className="vp-map-colhead">World Kit</span>
-              <span className="vp-map-kitbtns">
-                {hiddenRefs.length ? (
-                  <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
-                    Show all · {hiddenRefs.length} hidden
-                  </button>
-                ) : null}
-                <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
-                  <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
+              {hiddenRefs.length ? (
+                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
+                  Show all · {hiddenRefs.length} hidden
                 </button>
-              </span>
+              ) : null}
             </div>
             <div className="vp-map-wall">
               {(() => {
@@ -1641,7 +1642,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 const { rows } = packKit(sorted)
                 return rows.map((row, i) => (
                   <div className="vp-map-krow" key={i}>
-                    {row.map(({ k, w }) => kitCard(k, w))}
+                    {row.map(({ k, w, h }) => kitCard(k, w, h))}
                   </div>
                 ))
               })()}
@@ -1650,7 +1651,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
 
           {variantFor ? (
             <div className="vp-var-overlay" onClick={() => !vBusy && setVariantFor(null)}>
-              <div className="vp-var-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="vp-edit vp-var-modal" onClick={(e) => e.stopPropagation()}>
                 <h4>Variant of {variantFor.name}</h4>
                 <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} />
                 <label className="vp-edit-field">What changes (one deliberate change)
@@ -1683,6 +1684,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                   <button type="button" className="vp-undo" disabled={!!vBusy} onClick={() => setVariantFor(null)}>Cancel</button>
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {lightbox ? (
+            <div className="vp-var-overlay" onClick={() => setLightbox('')}>
+              <img className="vp-lightbox" src={contentUrl(lightbox)} alt="" />
             </div>
           ) : null}
         </div>
