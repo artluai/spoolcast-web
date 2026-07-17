@@ -276,11 +276,74 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     })
     setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
   }
+  // EQUAL SQUARE FOOTAGE, SIZED TO FIT: every kit image gets the same AREA
+  // whatever its aspect ratio (masters 1.35x), and that area is COMPUTED so
+  // the whole kit fits the viewport with NO scroll — if the kit column needs
+  // a scrollbar, the layout has failed. Ratios are remembered per image on
+  // load; the packer solves for area from the column's real width x height.
+  const kitAreaRef = useRef(16000)
+  const applyArea = (im: HTMLImageElement) => {
+    const r = Number(im.dataset.ratio) || 1
+    const boost = im.dataset.master === '1' ? 1.35 : 1
+    const h = Math.sqrt((kitAreaRef.current * boost) / r)
+    im.style.height = `${Math.round(h)}px`
+    im.style.width = `${Math.round(h * r)}px`
+  }
+  const onKitImgLoad = (isMaster: boolean) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    im.dataset.ratio = String(im.naturalWidth / im.naturalHeight || 1)
+    if (isMaster) im.dataset.master = '1'
+    applyArea(im)
+    fitKit()
+  }
+  // Attached (expanded-shot) images keep a fixed comfortable area.
+  const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    const r = im.naturalWidth / im.naturalHeight || 1
+    const h = Math.sqrt(area / r)
+    im.style.height = `${Math.round(h)}px`
+    im.style.width = `${Math.round(h * r)}px`
+  }
+  const fitKit = () => {
+    const board = boardRef.current
+    const kitEl = board?.querySelector<HTMLElement>('.vp-map-kit')
+    const scroller = board?.closest('.workflow-view') as HTMLElement | null
+    if (!board || !kitEl || !scroller) return
+    const H = Math.max(scroller.clientHeight, document.documentElement.clientHeight, 620) - 96
+    const W = kitEl.clientWidth || 600
+    kitEl.style.maxHeight = `${H}px`
+    const imgs = [...kitEl.querySelectorAll<HTMLImageElement>('img[data-ratio]')]
+    const textCards = kitEl.querySelectorAll('.vp-map-prompttext').length
+    // Budget: usable pixels minus what the text cards and card chrome eat.
+    const budget = W * H * 0.62 - textCards * 14000
+    const weight = imgs.reduce((n, im) => n + (im.dataset.master === '1' ? 1.35 : 1), 0) || 1
+    let area = Math.max(6000, Math.min(46000, budget / weight))
+    // The estimate is only a starting point — VERIFY against the real layout
+    // and shrink until the kit truly fits. Heuristics clipped cards; the loop
+    // cannot: no scroll, no clip, everything visible is the contract.
+    for (let i = 0; i < 7; i += 1) {
+      kitAreaRef.current = area
+      imgs.forEach(applyArea)
+      if (kitEl.scrollHeight <= kitEl.clientHeight + 2) break
+      area = Math.max(6000, area * Math.max(0.62, kitEl.clientHeight / kitEl.scrollHeight))
+      if (area <= 6001) {
+        kitAreaRef.current = area
+        imgs.forEach(applyArea)
+        break
+      }
+    }
+    measureThreads()
+  }
+
   // Threads re-measure when the board's data settles.
   useEffect(() => {
     if (view !== 'map') return
-    const raf = requestAnimationFrame(measureThreads)
-    const timers = [150, 500, 1300].map((ms) => window.setTimeout(measureThreads, ms))
+    const settle = () => {
+      fitKit()
+      measureThreads()
+    }
+    const raf = requestAnimationFrame(settle)
+    const timers = [150, 500, 1300, 2600].map((ms) => window.setTimeout(settle, ms))
     const ro = new ResizeObserver(() => measureThreads())
     if (boardRef.current) ro.observe(boardRef.current)
     window.addEventListener('resize', measureThreads)
@@ -301,13 +364,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     // scroll: cap its height to the real scroller viewport (not 100vh — the
     // embedded preview reports a zero viewport, and the scroller is the truth
     // in any host). Inner scroll is the fallback if a huge kit still overflows.
-    const sizeKit = () => {
-      const kitEl = boardRef.current?.querySelector<HTMLElement>('.vp-map-kit')
-      if (kitEl && scroller) kitEl.style.maxHeight = `${Math.max(320, scroller.clientHeight - 88)}px`
-    }
-    sizeKit()
-    const kro = new ResizeObserver(sizeKit)
+    fitKit()
+    const kro = new ResizeObserver(() => fitKit())
     if (scroller) kro.observe(scroller)
+    const kitEl = boardRef.current?.querySelector('.vp-map-kit')
+    if (kitEl) kro.observe(kitEl)
     return () => {
       cancelAnimationFrame(raf)
       timers.forEach((id) => window.clearTimeout(id))
@@ -406,18 +467,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     ;[nextNames[at], nextNames[to]] = [nextNames[to], nextNames[at]]
     writeRefs(imageId, nextNames, firstFrameOf(img))
   }
-  // EQUAL SQUARE FOOTAGE: every image gets the same AREA on screen whatever
-  // its aspect ratio — a portrait and a landscape reference are equally
-  // important, so neither may take more room. Computed from the image's own
-  // natural ratio on load; the card hugs the result (no empty box).
-  const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const im = e.currentTarget
-    const r = im.naturalWidth / im.naturalHeight || 1
-    const h = Math.sqrt(area / r)
-    im.style.height = `${Math.round(h)}px`
-    im.style.width = `${Math.round(h * r)}px`
-  }
-
   // One kit object as a card: the IMAGE sizes the card (native ratio, full
   // column width); a prompt-only object gets an equally-weighted text card —
   // never a box sized by its name. Kind chip labels what it is.
@@ -432,13 +481,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         key={k.name}
         type="button"
         data-mapref={k.name}
-        className={`vp-map-card ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
+        className={`vp-map-card ${k.kind === 'master' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={k.name} onLoad={sizeToArea(k.kind === 'master' ? 30000 : 19000)} />
+          <img src={contentUrl(k.image_path)} alt={k.name} onLoad={onKitImgLoad(k.kind === 'master')} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
@@ -1331,17 +1380,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             })}
           </div>
 
-          {/* THE WORLD KIT — every object, image-sized cards, masters apart. */}
+          {/* THE WORLD KIT — one wall, masters first (upper-left, tinted),
+              sized to FIT the screen: a scrollbar here means failure. */}
           <div className="vp-map-kit">
-            {kit.some((k) => k.kind === 'master') ? (
-              <div className="vp-map-masters">
-                <span className="vp-map-colhead">Master shots</span>
-                {kit.filter((k) => k.kind === 'master').map((k) => kitCard(k))}
-              </div>
-            ) : null}
             <span className="vp-map-colhead">World Kit</span>
             <div className="vp-map-wall">
-              {kit.filter((k) => k.kind !== 'master').map((k) => kitCard(k))}
+              {[...kit].sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0)).map((k) => kitCard(k))}
             </div>
             <div className="vp-map-foot">
               <span className="vp-hint">
