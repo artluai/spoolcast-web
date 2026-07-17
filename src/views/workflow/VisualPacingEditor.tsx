@@ -284,35 +284,54 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     im.style.height = `${Math.round(h)}px`
     im.style.width = `${Math.round(h * r)}px`
   }
-  // THE KIT IS MASONRY (the asset-library layout): uniform column width,
-  // every card exactly that wide, height from the image's own ratio — packed
-  // tight, structurally incapable of overlap, no JS image sizing at all.
-  // Fixed height = the window; content fills columns downward and overflows
-  // HORIZONTALLY when a kit outgrows the screen. Never a vertical scrollbar.
+  // KIT LAYOUT IS OURS, NOT THE BROWSER'S. CSS multicol kept reverting to
+  // sequential fill (balance is spec'd to switch off whenever content
+  // overflows), which resurrected the dead-space staircase at laptop sizes.
+  // So placement is explicit: measure the kit box, try column widths from
+  // wide to narrow, greedily drop each card into the shortest column, and
+  // accept the widest layout whose tallest column fits the window. A kit too
+  // big at the narrowest width grows extra columns and scrolls SIDEWAYS.
+  const [kitDims, setKitDims] = useState({ w: 1000, h: 700 })
+  const [imgRatios, setImgRatios] = useState<Record<string, number>>({})
+  const noteRatio = (name: string) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    const r = im.naturalHeight / im.naturalWidth || 1.25
+    setImgRatios((cur) => (Math.abs((cur[name] ?? 0) - r) < 0.01 ? cur : { ...cur, [name]: r }))
+  }
   const fitKit = () => {
     const board = boardRef.current
     const kitEl = board?.querySelector<HTMLElement>('.vp-map-kit')
-    const wall = kitEl?.querySelector<HTMLElement>('.vp-map-wall')
     const scroller = board?.closest('.workflow-view') as HTMLElement | null
-    if (!board || !kitEl || !wall || !scroller) return
+    if (!board || !kitEl || !scroller) return
     const H = Math.max(scroller.clientHeight, document.documentElement.clientHeight, 620) - 96
     kitEl.style.maxHeight = `${H}px`
-    wall.style.height = `${H - 26}px`
-    const W = kitEl.clientWidth || 900
-    const n = wall.querySelectorAll('.vp-map-card').length || 1
-    // Aim for ~2 cards per column; clamp to sane card widths.
-    const cols = Math.max(2, Math.min(6, Math.ceil(n / 2)))
-    wall.style.columnWidth = `${Math.max(170, Math.min(290, Math.floor(W / cols) - 12))}px`
     const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
     if (list) list.style.maxHeight = `${H}px`
-    // Balanced columns often need less than the full window — shrink the
-    // wall to what the tallest column actually uses so nothing trails empty.
-    requestAnimationFrame(() => {
-      const used = wall.scrollHeight
-      if (used > 60 && used < H - 24) wall.style.height = `${used + 4}px`
-      measureThreads()
-    })
+    const w = kitEl.clientWidth || 1000
+    const h = H - 26
+    setKitDims((cur) => (Math.abs(cur.w - w) < 8 && Math.abs(cur.h - h) < 8 ? cur : { w, h }))
     measureThreads()
+  }
+  // Greedy shortest-column packing for a given column width.
+  const TEXT_CARD_H = 178
+  const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
+    const est = (k: { name: string; image_path: string }) =>
+      k.image_path ? Math.round((imgRatios[k.name] ?? 1.25) * 0) : 0 // placeholder, replaced below
+    void est
+    for (let colW = 300; ; colW -= 10) {
+      const ncols = Math.max(1, Math.floor((kitDims.w + 10) / (colW + 10)))
+      const heights = new Array(Math.max(1, ncols)).fill(0)
+      const cols: (typeof objects)[] = Array.from({ length: Math.max(1, ncols) }, () => [])
+      for (const k of objects) {
+        const cardH = (k.image_path ? Math.round(colW * (imgRatios[k.name] ?? 1.25)) : TEXT_CARD_H) + 10
+        let at = 0
+        for (let i = 1; i < heights.length; i += 1) if (heights[i] < heights[at] - 1) at = i
+        cols[at].push(k)
+        heights[at] += cardH
+      }
+      const tallest = Math.max(...heights)
+      if (tallest <= kitDims.h || colW <= 160) return { cols: cols.filter((c) => c.length), colW }
+    }
   }
 
   // Threads re-measure when the board's data settles.
@@ -470,7 +489,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={() => measureThreads()} />
+          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
@@ -1385,7 +1404,15 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-map-kit">
             <span className="vp-map-colhead">World Kit</span>
             <div className="vp-map-wall">
-              {[...kit].sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0)).map((k) => kitCard(k))}
+              {(() => {
+                const sorted = [...kit].sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
+                const { cols, colW } = packKit(sorted)
+                return cols.map((col, i) => (
+                  <div className="vp-map-coln" key={i} style={{ width: colW }}>
+                    {col.map((k) => kitCard(k))}
+                  </div>
+                ))
+              })()}
             </div>
           </div>
         </div>
