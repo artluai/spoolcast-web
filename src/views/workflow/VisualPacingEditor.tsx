@@ -285,7 +285,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const applyArea = (im: HTMLImageElement) => {
     const r = Number(im.dataset.ratio) || 1
     const boost = im.dataset.master === '1' ? 1.35 : 1
-    const h = Math.sqrt((kitAreaRef.current * boost) / r)
+    let h = Math.sqrt((kitAreaRef.current * boost) / r)
+    // A panorama at equal area could outgrow its column and overlap
+    // neighbours — cap the width and give up a little area instead.
+    if (h * r > 380) h = 380 / r
     im.style.height = `${Math.round(h)}px`
     im.style.width = `${Math.round(h * r)}px`
   }
