@@ -255,7 +255,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
             label={metaGen === 'ready' ? 'Re-generate title & description' : 'Generate title & description'}
             busy={metaGen === 'working'}
             busyLabel="Drafting…"
-            title="Drafts from the script and series rules — uses model credits"
+            title="Drafts from the script and series rules"
             placeholder="Optional guidance — e.g. “lead with the failure story”, “no jargon in the title”…"
             onRun={generateMeta}
           />

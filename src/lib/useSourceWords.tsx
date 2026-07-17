@@ -32,10 +32,26 @@ export function useSourceWords(): number | null {
 export const THIN_SOURCE_LIMIT = 200
 
 export function ThinSourceNote({ words }: { words: number | null }) {
-  if (words === null || words >= THIN_SOURCE_LIMIT) return null
+  // Dismissible, and the dismissal sticks for the session's browser — the
+  // warning earns its keep once, not on every visit to every step.
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem('sc-thin-note-hidden') === '1' } catch { return false }
+  })
+  if (hidden || words === null || words >= THIN_SOURCE_LIMIT) return null
   return (
-    <span style={{ color: 'var(--amber)', fontSize: 12 }}>
+    <span style={{ color: 'var(--amber)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
       ⚠ drafting from only {words} words of source — results may be thin. Add material in the Video idea step.
+      <button
+        type="button"
+        title="Hide this note"
+        onClick={() => {
+          setHidden(true)
+          try { localStorage.setItem('sc-thin-note-hidden', '1') } catch { /* private mode */ }
+        }}
+        style={{ background: 'none', border: '1px solid var(--line-2)', color: 'var(--ink-3)', borderRadius: 5, fontSize: 10, lineHeight: 1, padding: '2px 6px', cursor: 'pointer' }}
+      >
+        ×
+      </button>
     </span>
   )
 }

@@ -194,7 +194,7 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
           style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
           disabled={suggesting}
           onClick={() => void suggest()}
-          title="AI reads what this video is about and proposes rules for this step — uses model credits"
+          title="AI reads what this video is about and proposes rules for this step"
         >
           {suggesting ? (<><span className="spin" /> Suggesting…</>) : '✦ Suggest rules with AI'}
         </button>

@@ -23,6 +23,7 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay } from '../../lib/screenplay-md'
+import { IMAGE_MODELS } from '../../lib/image-models'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
@@ -229,7 +230,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // THE KIT, AS OBJECTS: every World Kit reference — kind, description, and
   // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
   // real kit object and gets a real card; it just has no image yet.
-  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string }
+  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string; active_prompt?: string; active_model?: string }
   const [kit, setKit] = useState<KitObject[]>([])
   useEffect(() => {
     let live = true
@@ -288,6 +289,25 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [vInstr, setVInstr] = useState('')
   const [vExtras, setVExtras] = useState<string[]>([])
   const [vExtrasOpen, setVExtrasOpen] = useState(false)
+  const [vModel, setVModel] = useState('')
+  // The module floats OVER the board (no dim): draggable by its header, a
+  // dashed thread ties it to the master card it edits.
+  const [vPos, setVPos] = useState<{ x: number; y: number } | null>(null)
+  const vDragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const onVDrag = (e: React.PointerEvent) => {
+    vDragRef.current = { dx: e.clientX - (vPos?.x ?? 0), dy: e.clientY - (vPos?.y ?? 0) }
+    const move = (ev: PointerEvent) => {
+      const d = vDragRef.current
+      if (d) setVPos({ x: ev.clientX - d.dx, y: ev.clientY - d.dy })
+    }
+    const up = () => {
+      vDragRef.current = null
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   const [vBusy, setVBusy] = useState('')
   const [vErr, setVErr] = useState('')
   // Lightbox: any kit/attachment image, full size.
@@ -325,6 +345,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         action: 'generate_worldkit_ref',
         ref: name,
         prompt,
+        ...(vModel ? { model: vModel } : {}),
         ref_images: [variantFor.image_path, ...vExtras.map((n) => kit.find((k) => k.name === n)?.image_path).filter(Boolean)],
         allow_cost: true,
       }),
@@ -449,7 +470,17 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const kitEl = board?.querySelector<HTMLElement>('.vp-map-kit')
     const scroller = board?.closest('.workflow-view') as HTMLElement | null
     if (!board || !kitEl || !scroller) return
-    const H = Math.max(scroller.clientHeight, document.documentElement.clientHeight, 620) - 96
+    // The height budget must come from the REAL window, however this app is
+    // hosted — users don't send screenshots of their vh. Take the largest
+    // credible viewport measure, subtract where the kit actually starts.
+    const vh = Math.max(
+      window.innerHeight || 0,
+      document.documentElement.clientHeight || 0,
+      window.visualViewport?.height || 0,
+      620,
+    )
+    const kitTop = Math.max(0, kitEl.getBoundingClientRect().top)
+    const H = Math.max(420, Math.round(vh - Math.min(kitTop, vh * 0.4) - 56))
     kitEl.style.maxHeight = `${H}px`
     const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
     if (list) list.style.maxHeight = `${H}px`
@@ -693,12 +724,20 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}{(k as { group?: string }).group ? ` · ${(k as { group?: string }).group}` : ''}</span>
         <span className="vp-map-cardacts" onClick={(e) => e.stopPropagation()}>
           {k.image_path ? (
-            <span title="View large" onClick={() => setLightbox(k.image_path)}>view</span>
+            <span title="View large" onClick={() => setLightbox(k.image_path)}>⤢</span>
           ) : null}
           {k.kind === 'master' && k.image_path ? (
-            <span title="Make a VARIANT of this master — same shot, one deliberate change (generated with this image as the base reference)" onClick={() => setVariantFor(k)}>+ variant</span>
+            <span
+              title="Make a VARIANT — same shot, one deliberate change (this image is the base reference)"
+              onClick={(e) => {
+                setVariantFor(k)
+                setVModel((k as KitObject).active_model || '')
+                const card = (e.target as HTMLElement).closest('.vp-map-card')?.getBoundingClientRect()
+                setVPos({ x: Math.max(16, Math.min(window.innerWidth - 700, (card?.left ?? 200) - 690)), y: Math.max(70, (card?.top ?? 120) - 20) })
+              }}
+            >+</span>
           ) : null}
-          <span title="Hide this reference from the board (Show all brings it back)" onClick={() => persistHidden([...hiddenRefs, k.name])}>hide</span>
+          <span title="Hide this reference (Show all brings it back)" onClick={() => persistHidden([...hiddenRefs, k.name])}>✕</span>
         </span>
         {k.image_path ? (
           <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
@@ -1664,12 +1703,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-map-kit">
             <div className="vp-map-kithead">
               <span className="vp-map-colhead">World Kit</span>
-              {hiddenRefs.length ? (
-                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
-                  Show all · {hiddenRefs.length} hidden
-                </button>
-              ) : null}
             </div>
+            {hiddenRefs.length ? (
+              <button type="button" className="vp-map-showall corner" onClick={() => persistHidden([])}>
+                Show all · {hiddenRefs.length} hidden
+              </button>
+            ) : null}
             {(() => {
               const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
               const masters = visible.filter((k) => k.kind === 'master')
@@ -1687,49 +1726,81 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             })()}
           </div>
 
-          {variantFor ? (
-            <div className="vp-var-overlay" onClick={() => !vBusy && setVariantFor(null)}>
-              <div className="vp-edit vp-var-modal" onClick={(e) => e.stopPropagation()}>
-                <h4>Variant of {variantFor.name}</h4>
-                {/* VISUALS FIRST: the master IS the subject — it dominates the
-                    panel; the controls are a compact strip beneath it. */}
-                <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} />
-                <label className="vp-edit-field">What changes (one deliberate change)
-                  <textarea rows={2} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
-                </label>
-                <div className="vp-var-nameline">
-                  <label className="vp-edit-field">Variant name
-                    <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
-                  </label>
-                  <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
-                    {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
-                  </button>
-                </div>
-                {vExtrasOpen ? (
-                  <div className="vp-var-extras">
-                    {kit.filter((k) => k.image_path && k.name !== variantFor.name).map((k) => (
-                      <button
-                        key={k.name}
-                        type="button"
-                        className={`vp-ref-chip ${vExtras.includes(k.name) ? 'on' : ''}`}
-                        onClick={() => setVExtras((cur) => (cur.includes(k.name) ? cur.filter((n) => n !== k.name) : [...cur, k.name]))}
-                      >
-                        <img src={contentUrl(k.image_path)} alt="" />
-                        <span>{k.name}</span>
-                      </button>
-                    ))}
-                  </div>
+          {variantFor ? (() => {
+            const cardRect = boardRef.current?.querySelector(`[data-mapref="${CSS.escape(variantFor.name)}"]`)?.getBoundingClientRect()
+            const pos = vPos ?? { x: 120, y: 120 }
+            return (
+              <>
+                {cardRect ? (
+                  <svg className="vp-var-thread">
+                    <path d={`M ${cardRect.left + cardRect.width / 2} ${cardRect.top + cardRect.height / 2} C ${cardRect.left} ${cardRect.top - 40}, ${pos.x + 690} ${pos.y + 120}, ${pos.x + 660} ${pos.y + 90}`} />
+                  </svg>
                 ) : null}
-                {vErr ? <p className="vp-var-err">{vErr}</p> : null}
-                <div className="vp-edit-actions">
-                  <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
-                    {vBusy || '✦ Generate variant'}
-                  </button>
-                  <button type="button" className="vp-undo" disabled={!!vBusy} onClick={() => setVariantFor(null)}>Cancel</button>
+                <div className="vp-edit vp-var-modal" style={{ left: pos.x, top: pos.y }}>
+                  <div className="vp-var-head" onPointerDown={onVDrag}>
+                    <b>Variant of {variantFor.name}</b>
+                    <span className="vp-hint">drag to move</span>
+                  </div>
+                  <div className="vp-var-body">
+                    {/* The base image owns the left; everything else rides right. */}
+                    <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} onClick={() => setLightbox(variantFor.image_path)} title="Click to view large" />
+                    <div className="vp-var-fields">
+                      <label className="vp-edit-field">What changes (one deliberate change)
+                        <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
+                      </label>
+                      <div className="vp-var-row">
+                        <button
+                          type="button"
+                          className="vp-undo"
+                          disabled={!(variantFor as KitObject).active_prompt}
+                          title="Append the prompt that generated the base image"
+                          onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + ((variantFor as KitObject).active_prompt || ''))}
+                        >
+                          Import original prompt
+                        </button>
+                        <select className="vp-var-model" value={vModel || (variantFor as KitObject).active_model || ''} onChange={(e) => setVModel(e.target.value)} title="Image model (defaults to the base image's model)">
+                          {IMAGE_MODELS.map((m) => (
+                            <option key={m.id} value={m.id}>{m.label}</option>
+                          ))}
+                          {(variantFor as KitObject).active_model && !IMAGE_MODELS.some((m) => m.id === (variantFor as KitObject).active_model) ? (
+                            <option value={(variantFor as KitObject).active_model}>{(variantFor as KitObject).active_model}</option>
+                          ) : null}
+                        </select>
+                      </div>
+                      <label className="vp-edit-field">Variant name
+                        <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
+                      </label>
+                      <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
+                        {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
+                      </button>
+                      {vExtrasOpen ? (
+                        <div className="vp-var-extras">
+                          {kit.filter((k) => k.image_path && k.name !== variantFor.name).map((k) => (
+                            <button
+                              key={k.name}
+                              type="button"
+                              className={`vp-var-xref ${vExtras.includes(k.name) ? 'on' : ''}`}
+                              title={k.name}
+                              onClick={() => setVExtras((cur) => (cur.includes(k.name) ? cur.filter((n) => n !== k.name) : [...cur, k.name]))}
+                            >
+                              <img src={contentUrl(k.image_path)} alt={k.name} />
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {vErr ? <p className="vp-var-err">{vErr}</p> : null}
+                      <div className="vp-edit-actions">
+                        <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
+                          {vBusy || '✦ Generate variant'}
+                        </button>
+                        <button type="button" className="vp-undo" disabled={!!vBusy} onClick={() => setVariantFor(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ) : null}
+              </>
+            )
+          })() : null}
 
           {lightbox ? (
             <div className="vp-var-overlay" onClick={() => setLightbox('')}>

@@ -1197,7 +1197,7 @@ export function WorkflowView({
                 stays untouched): after approving this step, AI prepares the next. */}
             {(activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script' || activeStep.id === 'pacing') && (
               <label
-                title="Runs right after your approval — uses model credits"
+                title="Runs right after your approval"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
                   marginTop: 16, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer',

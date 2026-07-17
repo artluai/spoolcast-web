@@ -694,7 +694,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
             label="Write it"
             busy={busy === 'ai'}
             disabled={!!busy}
-            title="AI writes the first draft from your structure and World Kit — uses model credits"
+            title="AI writes the first draft from your structure and World Kit"
             rulesFocus="story"
             onRun={(fb) => runReview(fb, true)}
           />
@@ -1035,7 +1035,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                               type="button"
                               className="save-continue"
                               disabled={!aiNote.trim() || aiCellBusy}
-                              title="AI rewrites just the outlined box — uses model credits"
+                              title="AI rewrites just the outlined box"
                               onClick={() => void runCellAI()}
                               style={{ width: 'auto', padding: '6px 12px', fontSize: 12 }}
                             >
@@ -1263,7 +1263,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     className="save-continue"
                     style={{ width: 'auto', borderRadius: '0 8px 8px 0', minWidth: 128, padding: '6px 14px', fontSize: 12 }}
                     disabled={!!busy}
-                    title="Runs every check on the current script — the code audits plus the AI reviewer grading your step rules · uses model credits"
+                    title="Runs every check on the current script — the code audits plus the AI reviewer grading your step rules"
                     onClick={() => runReview('')}
                   >
                     {busy === 'ai' ? 'Revising…' : busy === 'audit' ? 'Checking…' : '✦ Review with AI'}

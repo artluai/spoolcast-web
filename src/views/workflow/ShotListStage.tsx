@@ -537,7 +537,6 @@ export function ShotListStage({ stageId }: { stageId: string }) {
               {checking ? 'Checking…' : edited ? 'Save & re-check' : 'Re-check'}
             </button>
           ) : null}
-          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>uses model credits</span>
           {(buildJob || stageProcess) && (building || activeProcess) ? (
             <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>job {buildJob?.status || stageProcess?.status}</span>
           ) : null}
