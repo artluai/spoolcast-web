@@ -674,6 +674,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .idea-sources-caption { color: var(--ink-2); font-size: 13.5px; line-height: 1.55; margin: 8px 0 18px; }
 .file-list { display: flex; flex-direction: column; margin-bottom: 14px; }
 .file-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: start; gap: 14px; padding: 14px 0; border-top: 1px solid rgba(255,255,255,.045); }
+.file-row.has-thumb { grid-template-columns: 120px 1fr auto; align-items: center; }
+.file-thumb { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line-2); display: block; background: var(--bg-2); }
 .file-row:first-child { border-top: 0; }
 .file-icon { margin-top: 2px; color: var(--ink-3); display: grid; place-items: center; }
 .file-meta-col { min-width: 0; }
@@ -1359,9 +1361,34 @@ body.chat-pinned .detail-card.full { right: 380px; }
 /* Per-shot reference chips: the kit's image-backed refs, toggled onto the shot. */
 .vp-ref-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .vp-ref-chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); color: var(--ink-3); font-size: 11.5px; cursor: pointer; transition: border-color .15s, color .15s; }
-.vp-ref-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; display: block; }
+.vp-ref-chip img { width: 54px; height: 54px; object-fit: cover; border-radius: 7px; display: block; }
 .vp-ref-chip:hover { border-color: var(--ink-3); color: var(--ink); }
 .vp-ref-chip.on { border-color: var(--accent); color: var(--ink); background: var(--bg-3); }
+
+/* THE MAPPING BOARD (step 7): shots ↔ reference images, threads between.
+   VISUAL-FIRST RULE: the reference images are the content here — large cards,
+   not chips. */
+.vp-map { position: relative; display: grid; grid-template-columns: minmax(300px, 1fr) 300px; gap: 0 220px; align-items: start; padding: 18px 4px; }
+.vp-map-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.vp-map-svg path { fill: none; stroke: rgba(122,162,255,.16); stroke-width: 1.6; transition: stroke .15s; }
+.vp-map-svg path.lit { stroke: rgba(122,162,255,.7); stroke-width: 2; }
+.vp-map-col { display: flex; flex-direction: column; gap: 14px; position: relative; z-index: 1; }
+.vp-map-colhead { color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.vp-map-shot { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; text-align: left; padding: 13px 15px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); color: var(--ink-2); cursor: pointer; transition: border-color .15s, opacity .15s, box-shadow .15s; }
+.vp-map-shot:hover { border-color: var(--ink-3); }
+.vp-map-shot.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); color: var(--ink); }
+.vp-map-shot.dim { opacity: .45; }
+.vp-map-shotid { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent-2); }
+.vp-map-shotmeta { font-family: var(--mono); font-size: 11px; color: var(--ink-3); align-self: center; }
+.vp-map-shotwhat { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.vp-map-ref { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--bg-2); color: var(--ink-2); cursor: pointer; transition: border-color .15s, box-shadow .15s, opacity .15s; }
+.vp-map-ref img { width: 100%; height: 190px; object-fit: cover; border-radius: 9px; display: block; background: var(--bg-3); }
+.vp-map-ref span { font-family: var(--mono); font-size: 11.5px; padding: 0 4px 3px; }
+.vp-map-ref:hover { border-color: var(--ink-3); }
+.vp-map-ref.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); color: var(--ink); }
+.vp-map-ref.unused { opacity: .55; }
+.vp-map-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 18px; }
+@media (max-width: 900px) { .vp-map { grid-template-columns: 1fr 1fr; gap: 0 80px; } }
 .vp-edit input, .vp-edit textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; text-transform: none; letter-spacing: normal; resize: vertical; }
 .vp-edit input:focus, .vp-edit textarea:focus { outline: none; border-color: var(--accent); }
 .vp-json-view { max-height: 45vh; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink-2); font-family: var(--mono); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }

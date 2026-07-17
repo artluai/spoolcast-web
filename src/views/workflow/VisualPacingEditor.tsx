@@ -58,7 +58,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; chunkId: string; beatCode?: string; imageId?: string } | null>(null)
   const [editing, setEditing] = useState<EditDraft | null>(null)
-  const [view, setView] = useState<'table' | 'script'>('script')
+  // The MAPPING board is the primary view: Spoolcast is visual-first, and
+  // which reference images each shot is shown matters more than its table row.
+  const [view, setView] = useState<'table' | 'script' | 'map'>('map')
   const [activeId, setActiveId] = useState('')
   // Step-level undo lives in the step header (Undo · Previous · Next) — the
   // editor registers its undo there instead of drawing its own button.
@@ -250,6 +252,53 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [])
 
+  // MAPPING BOARD state: which shot is selected (its threads light up and
+  // ref clicks re-map it), plus the measured thread geometry. Threads are
+  // real SVG curves between DOM cards, so they are measured after paint and
+  // re-measured on resize; the equality guard stops the effect->state loop.
+  const [mapSel, setMapSel] = useState('')
+  const [mapAI, setMapAI] = useState(false)
+  const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
+  const boardRef = useRef<HTMLDivElement>(null)
+  const measureThreads = () => {
+    const board = boardRef.current
+    if (!board) return
+    const box = board.getBoundingClientRect()
+    const out: { shot: string; ref: string; d: string }[] = []
+    board.querySelectorAll<HTMLElement>('[data-mapshot]').forEach((shotEl) => {
+      const names = (shotEl.dataset.maprefs || '').split('|').filter(Boolean)
+      const a = shotEl.getBoundingClientRect()
+      for (const name of names) {
+        const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
+        if (!refEl) continue
+        const b = refEl.getBoundingClientRect()
+        const x1 = a.right - box.left
+        const y1 = a.top - box.top + a.height / 2
+        const x2 = b.left - box.left
+        const y2 = b.top - box.top + b.height / 2
+        out.push({ shot: shotEl.dataset.mapshot!, ref: name, d: `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x2 - 70} ${y2}, ${x2} ${y2}` })
+      }
+    })
+    setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
+  }
+  useEffect(() => {
+    if (view !== 'map') return
+    // Measure after paint, then again as async data (plan, kit refs, images)
+    // settles layout — the first pass can run before the cards have height.
+    const raf = requestAnimationFrame(measureThreads)
+    const timers = [120, 450, 1200].map((ms) => window.setTimeout(measureThreads, ms))
+    const ro = new ResizeObserver(() => measureThreads())
+    if (boardRef.current) ro.observe(boardRef.current)
+    window.addEventListener('resize', measureThreads)
+    return () => {
+      cancelAnimationFrame(raf)
+      timers.forEach((id) => window.clearTimeout(id))
+      ro.disconnect()
+      window.removeEventListener('resize', measureThreads)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, draft, mapSel, kitRefs])
+
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
 
@@ -302,6 +351,46 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setStageDraft(stageId, serializePacingPlan(p))
   }
   const clone = (): PacingPlan => JSON.parse(JSON.stringify(plan)) as PacingPlan
+
+  // MAPPING BOARD actions. Toggling re-maps one shot's refs through the same
+  // parse→mutate→serialize path as every other edit (step Undo covers it).
+  const refsOf = (img: { refs: string }) => img.refs.split(',').map((s) => s.trim()).filter(Boolean)
+  const toggleMapRef = (imageId: string, name: string) => {
+    const next = clone()
+    for (const c of next.chunks)
+      for (const b of c.beats)
+        for (const i of b.images)
+          if (i.id === imageId) {
+            const cur = refsOf(i)
+            i.refs = (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]).join(', ')
+          }
+    apply(next)
+  }
+  // ✦ Let AI decide: the engine proposes a full shot→refs mapping (paid call,
+  // suggest_ref_map). It is APPLIED as one undoable edit — Undo is the veto.
+  const runMapAI = async () => {
+    setMapAI(true)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'suggest_ref_map', allow_cost: true }),
+      })
+      const out = await r.json().catch(() => null)
+      const mapping = out?.data?.mapping
+      if (!r.ok || out?.ok === false || !mapping) return
+      const next = clone()
+      for (const c of next.chunks)
+        for (const b of c.beats)
+          for (const i of b.images)
+            if (Array.isArray(mapping[i.id])) i.refs = mapping[i.id].join(', ')
+      apply(next)
+    } catch {
+      /* engine offline — the board still maps by hand */
+    } finally {
+      setMapAI(false)
+    }
+  }
 
   if (!wellFormed || raw) {
     // RAW MODE (or the plan doesn't parse): edit the markdown directly. The
@@ -1084,6 +1173,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       <div className="vp-viewbar">
         <h4 className="vp-sub-h">Pacing</h4>
         <div className="vp-viewtoggle">
+          <button type="button" className={view === 'map' ? 'on' : ''} onClick={() => setView('map')}>Mapping</button>
           <button type="button" className={view === 'script' ? 'on' : ''} onClick={() => setView('script')}>Script</button>
           <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
         </div>
@@ -1097,6 +1187,62 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           Edit as text
         </button>
       </div>
+
+      {view === 'map' ? (
+        <div className="vp-map" ref={boardRef}>
+          <svg className="vp-map-svg">
+            {threads.map((th, i) => {
+              const lit = !mapSel || mapSel === th.shot
+              return <path key={i} d={th.d} className={lit ? 'lit' : ''} />
+            })}
+          </svg>
+          <div className="vp-map-col vp-map-shots">
+            <span className="vp-map-colhead">Shots</span>
+            {images.map((img) => (
+              <button
+                key={img.id}
+                type="button"
+                data-mapshot={img.id}
+                data-maprefs={refsOf(img).join('|')}
+                className={`vp-map-shot ${mapSel === img.id ? 'on' : ''} ${mapSel && mapSel !== img.id ? 'dim' : ''}`}
+                onClick={() => setMapSel((cur) => (cur === img.id ? '' : img.id))}
+              >
+                <span className="vp-map-shotid">{img.id}</span>
+                <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
+                <span className="vp-map-shotwhat">{img.what}</span>
+              </button>
+            ))}
+          </div>
+          <div className="vp-map-col vp-map-refs">
+            <span className="vp-map-colhead">World Kit references</span>
+            {kitRefs.map((kr) => {
+              const linkedToSel = mapSel ? refsOf(images.find((i) => i.id === mapSel) ?? { refs: '' }).includes(kr.name) : false
+              const linkedAtAll = images.some((i) => refsOf(i).includes(kr.name))
+              return (
+                <button
+                  key={kr.name}
+                  type="button"
+                  data-mapref={kr.name}
+                  className={`vp-map-ref ${linkedToSel ? 'on' : ''} ${!linkedAtAll && !mapSel ? 'unused' : ''}`}
+                  title={mapSel ? (linkedToSel ? `Detach ${kr.name} from ${mapSel}` : `Attach ${kr.name} to ${mapSel}`) : 'Select a shot on the left first'}
+                  onClick={() => mapSel && toggleMapRef(mapSel, kr.name)}
+                >
+                  <img src={contentUrl(kr.path)} alt={kr.name} loading="lazy" />
+                  <span>{kr.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="vp-map-foot">
+            <span className="vp-hint">
+              {mapSel ? `Click a reference to attach or detach it from ${mapSel}.` : 'Click a shot, then click references to re-map it. Threads show what the generator will be shown.'}
+            </span>
+            <button type="button" className="ai-btn" disabled={mapAI} onClick={runMapAI}>
+              <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI decide'}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {view === 'table' ? (
         <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: listOverflows ? '24vh' : 0 }}>

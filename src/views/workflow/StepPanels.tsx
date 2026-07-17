@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
@@ -1598,10 +1598,16 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         {files.length ? (
           <div className="file-list">
             {files.map((file) => (
-              <div className="file-row" key={file.id}>
-                <span className="file-icon">
-                  <FileGlyph kind={file.kind} />
-                </span>
+              <div className={`file-row ${file.kind === 'image' ? 'has-thumb' : ''}`} key={file.id}>
+                {/* VISUAL-FIRST RULE: an uploaded image shows AS an image —
+                    a real preview, not an icon standing in for one. */}
+                {file.kind === 'image' ? (
+                  <img className="file-thumb" src={contentUrl(file.id)} alt={file.name} loading="lazy" />
+                ) : (
+                  <span className="file-icon">
+                    <FileGlyph kind={file.kind} />
+                  </span>
+                )}
                 <span className="file-meta-col">
                   <span className="file-name">{file.name}</span>
                   <span className="file-desc">
