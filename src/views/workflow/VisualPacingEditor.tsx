@@ -252,52 +252,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [])
 
-  // MAPPING BOARD state: which shot is selected (its threads light up and
-  // ref clicks re-map it), plus the measured thread geometry. Threads are
-  // real SVG curves between DOM cards, so they are measured after paint and
-  // re-measured on resize; the equality guard stops the effect->state loop.
+  // MAPPING BOARD state: which shot is selected — palette clicks re-map it.
   const [mapSel, setMapSel] = useState('')
   const [mapAI, setMapAI] = useState(false)
-  const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
-  const boardRef = useRef<HTMLDivElement>(null)
-  const measureThreads = () => {
-    const board = boardRef.current
-    if (!board) return
-    const box = board.getBoundingClientRect()
-    const out: { shot: string; ref: string; d: string }[] = []
-    board.querySelectorAll<HTMLElement>('[data-mapshot]').forEach((shotEl) => {
-      const names = (shotEl.dataset.maprefs || '').split('|').filter(Boolean)
-      const a = shotEl.getBoundingClientRect()
-      for (const name of names) {
-        const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
-        if (!refEl) continue
-        const b = refEl.getBoundingClientRect()
-        const x1 = a.right - box.left
-        const y1 = a.top - box.top + a.height / 2
-        const x2 = b.left - box.left
-        const y2 = b.top - box.top + b.height / 2
-        out.push({ shot: shotEl.dataset.mapshot!, ref: name, d: `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x2 - 70} ${y2}, ${x2} ${y2}` })
-      }
-    })
-    setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
-  }
-  useEffect(() => {
-    if (view !== 'map') return
-    // Measure after paint, then again as async data (plan, kit refs, images)
-    // settles layout — the first pass can run before the cards have height.
-    const raf = requestAnimationFrame(measureThreads)
-    const timers = [120, 450, 1200].map((ms) => window.setTimeout(measureThreads, ms))
-    const ro = new ResizeObserver(() => measureThreads())
-    if (boardRef.current) ro.observe(boardRef.current)
-    window.addEventListener('resize', measureThreads)
-    return () => {
-      cancelAnimationFrame(raf)
-      timers.forEach((id) => window.clearTimeout(id))
-      ro.disconnect()
-      window.removeEventListener('resize', measureThreads)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, draft, mapSel, kitRefs])
 
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
@@ -352,19 +309,44 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }
   const clone = (): PacingPlan => JSON.parse(JSON.stringify(plan)) as PacingPlan
 
-  // MAPPING BOARD actions. Toggling re-maps one shot's refs through the same
-  // parse→mutate→serialize path as every other edit (step Undo covers it).
-  const refsOf = (img: { refs: string }) => img.refs.split(',').map((s) => s.trim()).filter(Boolean)
-  const toggleMapRef = (imageId: string, name: string) => {
+  // MAPPING BOARD actions — all through the same parse→mutate→serialize path
+  // as every other edit (step Undo covers them). The refs cell is an ORDERED
+  // comma list; `^name` marks the shot's FIRST FRAME (the generator opens on
+  // that exact image — mirrors _first_frame_from_cell in build_shot_list.py).
+  const refsOf = (img: { refs: string }) => img.refs.split(',').map((s) => s.trim().replace(/^\^/, '')).filter(Boolean)
+  const firstFrameOf = (img: { refs: string }) =>
+    img.refs.split(',').map((s) => s.trim()).find((s) => s.startsWith('^'))?.slice(1) ?? ''
+  const writeRefs = (imageId: string, names: string[], firstFrame: string) => {
     const next = clone()
     for (const c of next.chunks)
       for (const b of c.beats)
         for (const i of b.images)
-          if (i.id === imageId) {
-            const cur = refsOf(i)
-            i.refs = (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]).join(', ')
-          }
+          if (i.id === imageId) i.refs = names.map((n) => (n === firstFrame ? `^${n}` : n)).join(', ')
     apply(next)
+  }
+  const toggleMapRef = (imageId: string, name: string) => {
+    const img = images.find((i) => i.id === imageId)
+    if (!img) return
+    const cur = refsOf(img)
+    const ff = firstFrameOf(img)
+    const nextNames = cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]
+    writeRefs(imageId, nextNames, nextNames.includes(ff) ? ff : '')
+  }
+  const moveMapRef = (imageId: string, name: string, dir: -1 | 1) => {
+    const img = images.find((i) => i.id === imageId)
+    if (!img) return
+    const cur = refsOf(img)
+    const at = cur.indexOf(name)
+    const to = at + dir
+    if (at < 0 || to < 0 || to >= cur.length) return
+    const nextNames = [...cur]
+    ;[nextNames[at], nextNames[to]] = [nextNames[to], nextNames[at]]
+    writeRefs(imageId, nextNames, firstFrameOf(img))
+  }
+  const setFirstFrame = (imageId: string, name: string) => {
+    const img = images.find((i) => i.id === imageId)
+    if (!img) return
+    writeRefs(imageId, refsOf(img), firstFrameOf(img) === name ? '' : name)
   }
   // ✦ Let AI decide: the engine proposes a full shot→refs mapping (paid call,
   // suggest_ref_map). It is APPLIED as one undoable edit — Undo is the veto.
@@ -1189,57 +1171,69 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'map' ? (
-        <div className="vp-map" ref={boardRef}>
-          <svg className="vp-map-svg">
-            {threads.map((th, i) => {
-              const lit = !mapSel || mapSel === th.shot
-              return <path key={i} d={th.d} className={lit ? 'lit' : ''} />
-            })}
-          </svg>
-          <div className="vp-map-col vp-map-shots">
-            <span className="vp-map-colhead">Shots</span>
-            {images.map((img) => (
-              <button
-                key={img.id}
-                type="button"
-                data-mapshot={img.id}
-                data-maprefs={refsOf(img).join('|')}
-                className={`vp-map-shot ${mapSel === img.id ? 'on' : ''} ${mapSel && mapSel !== img.id ? 'dim' : ''}`}
-                onClick={() => setMapSel((cur) => (cur === img.id ? '' : img.id))}
-              >
-                <span className="vp-map-shotid">{img.id}</span>
-                <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
-                <span className="vp-map-shotwhat">{img.what}</span>
-              </button>
-            ))}
-          </div>
-          <div className="vp-map-col vp-map-refs">
-            <span className="vp-map-colhead">World Kit references</span>
+        <div className="vp-map">
+          {/* THE KIT, ALWAYS IN REACH: every reference at once, sticky while
+              the shots scroll. Native aspect ratios — never cropped to a box. */}
+          <div className="vp-map-palette">
             {kitRefs.map((kr) => {
-              const linkedToSel = mapSel ? refsOf(images.find((i) => i.id === mapSel) ?? { refs: '' }).includes(kr.name) : false
-              const linkedAtAll = images.some((i) => refsOf(i).includes(kr.name))
+              const sel = images.find((i) => i.id === mapSel)
+              const linkedToSel = sel ? refsOf(sel).includes(kr.name) : false
               return (
                 <button
                   key={kr.name}
                   type="button"
-                  data-mapref={kr.name}
-                  className={`vp-map-ref ${linkedToSel ? 'on' : ''} ${!linkedAtAll && !mapSel ? 'unused' : ''}`}
-                  title={mapSel ? (linkedToSel ? `Detach ${kr.name} from ${mapSel}` : `Attach ${kr.name} to ${mapSel}`) : 'Select a shot on the left first'}
+                  className={`vp-map-pal ${linkedToSel ? 'on' : ''}`}
+                  title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : 'Select a shot below first'}
                   onClick={() => mapSel && toggleMapRef(mapSel, kr.name)}
                 >
-                  <img src={contentUrl(kr.path)} alt={kr.name} loading="lazy" />
+                  <img src={contentUrl(kr.path)} alt={kr.name} />
                   <span>{kr.name}</span>
                 </button>
               )
             })}
-          </div>
-          <div className="vp-map-foot">
-            <span className="vp-hint">
-              {mapSel ? `Click a reference to attach or detach it from ${mapSel}.` : 'Click a shot, then click references to re-map it. Threads show what the generator will be shown.'}
-            </span>
-            <button type="button" className="ai-btn" disabled={mapAI} onClick={runMapAI}>
+            <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
               <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI decide'}
             </button>
+          </div>
+
+          {/* ONE SHOT, ONE PIECE: the beat and the exact images its generation
+              will be shown, together in one row, in playback order. */}
+          <div className="vp-map-rows">
+            {images.map((img) => {
+              const names = refsOf(img)
+              const ff = firstFrameOf(img)
+              const on = mapSel === img.id
+              return (
+                <div key={img.id} className={`vp-map-row ${on ? 'on' : ''}`} onClick={() => setMapSel(on ? '' : img.id)}>
+                  <div className="vp-map-rowhead">
+                    <span className="vp-map-shotid">{img.id}</span>
+                    <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
+                    <span className="vp-map-shotwhat">{img.what}</span>
+                  </div>
+                  <div className="vp-map-attached">
+                    {names.length === 0 ? <span className="vp-hint">No references — {on ? 'click one above' : 'select this shot, then click references above'}.</span> : null}
+                    {names.map((name, idx) => {
+                      const kit = kitRefs.find((k) => k.name === name)
+                      return (
+                        <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`} onClick={(e) => e.stopPropagation()}>
+                          <span className="vp-map-ord">{idx + 1}</span>
+                          {kit ? <img src={contentUrl(kit.path)} alt={name} /> : <span className="vp-map-noimg">{name}</span>}
+                          <figcaption>
+                            <span className="vp-map-attname">{name}</span>
+                            <span className="vp-map-attbtns">
+                              <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                              <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                              <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st frame</button>
+                              <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                            </span>
+                          </figcaption>
+                        </figure>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       ) : null}
