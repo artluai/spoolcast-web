@@ -305,6 +305,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     wall.style.columnWidth = `${Math.max(170, Math.min(290, Math.floor(W / cols) - 12))}px`
     const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
     if (list) list.style.maxHeight = `${H}px`
+    // Balanced columns often need less than the full window — shrink the
+    // wall to what the tallest column actually uses so nothing trails empty.
+    requestAnimationFrame(() => {
+      const used = wall.scrollHeight
+      if (used > 60 && used < H - 24) wall.style.height = `${used + 4}px`
+      measureThreads()
+    })
     measureThreads()
   }
 
