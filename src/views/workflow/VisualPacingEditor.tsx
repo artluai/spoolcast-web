@@ -229,7 +229,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // THE KIT, AS OBJECTS: every World Kit reference — kind, description, and
   // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
   // real kit object and gets a real card; it just has no image yet.
-  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string }
+  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string }
   const [kit, setKit] = useState<KitObject[]>([])
   useEffect(() => {
     let live = true
@@ -257,6 +257,72 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // null = no user preference yet: hidden by default on the mapping board
   // (the board is the star there), shown by default on script/table.
   const [tlOpen, setTlOpen] = useState<boolean | null>(null)
+  // MASTER VARIANT creation: same shot, one deliberate change, generated
+  // with the master's picked image as the base reference.
+  const [variantFor, setVariantFor] = useState<KitObject | null>(null)
+  const [vName, setVName] = useState('')
+  const [vInstr, setVInstr] = useState('')
+  const [vExtras, setVExtras] = useState<string[]>([])
+  const [vBusy, setVBusy] = useState('')
+  const [vErr, setVErr] = useState('')
+  const refetchKit = async () => {
+    const out = await fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
+    return (out?.data?.kit ?? []) as KitObject[]
+  }
+  const createVariant = async () => {
+    if (!variantFor || !vInstr.trim()) return
+    const name = (vName.trim() || `${variantFor.name}--${vInstr.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`).replace(/-+$/, '')
+    setVErr('')
+    setVBusy('Registering…')
+    const reg = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'register_master_variant', master: variantFor.name, name, instruction: vInstr.trim() }),
+    }).then((r) => r.json()).catch(() => null)
+    if (!reg?.ok) {
+      setVBusy('')
+      setVErr(reg?.error || 'Could not register the variant.')
+      return
+    }
+    setVBusy('Generating — the master is the base reference…')
+    const prompt =
+      `Use reference image 1 as the exact base shot: same person, same clothes, same setting, same framing, same light, same casual phone-camera look. ` +
+      `ONE change only: ${vInstr.trim()}. Everything else stays exactly identical to the reference.`
+    const gen = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'generate_worldkit_ref',
+        ref: name,
+        prompt,
+        ref_images: [variantFor.image_path, ...vExtras.map((n) => kit.find((k) => k.name === n)?.image_path).filter(Boolean)],
+        allow_cost: true,
+      }),
+    }).then((r) => r.json()).catch(() => null)
+    if (!gen?.ok) {
+      setVBusy('')
+      setVErr(gen?.error || gen?.message || 'Generation did not start.')
+      return
+    }
+    for (let i = 0; i < 40; i += 1) {
+      await new Promise((r) => window.setTimeout(r, 6000))
+      const fresh = await refetchKit()
+      if (fresh.find((k) => k.name === name)?.image_path) {
+        setVBusy('')
+        setVariantFor(null)
+        setVName('')
+        setVInstr('')
+        setVExtras([])
+        return
+      }
+      setVBusy(`Generating… (~${Math.round(((i + 1) * 6) / 60)}min)`)
+    }
+    setVBusy('')
+    setVErr('Still generating — it will appear in the kit when done.')
+  }
   const tlShown = tlOpen ?? view !== 'map'
   const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
   const boardRef = useRef<HTMLDivElement>(null)
@@ -558,7 +624,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // column width); a prompt-only object gets an equally-weighted text card —
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
-    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : 'REFERENCE'
+    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : 'REFERENCE'
   const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number) => {
     const sel = images.find((i) => i.id === mapSel)
     const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
@@ -569,7 +635,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         type="button"
         data-mapref={k.name}
         style={w ? { width: w } : undefined}
-        className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
+        className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' || k.kind === 'variant' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
@@ -584,6 +650,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         >
           hide
         </span>
+        {k.kind === 'master' && k.image_path ? (
+          <span
+            className="vp-map-mkvariant"
+            title="Make a VARIANT of this master — same shot, one deliberate change (generated with this image as the base reference)"
+            onClick={(e) => {
+              e.stopPropagation()
+              setVariantFor(k)
+            }}
+          >
+            + variant
+          </span>
+        ) : null}
         {k.image_path ? (
           <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
@@ -1259,7 +1337,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <button type="button" className={view === 'script' ? 'on' : ''} onClick={() => setView('script')}>Script</button>
           <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
         </div>
-        <button type="button" className="vp-tl-toggle" onClick={() => setTlOpen(!tlShown)}>
+        <button type="button" className="vp-undo" style={{ marginLeft: 8 }} onClick={() => setTlOpen(!tlShown)}>
           {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
         </button>
         <button
@@ -1468,9 +1546,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-map-shots">
             <div className="vp-map-shotshead">
               <span className="vp-map-colhead">Shots</span>
-              <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
-                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
-              </button>
             </div>
             <div className="vp-map-shotlist">
               {images.map((img) => {
@@ -1544,17 +1619,25 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           <div className="vp-map-kit">
             <div className="vp-map-kithead">
               <span className="vp-map-colhead">World Kit</span>
-              {hiddenRefs.length ? (
-                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
-                  Show all · {hiddenRefs.length} hidden
+              <span className="vp-map-kitbtns">
+                {hiddenRefs.length ? (
+                  <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
+                    Show all · {hiddenRefs.length} hidden
+                  </button>
+                ) : null}
+                <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
+                  <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
                 </button>
-              ) : null}
+              </span>
             </div>
             <div className="vp-map-wall">
               {(() => {
-                const sorted = [...kit]
-                  .filter((k) => !hiddenRefs.includes(k.name))
-                  .sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
+                const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
+                const masters = visible.filter((k) => k.kind === 'master')
+                const sorted = [
+                  ...masters.flatMap((m) => [m, ...visible.filter((k) => k.kind === 'variant' && k.variant_of === m.name)]),
+                  ...visible.filter((k) => k.kind !== 'master' && !(k.kind === 'variant' && masters.some((m) => m.name === k.variant_of))),
+                ]
                 const { rows } = packKit(sorted)
                 return rows.map((row, i) => (
                   <div className="vp-map-krow" key={i}>
@@ -1564,6 +1647,44 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
               })()}
             </div>
           </div>
+
+          {variantFor ? (
+            <div className="vp-var-overlay" onClick={() => !vBusy && setVariantFor(null)}>
+              <div className="vp-var-modal" onClick={(e) => e.stopPropagation()}>
+                <h4>Variant of {variantFor.name}</h4>
+                <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} />
+                <label className="vp-edit-field">What changes (one deliberate change)
+                  <textarea rows={2} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
+                </label>
+                <label className="vp-edit-field">Variant name
+                  <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
+                </label>
+                {kit.filter((k) => k.image_path && k.name !== variantFor.name).length ? (
+                  <div className="vp-var-extras">
+                    <span className="vp-map-colhead">Extra references (optional)</span>
+                    {kit.filter((k) => k.image_path && k.name !== variantFor.name).map((k) => (
+                      <button
+                        key={k.name}
+                        type="button"
+                        className={`vp-ref-chip ${vExtras.includes(k.name) ? 'on' : ''}`}
+                        onClick={() => setVExtras((cur) => (cur.includes(k.name) ? cur.filter((n) => n !== k.name) : [...cur, k.name]))}
+                      >
+                        <img src={contentUrl(k.image_path)} alt="" />
+                        <span>{k.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {vErr ? <p className="vp-var-err">{vErr}</p> : null}
+                <div className="vp-edit-actions">
+                  <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
+                    {vBusy || '✦ Generate variant'}
+                  </button>
+                  <button type="button" className="vp-undo" disabled={!!vBusy} onClick={() => setVariantFor(null)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
