@@ -276,30 +276,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     })
     setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
   }
-  // EQUAL SQUARE FOOTAGE, SIZED TO FIT: every kit image gets the same AREA
-  // whatever its aspect ratio (masters 1.35x), and that area is COMPUTED so
-  // the whole kit fits the viewport with NO scroll — if the kit column needs
-  // a scrollbar, the layout has failed. Ratios are remembered per image on
-  // load; the packer solves for area from the column's real width x height.
-  const kitAreaRef = useRef(16000)
-  const applyArea = (im: HTMLImageElement) => {
-    const r = Number(im.dataset.ratio) || 1
-    const boost = im.dataset.master === '1' ? 1.35 : 1
-    let h = Math.sqrt((kitAreaRef.current * boost) / r)
-    // A panorama at equal area could outgrow its column and overlap
-    // neighbours — cap the width and give up a little area instead.
-    if (h * r > 380) h = 380 / r
-    im.style.height = `${Math.round(h)}px`
-    im.style.width = `${Math.round(h * r)}px`
-  }
-  const onKitImgLoad = (isMaster: boolean) => (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const im = e.currentTarget
-    im.dataset.ratio = String(im.naturalWidth / im.naturalHeight || 1)
-    if (isMaster) im.dataset.master = '1'
-    applyArea(im)
-    fitKit()
-  }
-  // Attached (expanded-shot) images keep a fixed comfortable area.
+  // Attached (expanded-shot) images share one comfortable footprint.
   const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
     const im = e.currentTarget
     const r = im.naturalWidth / im.naturalHeight || 1
@@ -307,37 +284,25 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     im.style.height = `${Math.round(h)}px`
     im.style.width = `${Math.round(h * r)}px`
   }
+  // THE KIT IS MASONRY (the asset-library layout): uniform column width,
+  // every card exactly that wide, height from the image's own ratio — packed
+  // tight, structurally incapable of overlap, no JS image sizing at all.
+  // Fixed height = the window; content fills columns downward and overflows
+  // HORIZONTALLY when a kit outgrows the screen. Never a vertical scrollbar.
   const fitKit = () => {
     const board = boardRef.current
     const kitEl = board?.querySelector<HTMLElement>('.vp-map-kit')
+    const wall = kitEl?.querySelector<HTMLElement>('.vp-map-wall')
     const scroller = board?.closest('.workflow-view') as HTMLElement | null
-    if (!board || !kitEl || !scroller) return
+    if (!board || !kitEl || !wall || !scroller) return
     const H = Math.max(scroller.clientHeight, document.documentElement.clientHeight, 620) - 96
-    const W = kitEl.clientWidth || 600
     kitEl.style.maxHeight = `${H}px`
-    const imgs = [...kitEl.querySelectorAll<HTMLImageElement>('img[data-ratio]')]
-    const textCards = kitEl.querySelectorAll('.vp-map-prompttext').length
-    // Budget: usable pixels minus what the text cards and card chrome eat.
-    const budget = W * H * 0.62 - textCards * 14000
-    const weight = imgs.reduce((n, im) => n + (im.dataset.master === '1' ? 1.35 : 1), 0) || 1
-    let area = Math.max(15000, Math.min(46000, budget / weight))
-    // The estimate is only a starting point — VERIFY against the real layout
-    // and shrink until the kit truly fits VERTICALLY. Below a floor the
-    // images stop being useful, so a huge kit overflows HORIZONTALLY instead
-    // (2-row rail, scroll sideways) — never a vertical scrollbar.
-    for (let i = 0; i < 6; i += 1) {
-      kitAreaRef.current = area
-      imgs.forEach(applyArea)
-      if (kitEl.scrollHeight <= kitEl.clientHeight + 2) break
-      area = Math.max(15000, area * Math.max(0.66, kitEl.clientHeight / kitEl.scrollHeight))
-      if (area <= 15001) break
-    }
-    kitAreaRef.current = area
-    imgs.forEach(applyArea)
-    const wall = kitEl.querySelector<HTMLElement>('.vp-map-wall')
-    wall?.classList.toggle('h-scroll', kitEl.scrollHeight > kitEl.clientHeight + 2)
-    // The shots column scrolls on its own (a 20-minute video has more shots
-    // than any screen) while the kit stays put beside it.
+    wall.style.height = `${H - 26}px`
+    const W = kitEl.clientWidth || 900
+    const n = wall.querySelectorAll('.vp-map-card').length || 1
+    // Aim for ~2 cards per column; clamp to sane card widths.
+    const cols = Math.max(2, Math.min(6, Math.ceil(n / 2)))
+    wall.style.columnWidth = `${Math.max(170, Math.min(290, Math.floor(W / cols) - 12))}px`
     const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
     if (list) list.style.maxHeight = `${H}px`
     measureThreads()
@@ -498,7 +463,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={k.name} onLoad={onKitImgLoad(k.kind === 'master')} />
+          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={() => measureThreads()} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}

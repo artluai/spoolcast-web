@@ -1409,10 +1409,11 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-kit { position: sticky; top: 4px; align-self: start; z-index: 1; display: flex; flex-direction: column; overflow: hidden; }
 .vp-map-card.is-master { border-color: color-mix(in srgb, var(--accent-2) 50%, var(--line-2)); background: #232b3d; }
 .vp-map-card.is-master.is-text .vp-map-chip { background: #161c2c; }
-.vp-map-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
-.vp-map-wall.h-scroll { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; grid-template-rows: repeat(2, min-content); align-items: start; justify-content: start; overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; }
-.vp-map-card { position: relative; display: inline-block; width: fit-content; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
-.vp-map-card img { display: block; }
+/* Masonry: JS sets column-width and a fixed height; content fills columns
+   top-to-bottom and grows SIDEWAYS past the screen — never down. */
+.vp-map-wall { column-gap: 10px; column-fill: auto; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+.vp-map-card { position: relative; display: block; width: 100%; break-inside: avoid; margin: 0 0 10px; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
+.vp-map-card img { display: block; width: 100%; height: auto; }
 .vp-map-card:hover { border-color: var(--ink-3); }
 .vp-map-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 .vp-map-card.dim { opacity: .58; }
@@ -1426,7 +1427,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-chip.k-prop { color: #f2c66d; }
 .vp-map-cardname { display: block; padding: 9px 12px 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vp-map-card img + .vp-map-cardname { position: absolute; left: 0; right: 0; bottom: 0; padding-top: 26px; background: linear-gradient(transparent, rgba(8,10,15,.88)); color: var(--ink); }
-.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 9; -webkit-box-orient: vertical; overflow: hidden; width: 170px; padding: 7px 10px 0; color: var(--ink-3); font-size: 10px; line-height: 1.45; mask-image: linear-gradient(180deg, #000 62%, transparent 97%); -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 97%); }
+.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 9; -webkit-box-orient: vertical; overflow: hidden; padding: 7px 10px 0; color: var(--ink-3); font-size: 10px; line-height: 1.45; mask-image: linear-gradient(180deg, #000 62%, transparent 97%); -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 97%); }
 .vp-map-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; }
 .vp-edit input, .vp-edit textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; text-transform: none; letter-spacing: normal; resize: vertical; }
 .vp-edit input:focus, .vp-edit textarea:focus { outline: none; border-color: var(--accent); }
