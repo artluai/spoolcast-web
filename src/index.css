@@ -1380,7 +1380,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-var-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(6,8,13,.7); backdrop-filter: blur(4px); }
 .vp-var-modal { width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; margin: 0; display: flex; flex-direction: column; gap: 12px; }
 .vp-var-modal h4 { margin: 0; font-size: 14px; font-family: var(--mono); color: var(--ink); }
-.vp-var-master { max-height: 240px; width: auto; max-width: 100%; align-self: center; border-radius: 10px; }
+.vp-var-master { max-height: 52vh; width: auto; max-width: 100%; align-self: center; border-radius: 10px; }
+.vp-var-nameline { display: flex; align-items: flex-end; gap: 10px; }
+.vp-var-nameline .vp-edit-field { flex: 1; }
+.vp-var-nameline .vp-undo { margin-bottom: 2px; white-space: nowrap; }
 .vp-var-extras { display: flex; flex-wrap: wrap; gap: 8px; }
 .vp-var-err { margin: 0; color: #ff9d9d; font-size: 12px; }
 .vp-map-grpchip { font-family: var(--mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-2); border: 1px solid color-mix(in srgb, var(--accent-2) 45%, transparent); border-radius: 6px; padding: 2px 7px; }
@@ -1445,8 +1448,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
    top-to-bottom and grows SIDEWAYS past the screen — never down. */
 /* Explicit columns (JS shortest-column packing) — flex row of stacks; a
    kit too large for the window grows columns sideways and scrolls. */
-.vp-map-wall { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
-.vp-map-krow { display: flex; align-items: flex-start; gap: 10px; }
+.vp-map-wall { overflow: hidden; }
 .vp-map-kithead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .vp-map-showall { border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); border-radius: 7px; font-family: var(--mono); font-size: 10.5px; padding: 4px 10px; cursor: pointer; margin-bottom: 10px; }
 .vp-map-showall:hover { color: var(--ink); border-color: var(--ink-3); }
@@ -1456,7 +1458,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-cardacts span:hover { color: var(--ink); }
 .vp-map-card.is-text .vp-map-cardacts { bottom: 8px; }
 .vp-map-card { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
-.vp-map-card img { display: block; width: 100%; height: auto; }
+.vp-map-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .vp-map-card:hover { border-color: var(--ink-3); }
 .vp-map-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 .vp-map-card.dim { opacity: .58; }
@@ -1470,7 +1472,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-chip.k-prop { color: #f2c66d; }
 .vp-map-cardname { display: block; padding: 9px 12px 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vp-map-card img + .vp-map-cardname { position: absolute; left: 0; right: 0; bottom: 0; padding-top: 26px; background: linear-gradient(transparent, rgba(8,10,15,.88)); color: var(--ink); }
-.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 12; -webkit-box-orient: vertical; overflow: hidden; padding: 7px 10px 0; color: var(--ink-3); font-size: 10px; line-height: 1.45; mask-image: linear-gradient(180deg, #000 62%, transparent 97%); -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 97%); }
+.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; padding: 6px 10px 0; color: var(--ink-3); font-size: 10px; line-height: 1.45; mask-image: linear-gradient(180deg, #000 58%, transparent 96%); -webkit-mask-image: linear-gradient(180deg, #000 58%, transparent 96%); }
 .vp-map-card.is-text { overflow: hidden; }
 .vp-map-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; }
 .vp-edit input, .vp-edit textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; text-transform: none; letter-spacing: normal; resize: vertical; }

@@ -237,7 +237,31 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (!live) return
-        if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
+        if (!Array.isArray(out?.data?.kit)) return
+        const kitArr = out.data.kit as KitObject[]
+        setKit(kitArr)
+        // Measure every image OFF-DOM in one batch and commit ratios once.
+        // Measuring via the cards' own onLoad re-packed the wall per image,
+        // React remounted the migrating cards, their loads restarted, and
+        // the loop meant no image ever finished. One batch, one commit.
+        Promise.allSettled(
+          kitArr
+            .filter((k) => k.image_path)
+            .map(
+              (k) =>
+                new Promise<[string, number]>((resolve, reject) => {
+                  const im = new Image()
+                  im.onload = () => resolve([k.name, im.naturalHeight / im.naturalWidth || 1.25])
+                  im.onerror = reject
+                  im.src = contentUrl(k.image_path)
+                }),
+            ),
+        ).then((results) => {
+          if (!live) return
+          const next: Record<string, number> = {}
+          for (const r of results) if (r.status === 'fulfilled') next[r.value[0]] = r.value[1]
+          if (Object.keys(next).length) setImgRatios((cur) => ({ ...cur, ...next }))
+        })
       })
       .catch(() => {
         /* engine offline — the free-text refs field still works */
@@ -263,6 +287,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [vName, setVName] = useState('')
   const [vInstr, setVInstr] = useState('')
   const [vExtras, setVExtras] = useState<string[]>([])
+  const [vExtrasOpen, setVExtrasOpen] = useState(false)
   const [vBusy, setVBusy] = useState('')
   const [vErr, setVErr] = useState('')
   // Lightbox: any kit/attachment image, full size.
@@ -439,9 +464,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // 1.35A; text objects a fixed sensible card), rows shelf-pack across the
   // region, binary search on A. Wide images come out wide, portraits tall,
   // squares square — and they are as big as the space mathematically allows.
-  const TEXT_W = 232
-  const TEXT_H = 170
-  type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number }
+  // Text objects are SECOND-CLASS visually: small, fixed, never inflated.
+  // Images are what the space is for.
+  const TEXT_W = 200
+  const TEXT_H = 122
+  type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number; x: number; y: number }
   const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
     const W = Math.max(320, kitDims.w)
     const HB = Math.max(240, kitDims.h - 8)
@@ -461,20 +488,32 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           rows.push([])
           x = 0
         }
-        rows[rows.length - 1].push({ k, w, h })
+        rows[rows.length - 1].push({ k, w, h, x: 0, y: 0 })
         x += w + 10
       }
-      // JUSTIFY: scale every row to end flush with the region's right edge —
-      // ragged rows are where the dead space was creeping back in. Text cards
-      // scale too (their width is a layout choice, not content truth).
+      // JUSTIFY, IMAGES FIRST: each row ends flush with the right edge, and
+      // ONLY the images stretch to absorb the leftover — text cards stay at
+      // their small fixed size. Scaling text up was the mistake that made
+      // text huge and images small; the space belongs to the pictures.
       let totalH = 0
       for (const row of rows) {
-        const used = row.reduce((n, it) => n + it.w, 0)
-        const f = Math.min(1.6, Math.max(0.8, (W - (row.length - 1) * 10) / Math.max(1, used)))
+        const gapW = (row.length - 1) * 10
+        const imgs = row.filter((it) => it.k.image_path)
+        const textW = row.filter((it) => !it.k.image_path).reduce((n, it) => n + it.w, 0)
+        const imgW = imgs.reduce((n, it) => n + it.w, 0)
+        if (imgW > 0) {
+          const f = Math.min(2.4, Math.max(0.85, (W - gapW - textW) / imgW))
+          for (const it of imgs) {
+            it.w = Math.round(it.w * f)
+            it.h = Math.round(it.h * f)
+          }
+        }
         let rowH = 0
+        let x = 0
         for (const it of row) {
-          it.w = Math.round(it.w * f)
-          it.h = Math.round(it.h * f)
+          it.x = x
+          it.y = totalH
+          x += it.w + 10
           rowH = Math.max(rowH, it.h)
         }
         totalH += rowH + 10
@@ -637,7 +676,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
     kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : 'REFERENCE'
-  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number, h?: number) => {
+  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number, h?: number, x?: number, y?: number) => {
     const sel = images.find((i) => i.id === mapSel)
     const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
     const linkedAtAll = images.some((i) => refsOf(i).includes(k.name))
@@ -646,7 +685,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         key={k.name}
         type="button"
         data-mapref={k.name}
-        style={w ? { width: w, ...(k.image_path ? {} : { height: h }) } : undefined}
+        style={w ? { position: 'absolute', left: x, top: y, width: w, height: h, overflow: 'hidden' } : undefined}
         className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' || k.kind === 'variant' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
@@ -1631,38 +1670,43 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 </button>
               ) : null}
             </div>
-            <div className="vp-map-wall">
-              {(() => {
-                const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
-                const masters = visible.filter((k) => k.kind === 'master')
-                const sorted = [
-                  ...masters.flatMap((m) => [m, ...visible.filter((k) => k.kind === 'variant' && k.variant_of === m.name)]),
-                  ...visible.filter((k) => k.kind !== 'master' && !(k.kind === 'variant' && masters.some((m) => m.name === k.variant_of))),
-                ]
-                const { rows } = packKit(sorted)
-                return rows.map((row, i) => (
-                  <div className="vp-map-krow" key={i}>
-                    {row.map(({ k, w, h }) => kitCard(k, w, h))}
-                  </div>
-                ))
-              })()}
-            </div>
+            {(() => {
+              const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
+              const masters = visible.filter((k) => k.kind === 'master')
+              const sorted = [
+                ...masters.flatMap((m) => [m, ...visible.filter((k) => k.kind === 'variant' && k.variant_of === m.name)]),
+                ...visible.filter((k) => k.kind !== 'master' && !(k.kind === 'variant' && masters.some((m) => m.name === k.variant_of))),
+              ]
+              const { rows, totalH } = packKit(sorted)
+              const items = rows.flat()
+              return (
+                <div className="vp-map-wall" style={{ position: 'relative', height: totalH }}>
+                  {items.map((it) => kitCard(it.k, it.w, it.h, it.x, it.y))}
+                </div>
+              )
+            })()}
           </div>
 
           {variantFor ? (
             <div className="vp-var-overlay" onClick={() => !vBusy && setVariantFor(null)}>
               <div className="vp-edit vp-var-modal" onClick={(e) => e.stopPropagation()}>
                 <h4>Variant of {variantFor.name}</h4>
+                {/* VISUALS FIRST: the master IS the subject — it dominates the
+                    panel; the controls are a compact strip beneath it. */}
                 <img className="vp-var-master" src={contentUrl(variantFor.image_path)} alt={variantFor.name} />
                 <label className="vp-edit-field">What changes (one deliberate change)
                   <textarea rows={2} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
                 </label>
-                <label className="vp-edit-field">Variant name
-                  <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
-                </label>
-                {kit.filter((k) => k.image_path && k.name !== variantFor.name).length ? (
+                <div className="vp-var-nameline">
+                  <label className="vp-edit-field">Variant name
+                    <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${variantFor.name}--…`} />
+                  </label>
+                  <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
+                    {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
+                  </button>
+                </div>
+                {vExtrasOpen ? (
                   <div className="vp-var-extras">
-                    <span className="vp-map-colhead">Extra references (optional)</span>
                     {kit.filter((k) => k.image_path && k.name !== variantFor.name).map((k) => (
                       <button
                         key={k.name}
