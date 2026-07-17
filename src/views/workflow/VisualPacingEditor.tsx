@@ -225,24 +225,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [])
 
-  // THE KIT POOL: every World Kit ref with a picked image, for the per-shot
-  // reference chips in the edit popup. Image-backed only — a ref without an
-  // image can still be typed into the free-text field, but there is nothing
-  // to show for it. Same endpoint the World Kit panel itself uses.
-  const [kitRefs, setKitRefs] = useState<{ name: string; path: string }[]>([])
+  // THE KIT, AS OBJECTS: every World Kit reference — kind, description, and
+  // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
+  // real kit object and gets a real card; it just has no image yet.
+  type KitObject = { name: string; kind: string; notes: string; image_path: string }
+  const [kit, setKit] = useState<KitObject[]>([])
   useEffect(() => {
     let live = true
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (!live) return
-        const images = out?.data?.images
-        if (!Array.isArray(images)) return
-        setKitRefs(
-          images
-            .filter((img: { ref?: string }) => img.ref)
-            .map((img: { ref: string; path: string }) => ({ name: img.ref, path: img.path })),
-        )
+        if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
       })
       .catch(() => {
         /* engine offline — the free-text refs field still works */
@@ -252,9 +246,52 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [])
 
-  // MAPPING BOARD state: which shot is selected — palette clicks re-map it.
+
+  // MAPPING BOARD state: selected shot (expands + lights its threads, dims
+  // unlinked refs), AI-mapping flight, and the measured thread geometry.
+  // Threads are SVG curves between DOM cards — measured after paint,
+  // re-measured on resize and settle timers; equality guard stops loops.
   const [mapSel, setMapSel] = useState('')
   const [mapAI, setMapAI] = useState(false)
+  const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
+  const boardRef = useRef<HTMLDivElement>(null)
+  const measureThreads = () => {
+    const board = boardRef.current
+    if (!board) return
+    const box = board.getBoundingClientRect()
+    const out: { shot: string; ref: string; d: string }[] = []
+    board.querySelectorAll<HTMLElement>('[data-mapshot]').forEach((shotEl) => {
+      const names = (shotEl.dataset.maprefs || '').split('|').filter(Boolean)
+      const a = shotEl.getBoundingClientRect()
+      for (const name of names) {
+        const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
+        if (!refEl) continue
+        const b = refEl.getBoundingClientRect()
+        const x1 = a.right - box.left
+        const y1 = a.top - box.top + Math.min(28, a.height / 2)
+        const x2 = b.left - box.left
+        const y2 = b.top - box.top + Math.min(40, b.height / 2)
+        out.push({ shot: shotEl.dataset.mapshot!, ref: name, d: `M ${x1} ${y1} C ${x1 + 55} ${y1}, ${x2 - 55} ${y2}, ${x2} ${y2}` })
+      }
+    })
+    setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
+  }
+  // Threads re-measure when the board's data settles.
+  useEffect(() => {
+    if (view !== 'map') return
+    const raf = requestAnimationFrame(measureThreads)
+    const timers = [150, 500, 1300].map((ms) => window.setTimeout(measureThreads, ms))
+    const ro = new ResizeObserver(() => measureThreads())
+    if (boardRef.current) ro.observe(boardRef.current)
+    window.addEventListener('resize', measureThreads)
+    return () => {
+      cancelAnimationFrame(raf)
+      timers.forEach((id) => window.clearTimeout(id))
+      ro.disconnect()
+      window.removeEventListener('resize', measureThreads)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, draft, mapSel, kit])
 
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
@@ -343,6 +380,35 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     ;[nextNames[at], nextNames[to]] = [nextNames[to], nextNames[at]]
     writeRefs(imageId, nextNames, firstFrameOf(img))
   }
+  // One kit object as a card: the IMAGE sizes the card (native ratio, full
+  // column width); a prompt-only object gets an equally-weighted text card —
+  // never a box sized by its name. Kind chip labels what it is.
+  const kindLabel = (kind: string) =>
+    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : 'REFERENCE'
+  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }) => {
+    const sel = images.find((i) => i.id === mapSel)
+    const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
+    const linkedAtAll = images.some((i) => refsOf(i).includes(k.name))
+    return (
+      <button
+        key={k.name}
+        type="button"
+        data-mapref={k.name}
+        className={`vp-map-card ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
+        title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
+        onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
+      >
+        <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
+        {k.image_path ? (
+          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" />
+        ) : (
+          <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
+        )}
+        <span className="vp-map-cardname">{k.name}</span>
+      </button>
+    )
+  }
+
   const setFirstFrame = (imageId: string, name: string) => {
     const img = images.find((i) => i.id === imageId)
     if (!img) return
@@ -1095,9 +1161,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                   toggle chips. These images now genuinely reach generation
                   (resolve_reference reads the kit), so what you attach here is
                   what the model is shown. Text-only refs stay in the field above. */}
-              {kitRefs.length ? (
+              {kit.some((k) => k.image_path) ? (
                 <div className="vp-ref-chips">
-                  {kitRefs.map((kr) => {
+                  {kit.filter((k) => k.image_path).map((kr) => {
                     const current = editing.refs.split(',').map((s) => s.trim()).filter(Boolean)
                     const on = current.includes(kr.name)
                     return (
@@ -1112,7 +1178,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                           })
                         }
                       >
-                        <img src={contentUrl(kr.path)} alt="" />
+                        <img src={contentUrl(kr.image_path)} alt="" />
                         <span>{kr.name}</span>
                       </button>
                     )
@@ -1171,69 +1237,82 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'map' ? (
-        <div className="vp-map">
-          {/* THE KIT, ALWAYS IN REACH: every reference at once, sticky while
-              the shots scroll. Native aspect ratios — never cropped to a box. */}
-          <div className="vp-map-palette">
-            {kitRefs.map((kr) => {
-              const sel = images.find((i) => i.id === mapSel)
-              const linkedToSel = sel ? refsOf(sel).includes(kr.name) : false
-              return (
-                <button
-                  key={kr.name}
-                  type="button"
-                  className={`vp-map-pal ${linkedToSel ? 'on' : ''}`}
-                  title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : 'Select a shot below first'}
-                  onClick={() => mapSel && toggleMapRef(mapSel, kr.name)}
-                >
-                  <img src={contentUrl(kr.path)} alt={kr.name} />
-                  <span>{kr.name}</span>
-                </button>
-              )
-            })}
-            <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
-              <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI decide'}
-            </button>
-          </div>
+        <div className="vp-map" ref={boardRef}>
+          <svg className="vp-map-svg">
+            {threads.map((th, i) => (
+              <path key={i} d={th.d} className={!mapSel ? '' : mapSel === th.shot ? 'lit' : 'off'} />
+            ))}
+          </svg>
 
-          {/* ONE SHOT, ONE PIECE: the beat and the exact images its generation
-              will be shown, together in one row, in playback order. */}
-          <div className="vp-map-rows">
+          {/* SHOTS, in playback order. Click = expand: the exact attached
+              references show with their controls; unlinked kit cards dim. */}
+          <div className="vp-map-shots">
+            <span className="vp-map-colhead">Shots</span>
             {images.map((img) => {
               const names = refsOf(img)
               const ff = firstFrameOf(img)
               const on = mapSel === img.id
               return (
-                <div key={img.id} className={`vp-map-row ${on ? 'on' : ''}`} onClick={() => setMapSel(on ? '' : img.id)}>
+                <div
+                  key={img.id}
+                  data-mapshot={img.id}
+                  data-maprefs={names.join('|')}
+                  className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
+                  onClick={() => setMapSel(on ? '' : img.id)}
+                >
                   <div className="vp-map-rowhead">
                     <span className="vp-map-shotid">{img.id}</span>
                     <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
-                    <span className="vp-map-shotwhat">{img.what}</span>
                   </div>
-                  <div className="vp-map-attached">
-                    {names.length === 0 ? <span className="vp-hint">No references — {on ? 'click one above' : 'select this shot, then click references above'}.</span> : null}
-                    {names.map((name, idx) => {
-                      const kit = kitRefs.find((k) => k.name === name)
-                      return (
-                        <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`} onClick={(e) => e.stopPropagation()}>
-                          <span className="vp-map-ord">{idx + 1}</span>
-                          {kit ? <img src={contentUrl(kit.path)} alt={name} /> : <span className="vp-map-noimg">{name}</span>}
-                          <figcaption>
-                            <span className="vp-map-attname">{name}</span>
-                            <span className="vp-map-attbtns">
-                              <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
-                              <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
-                              <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st frame</button>
-                              <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
-                            </span>
-                          </figcaption>
-                        </figure>
-                      )
-                    })}
-                  </div>
+                  <span className="vp-map-shotwhat">{img.what}</span>
+                  {on ? (
+                    <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
+                      {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
+                      {names.map((name, idx) => {
+                        const obj = kit.find((k) => k.name === name)
+                        return (
+                          <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
+                            <span className="vp-map-ord">{idx + 1}</span>
+                            {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} /> : <span className="vp-map-noimg">{name}</span>}
+                            <figcaption>
+                              <span className="vp-map-attname">{name}</span>
+                              <span className="vp-map-attbtns">
+                                <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                                <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                                <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st frame</button>
+                                <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                              </span>
+                            </figcaption>
+                          </figure>
+                        )
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               )
             })}
+          </div>
+
+          {/* THE WORLD KIT — every object, image-sized cards, masters apart. */}
+          <div className="vp-map-kit">
+            {kit.some((k) => k.kind === 'master') ? (
+              <div className="vp-map-masters">
+                <span className="vp-map-colhead">Master shots</span>
+                {kit.filter((k) => k.kind === 'master').map((k) => kitCard(k))}
+              </div>
+            ) : null}
+            <span className="vp-map-colhead">World Kit</span>
+            <div className="vp-map-wall">
+              {kit.filter((k) => k.kind !== 'master').map((k) => kitCard(k))}
+            </div>
+            <div className="vp-map-foot">
+              <span className="vp-hint">
+                {mapSel ? `Click a card to attach or detach it from ${mapSel}.` : 'Click a shot to expand it and re-map.'}
+              </span>
+              <button type="button" className="ai-btn" disabled={mapAI} onClick={runMapAI}>
+                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI decide'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
