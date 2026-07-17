@@ -30,6 +30,13 @@ export function ModelPicker({
   const [showMore, setShowMore] = useState(false)
   const open = menuPos !== null
 
+  // An id outside the catalog still deserves its family's short label:
+  // 'gpt-image-2-image-to-image' IS GPT Image 2 to the user — the endpoint
+  // suffix is our concern, not theirs. Raw id only when nothing matches.
+  const stem = (s: string) => s.replace(/-(text|image)-to-image$/, '')
+  const labelOf = (id: string) =>
+    models.find((m) => m.id === id)?.label ?? models.find((m) => stem(m.id) === stem(id))?.label ?? id
+
   const toggle = () => {
     if (open) {
       setMenuPos(null)
@@ -62,7 +69,7 @@ export function ModelPicker({
         onClick={toggle}
         style={{ fontSize: 12, padding: '8px 12px' }}
       >
-        {models.find((m) => m.id === model)?.label ?? model} ▾
+        {labelOf(model)} ▾
       </button>
       {open
         ? createPortal(

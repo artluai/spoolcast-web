@@ -1388,7 +1388,11 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-var-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* The model pill can carry a raw model id — one line, ellipsized, never a
    six-line tower. */
-.vp-var-row .vp-menu-btn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+/* The model pill sits in a row of .vp-undo buttons — same size as them
+   (the picker's own inline size is for toolbar contexts, hence !important). */
+.vp-var-row .vp-menu-btn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; font-size: 10px !important; padding: 5px 11px !important; }
+/* Generate lives bottom-right of the module. */
+.vp-var-modal .vp-edit-actions { justify-content: flex-end; }
 .vp-var-model { flex: 1; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); font-family: var(--sans); font-size: 12px; padding: 6px 8px; }
 .vp-var-extras { display: flex; flex-wrap: wrap; gap: 8px; }
 .vp-var-xref { padding: 0; border: 2px solid var(--line-2); border-radius: 9px; overflow: hidden; background: none; cursor: pointer; line-height: 0; }
