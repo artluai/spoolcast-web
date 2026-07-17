@@ -633,70 +633,64 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setKitDims((cur) => (Math.abs(cur.w - w) < 8 && Math.abs(cur.h - h) < 8 ? cur : { w, h }))
     measureThreads()
   }
-  // THE PACKING EQUATION — equal square footage. Every image gets the SAME
-  // area A on screen, its shape computed from its own ratio (w = √(A/r),
-  // h = w·r): a portrait and a landscape occupy identical footprint, just
-  // shaped differently. Masters (and their variants) get a deliberately
-  // larger area; prompt-only cards are a fixed box of comparable size, never
-  // inflated — images are what the space is for. Rows shelf-pack across the
-  // region and binary search finds the LARGEST A that still fits the kit's
-  // vertical budget, so images are as big as the space mathematically
-  // allows without vertical scrolling. A gentle per-row justify (clamped
-  // tight) closes the right edge without visibly breaking equal footprint.
+  // THE PACKING EQUATION — equal square footage, NO ROWS. Every image gets
+  // the SAME area A on screen, its shape computed from its own ratio
+  // (w = √(A/r), h = w·r): a portrait and a landscape occupy identical
+  // footprint, just shaped differently. Masters (and their variants) get a
+  // deliberately larger area; prompt-only cards are a fixed box of
+  // comparable size, never inflated — images are what the space is for.
+  // Placement is bottom-left skyline: each card drops into the lowest open
+  // pocket (leftmost on ties), so a tall portrait interlocks with stacked
+  // landscapes instead of forcing a shared shelf line — there is no row to
+  // align to and no row-justify stretch, so equal area is exact. Binary
+  // search finds the LARGEST A whose packed height still fits the kit's
+  // vertical budget: as big as the space mathematically allows without
+  // vertical scrolling.
   const GAP = 10
   type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number; x: number; y: number }
   const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
     const W = Math.max(320, kitDims.w)
     const HB = Math.max(240, kitDims.h - 8)
-    const layout = (A: number): { rows: Packed[][]; totalH: number } => {
+    const STEP = 8 // skyline resolution; cards land on an 8px grid
+    const layout = (A: number): { items: Packed[]; totalH: number } => {
       // Text cards: a fixed 1.4:1 box at ~70% of the image area — comparable
       // to its neighbors, but the pictures always read larger.
       const tw = Math.round(Math.min(W - 8, Math.max(150, Math.sqrt(A * 0.7 * 1.4))))
       const th = Math.round(Math.max(105, tw / 1.4))
-      const rows: Packed[][] = [[]]
-      let x = 0
+      const cols = Math.max(1, Math.floor(W / STEP))
+      const heights = new Array<number>(cols).fill(0)
+      const items: Packed[] = []
+      let totalH = 0
       for (const k of objects) {
         let w = tw
         let h = th
         if (k.image_path) {
           const r = imgRatios[k.name] ?? 1.25
           const area = k.kind === 'master' || k.kind === 'variant' ? A * 1.5 : A
-          w = Math.min(W - 8, Math.max(90, Math.sqrt(area / r)))
-          h = w * r
+          w = Math.round(Math.min(W - 8, Math.max(90, Math.sqrt(area / r))))
+          h = Math.round(w * r)
         }
-        if (x > 0 && x + w > W) {
-          rows.push([])
-          x = 0
-        }
-        rows[rows.length - 1].push({ k, w, h, x: 0, y: 0 })
-        x += w + GAP
-      }
-      let totalH = 0
-      for (const row of rows) {
-        const gapW = (row.length - 1) * GAP
-        const imgs = row.filter((it) => it.k.image_path)
-        const textW = row.filter((it) => !it.k.image_path).reduce((n, it) => n + it.w, 0)
-        const imgW = imgs.reduce((n, it) => n + it.w, 0)
-        if (imgW > 0) {
-          // Close the right edge, but never so hard that one row's images
-          // dwarf another's — the old 2.4× clamp was how "equal area" died.
-          const f = Math.min(1.18, Math.max(0.9, (W - gapW - textW) / imgW))
-          for (const it of imgs) {
-            it.w = Math.round(it.w * f)
-            it.h = Math.round(it.h * f)
+        const span = Math.min(cols, Math.ceil((w + GAP) / STEP))
+        let bestC = 0
+        let bestY = Infinity
+        for (let c = 0; c + span <= cols; c += 1) {
+          let y = 0
+          for (let i = c; i < c + span; i += 1) y = Math.max(y, heights[i])
+          if (y < bestY - 0.5) {
+            bestY = y
+            bestC = c
           }
         }
-        let rowH = 0
-        let cx = 0
-        for (const it of row) {
-          it.x = cx
-          it.y = totalH
-          cx += it.w + GAP
-          rowH = Math.max(rowH, it.h)
+        if (!Number.isFinite(bestY)) {
+          bestY = Math.max(0, ...heights)
+          bestC = 0
         }
-        totalH += rowH + GAP
+        items.push({ k, w, h, x: bestC * STEP, y: bestY })
+        const top = bestY + h + GAP
+        for (let i = bestC; i < Math.min(cols, bestC + span); i += 1) heights[i] = top
+        totalH = Math.max(totalH, bestY + h)
       }
-      return { rows, totalH: Math.max(0, totalH - GAP) }
+      return { items, totalH }
     }
     let lo = 7000
     let hi = 220000
@@ -1881,8 +1875,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
               // pixel of row width goes to pictures) and the text cards form
               // their own bottom rows instead of punching holes.
               const sorted = [...ordered.filter((k) => k.image_path), ...sources, ...ordered.filter((k) => !k.image_path)]
-              const { rows, totalH } = packKit(sorted)
-              const items = rows.flat()
+              const { items, totalH } = packKit(sorted)
               return (
                 <div className="vp-map-wall" style={{ position: 'relative', height: totalH }}>
                   {items.map((it) => kitCard(it.k, it.w, it.h, it.x, it.y))}
