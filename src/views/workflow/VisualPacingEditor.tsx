@@ -317,21 +317,26 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     // Budget: usable pixels minus what the text cards and card chrome eat.
     const budget = W * H * 0.62 - textCards * 14000
     const weight = imgs.reduce((n, im) => n + (im.dataset.master === '1' ? 1.35 : 1), 0) || 1
-    let area = Math.max(6000, Math.min(46000, budget / weight))
+    let area = Math.max(15000, Math.min(46000, budget / weight))
     // The estimate is only a starting point — VERIFY against the real layout
-    // and shrink until the kit truly fits. Heuristics clipped cards; the loop
-    // cannot: no scroll, no clip, everything visible is the contract.
-    for (let i = 0; i < 7; i += 1) {
+    // and shrink until the kit truly fits VERTICALLY. Below a floor the
+    // images stop being useful, so a huge kit overflows HORIZONTALLY instead
+    // (2-row rail, scroll sideways) — never a vertical scrollbar.
+    for (let i = 0; i < 6; i += 1) {
       kitAreaRef.current = area
       imgs.forEach(applyArea)
       if (kitEl.scrollHeight <= kitEl.clientHeight + 2) break
-      area = Math.max(6000, area * Math.max(0.62, kitEl.clientHeight / kitEl.scrollHeight))
-      if (area <= 6001) {
-        kitAreaRef.current = area
-        imgs.forEach(applyArea)
-        break
-      }
+      area = Math.max(15000, area * Math.max(0.66, kitEl.clientHeight / kitEl.scrollHeight))
+      if (area <= 15001) break
     }
+    kitAreaRef.current = area
+    imgs.forEach(applyArea)
+    const wall = kitEl.querySelector<HTMLElement>('.vp-map-wall')
+    wall?.classList.toggle('h-scroll', kitEl.scrollHeight > kitEl.clientHeight + 2)
+    // The shots column scrolls on its own (a 20-minute video has more shots
+    // than any screen) while the kit stays put beside it.
+    const list = board.querySelector<HTMLElement>('.vp-map-shotlist')
+    if (list) list.style.maxHeight = `${H}px`
     measureThreads()
   }
 
@@ -360,6 +365,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       })
     }
     scroller?.addEventListener('scroll', onScroll)
+    const shotList = boardRef.current?.querySelector('.vp-map-shotlist')
+    shotList?.addEventListener('scroll', onScroll)
     // The kit column must keep EVERY reference on screen while the shots
     // scroll: cap its height to the real scroller viewport (not 100vh — the
     // embedded preview reports a zero viewport, and the scroller is the truth
@@ -376,6 +383,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       kro.disconnect()
       window.removeEventListener('resize', measureThreads)
       scroller?.removeEventListener('scroll', onScroll)
+      shotList?.removeEventListener('scroll', onScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, draft, mapSel, kit])
@@ -481,7 +489,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         key={k.name}
         type="button"
         data-mapref={k.name}
-        className={`vp-map-card ${k.kind === 'master' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
+        className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
@@ -1324,76 +1332,85 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       </div>
 
       {view === 'map' ? (
-        <div className="vp-map" ref={boardRef}>
+        <div
+          className="vp-map"
+          ref={boardRef}
+          onClick={(e) => {
+            // Click on background = collapse. Cards, shots and buttons handle
+            // their own clicks and never fall through to here.
+            if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button')) setMapSel('')
+          }}
+        >
           <svg className="vp-map-svg">
             {threads.map((th, i) => (
               <path key={i} d={th.d} className={!mapSel ? '' : mapSel === th.shot ? 'lit' : 'off'} />
             ))}
           </svg>
 
-          {/* SHOTS, in playback order. Click = expand: the exact attached
-              references show with their controls; unlinked kit cards dim. */}
           <div className="vp-map-shots">
-            <span className="vp-map-colhead">Shots</span>
-            {images.map((img) => {
-              const names = refsOf(img)
-              const ff = firstFrameOf(img)
-              const on = mapSel === img.id
-              return (
-                <div
-                  key={img.id}
-                  data-mapshot={img.id}
-                  data-maprefs={names.join('|')}
-                  className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
-                  onClick={() => setMapSel(on ? '' : img.id)}
-                >
-                  <div className="vp-map-rowhead">
-                    <span className="vp-map-shotid">{img.id}</span>
-                    <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
-                  </div>
-                  <span className="vp-map-shotwhat">{img.what}</span>
-                  {on ? (
-                    <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
-                      {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
-                      {names.map((name, idx) => {
-                        const obj = kit.find((k) => k.name === name)
-                        return (
-                          <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
-                            <span className="vp-map-ord">{idx + 1}</span>
-                            {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(21000)} /> : <span className="vp-map-noimg">{name}</span>}
-                            <figcaption>
-                              <span className="vp-map-attname">{name}</span>
-                              <span className="vp-map-attbtns">
-                                <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
-                                <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
-                                <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st frame</button>
-                                <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
-                              </span>
-                            </figcaption>
-                          </figure>
-                        )
-                      })}
+            <div className="vp-map-shotshead">
+              <span className="vp-map-colhead">Shots</span>
+              <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
+                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
+              </button>
+            </div>
+            <div className="vp-map-shotlist">
+              {images.map((img) => {
+                const names = refsOf(img)
+                const ff = firstFrameOf(img)
+                const on = mapSel === img.id
+                return (
+                  <div
+                    key={img.id}
+                    data-mapshot={img.id}
+                    data-maprefs={names.join('|')}
+                    className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
+                    onClick={() => setMapSel(on ? '' : img.id)}
+                  >
+                    <div className="vp-map-rowhead">
+                      <span className="vp-map-shotid">{img.id}</span>
+                      <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
+                      {on ? (
+                        <button type="button" className="vp-map-collapse" title="Collapse" onClick={(e) => { e.stopPropagation(); setMapSel('') }}>▴</button>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              )
-            })}
+                    <span className="vp-map-shotwhat">{img.what}</span>
+                    {on ? (
+                      <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
+                        {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
+                        {names.map((name, idx) => {
+                          const obj = kit.find((k) => k.name === name)
+                          return (
+                            <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
+                              <span className="vp-map-ord">{idx + 1}</span>
+                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
+                              {/* Controls live ON the image — no chrome bar below. */}
+                              <div className="vp-map-att-ov">
+                                <span className="vp-map-attname">{ff === name ? '1st frame · ' : ''}{name}</span>
+                                <span className="vp-map-attbtns">
+                                  <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                                  <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                                  <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st</button>
+                                  <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                                </span>
+                              </div>
+                            </figure>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
-          {/* THE WORLD KIT — one wall, masters first (upper-left, tinted),
-              sized to FIT the screen: a scrollbar here means failure. */}
+          {/* THE WORLD KIT — masters first (upper-left, solid tint), sized to
+              fit vertically; a huge kit overflows sideways, never down. */}
           <div className="vp-map-kit">
             <span className="vp-map-colhead">World Kit</span>
             <div className="vp-map-wall">
               {[...kit].sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0)).map((k) => kitCard(k))}
-            </div>
-            <div className="vp-map-foot">
-              <span className="vp-hint">
-                {mapSel ? `Click a card to attach or detach it from ${mapSel}.` : 'Click a shot to expand it and re-map.'}
-              </span>
-              <button type="button" className="ai-btn" disabled={mapAI} onClick={runMapAI}>
-                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI decide'}
-              </button>
             </div>
           </div>
         </div>
