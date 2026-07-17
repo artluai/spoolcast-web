@@ -1244,6 +1244,123 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         </button>
       </div>
 
+
+      {view === 'map' ? (
+        <div
+          className="vp-map"
+          ref={boardRef}
+          onClick={(e) => {
+            // Click on background = collapse. Cards, shots and buttons handle
+            // their own clicks and never fall through to here.
+            if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button')) setMapSel('')
+          }}
+        >
+          {/* Two layers: unselected threads run BEHIND the cards; the selected
+              shot's threads render on a front layer ABOVE everything. Both
+              vanish while scrolling and return re-measured at rest. */}
+          <svg className={`vp-map-svg ${threadsHidden ? 'hush' : ''}`}>
+            {threads.filter((th) => th.shot !== mapSel).map((th, i) => (
+              <path key={i} d={th.d} className={mapSel ? 'off' : ''} />
+            ))}
+          </svg>
+          <svg className={`vp-map-svg front ${threadsHidden ? 'hush' : ''}`}>
+            {mapSel ? threads.filter((th) => th.shot === mapSel).map((th, i) => <path key={i} d={th.d} className="lit" />) : null}
+          </svg>
+
+          <div className="vp-map-shots">
+            <div className="vp-map-shotshead">
+              <span className="vp-map-colhead">Shots</span>
+              <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
+                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
+              </button>
+            </div>
+            <div className="vp-map-shotlist">
+              {images.map((img) => {
+                const names = refsOf(img)
+                const ff = firstFrameOf(img)
+                const on = mapSel === img.id
+                return (
+                  <div
+                    key={img.id}
+                    data-mapshot={img.id}
+                    data-maprefs={names.join('|')}
+                    className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
+                    onClick={() => {
+                      setMapSel(on ? '' : img.id)
+                      setActiveId(on ? '' : img.id)
+                    }}
+                  >
+                    <div className="vp-map-rowhead">
+                      <span className="vp-map-shotid">{img.id}</span>
+                      <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
+                      {on ? (
+                        <button type="button" className="vp-map-collapse" title="Collapse and unselect" onClick={(e) => { e.stopPropagation(); setMapSel(''); setActiveId('') }}>▴</button>
+                      ) : null}
+                    </div>
+                    <span className="vp-map-shotwhat">{img.what}</span>
+                    {on ? (
+                      <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
+                        {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
+                        {names.map((name, idx) => {
+                          const obj = kit.find((k) => k.name === name)
+                          return (
+                            <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
+                              {/* Header ON the image: order controls as one cluster
+                                  (◀ n ▶), the name on its own line. */}
+                              <div className="vp-map-att-top">
+                                <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                                <span className="vp-map-ordgrp">
+                                  <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                                  <b>{idx + 1}</b>
+                                  <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                                </span>
+                                <span className="vp-map-attname">{name}</span>
+                              </div>
+                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
+                              <div className="vp-map-att-ov">
+                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
+                                  {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
+                                </button>
+                              </div>
+                            </figure>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* THE WORLD KIT — masters first (upper-left, solid tint), sized to
+              fit vertically; a huge kit overflows sideways, never down. */}
+          <div className="vp-map-kit">
+            <div className="vp-map-kithead">
+              <span className="vp-map-colhead">World Kit</span>
+              {hiddenRefs.length ? (
+                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
+                  Show all · {hiddenRefs.length} hidden
+                </button>
+              ) : null}
+            </div>
+            <div className="vp-map-wall">
+              {(() => {
+                const sorted = [...kit]
+                  .filter((k) => !hiddenRefs.includes(k.name))
+                  .sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
+                const { rows } = packKit(sorted)
+                return rows.map((row, i) => (
+                  <div className="vp-map-krow" key={i}>
+                    {row.map(({ k, w }) => kitCard(k, w))}
+                  </div>
+                ))
+              })()}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* THE TIMELINE RIDES WITH YOU: sticky under the view tabs, so however
           deep you scroll the script or the board, where-you-are on the clock
           stays in sight. Clicking a block selects that shot's mapping. */}
@@ -1413,122 +1530,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         </div>
       </TimelineScroller>
       </div>
-
-      {view === 'map' ? (
-        <div
-          className="vp-map"
-          ref={boardRef}
-          onClick={(e) => {
-            // Click on background = collapse. Cards, shots and buttons handle
-            // their own clicks and never fall through to here.
-            if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button')) setMapSel('')
-          }}
-        >
-          {/* Two layers: unselected threads run BEHIND the cards; the selected
-              shot's threads render on a front layer ABOVE everything. Both
-              vanish while scrolling and return re-measured at rest. */}
-          <svg className={`vp-map-svg ${threadsHidden ? 'hush' : ''}`}>
-            {threads.filter((th) => th.shot !== mapSel).map((th, i) => (
-              <path key={i} d={th.d} className={mapSel ? 'off' : ''} />
-            ))}
-          </svg>
-          <svg className={`vp-map-svg front ${threadsHidden ? 'hush' : ''}`}>
-            {mapSel ? threads.filter((th) => th.shot === mapSel).map((th, i) => <path key={i} d={th.d} className="lit" />) : null}
-          </svg>
-
-          <div className="vp-map-shots">
-            <div className="vp-map-shotshead">
-              <span className="vp-map-colhead">Shots</span>
-              <button type="button" className="ai-btn vp-map-aibtn" disabled={mapAI} onClick={runMapAI}>
-                <span className="ap-spark">✦</span> {mapAI ? 'Mapping…' : 'Let AI map references'}
-              </button>
-            </div>
-            <div className="vp-map-shotlist">
-              {images.map((img) => {
-                const names = refsOf(img)
-                const ff = firstFrameOf(img)
-                const on = mapSel === img.id
-                return (
-                  <div
-                    key={img.id}
-                    data-mapshot={img.id}
-                    data-maprefs={names.join('|')}
-                    className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
-                    onClick={() => {
-                      setMapSel(on ? '' : img.id)
-                      setActiveId(on ? '' : img.id)
-                    }}
-                  >
-                    <div className="vp-map-rowhead">
-                      <span className="vp-map-shotid">{img.id}</span>
-                      <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
-                      {on ? (
-                        <button type="button" className="vp-map-collapse" title="Collapse" onClick={(e) => { e.stopPropagation(); setMapSel('') }}>▴</button>
-                      ) : null}
-                    </div>
-                    <span className="vp-map-shotwhat">{img.what}</span>
-                    {on ? (
-                      <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
-                        {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
-                        {names.map((name, idx) => {
-                          const obj = kit.find((k) => k.name === name)
-                          return (
-                            <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
-                              {/* Header ON the image: order controls as one cluster
-                                  (◀ n ▶), the name on its own line. */}
-                              <div className="vp-map-att-top">
-                                <span className="vp-map-ordgrp">
-                                  <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
-                                  <b>{idx + 1}</b>
-                                  <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
-                                </span>
-                                <span className="vp-map-attname">{name}</span>
-                              </div>
-                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
-                              <div className="vp-map-att-ov">
-                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
-                                  {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
-                                </button>
-                                <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
-                              </div>
-                            </figure>
-                          )
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* THE WORLD KIT — masters first (upper-left, solid tint), sized to
-              fit vertically; a huge kit overflows sideways, never down. */}
-          <div className="vp-map-kit">
-            <div className="vp-map-kithead">
-              <span className="vp-map-colhead">World Kit</span>
-              {hiddenRefs.length ? (
-                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
-                  Show all · {hiddenRefs.length} hidden
-                </button>
-              ) : null}
-            </div>
-            <div className="vp-map-wall">
-              {(() => {
-                const sorted = [...kit]
-                  .filter((k) => !hiddenRefs.includes(k.name))
-                  .sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
-                const { rows } = packKit(sorted)
-                return rows.map((row, i) => (
-                  <div className="vp-map-krow" key={i}>
-                    {row.map(({ k, w }) => kitCard(k, w))}
-                  </div>
-                ))
-              })()}
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {view === 'table' ? (
         <div className="table-wrap" ref={listRef} style={{ maxHeight: '48vh', overflowY: 'auto', paddingBottom: listOverflows ? '24vh' : 0 }}>
