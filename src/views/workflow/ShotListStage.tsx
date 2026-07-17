@@ -691,7 +691,11 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                           type="button"
                           key={event.id}
                           className={`sl-item ${selected === `base:${event.id}` ? 'on' : ''}`}
-                          onClick={() => setSelected((cur) => (cur === `base:${event.id}` ? '' : `base:${event.id}`))}
+                          onClick={() => {
+                            // Copying a prompt out of the row must not toggle it.
+                            if (window.getSelection()?.toString()) return
+                            setSelected((cur) => (cur === `base:${event.id}` ? '' : `base:${event.id}`))
+                          }}
                         >
                           <span className="id">{event.id}</span>
                           <span>{event.pacing_image_id || 'visual'} · {Number(event.duration_s ?? eventEnd(event) - eventStart(event)).toFixed(1)}s</span>

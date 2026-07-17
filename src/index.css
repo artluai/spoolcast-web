@@ -1377,6 +1377,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .sl-part dt { color: var(--ink-3); font-family: var(--mono); font-size: 11px; }
 .sl-part dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .sl-item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px 10px; align-items: baseline; width: 100%; padding: 8px 0; background: none; border: 0; border-top: 1px solid rgba(255,255,255,.055); color: var(--ink-2); text-align: left; cursor: pointer; font-size: 13px; }
+/* The row is a <button> (click = select), and buttons suppress drag-selection —
+   but these rows hold the shot's actual prompt text, which people copy out.
+   Re-enable selection inside; the onClick guard skips toggling mid-selection. */
+.sl-item span, .sl-item small { user-select: text; cursor: text; }
 .sl-item:first-of-type { border-top: 0; padding-top: 0; }
 .sl-item:hover, .sl-item.on { color: var(--ink); }
 .sl-item small { grid-column: 2; color: var(--ink-3); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
