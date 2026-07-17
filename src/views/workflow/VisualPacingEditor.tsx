@@ -260,15 +260,21 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     if (!board) return
     const box = board.getBoundingClientRect()
     const out: { shot: string; ref: string; d: string }[] = []
+    const listBox = board.querySelector('.vp-map-shotlist')?.getBoundingClientRect()
     board.querySelectorAll<HTMLElement>('[data-mapshot]').forEach((shotEl) => {
       const names = (shotEl.dataset.maprefs || '').split('|').filter(Boolean)
       const a = shotEl.getBoundingClientRect()
+      // A shot scrolled fully out of its column gets no threads; a partly
+      // visible one anchors them to its visible sliver, not off-section.
+      if (listBox && (a.bottom < listBox.top + 4 || a.top > listBox.bottom - 4)) return
       for (const name of names) {
         const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
         if (!refEl) continue
         const b = refEl.getBoundingClientRect()
         const x1 = a.right - box.left
-        const y1 = a.top - box.top + Math.min(28, a.height / 2)
+        let yAnchor = a.top + Math.min(28, a.height / 2)
+        if (listBox) yAnchor = Math.max(listBox.top + 12, Math.min(listBox.bottom - 12, yAnchor))
+        const y1 = yAnchor - box.top
         const x2 = b.left - box.left
         const y2 = b.top - box.top + Math.min(40, b.height / 2)
         out.push({ shot: shotEl.dataset.mapshot!, ref: name, d: `M ${x1} ${y1} C ${x1 + 55} ${y1}, ${x2 - 55} ${y2}, ${x2} ${y2}` })
@@ -678,7 +684,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     .filter(Boolean) as (PacingOverlay & { center: number })[]
   // Clock ticks: finer intervals when zoomed in; skip any tick that would
   // crowd the end label (a 2:01 video otherwise prints 2:00 on top of 2:01).
-  const tickStep = zoom >= 4 ? 15 : zoom >= 2 ? 30 : 60
+  // Interval scales with the video, not a fixed minute grid — a 37s ad gets
+  // 5s marks, a 5-minute devlog gets 30s ones. Zoom refines further.
+  const baseTick = totalSec <= 45 ? 5 : totalSec <= 90 ? 10 : totalSec <= 180 ? 15 : totalSec <= 420 ? 30 : 60
+  const tickStep = Math.max(totalSec <= 45 ? 1 : 5, zoom >= 4 ? baseTick / 4 : zoom >= 2 ? baseTick / 2 : baseTick)
   const ticks: number[] = []
   const tickGuard = Math.max(8, (totalSec * 0.05) / zoom)
   for (let s = 0; s <= totalSec; s += tickStep) if (totalSec - s >= tickGuard) ticks.push(s)
@@ -1047,160 +1056,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         <span>working/visual-pacing-plan.md</span>
       </div>
 
-      <TimelineScroller
-        zoom={zoom}
-        setZoom={setZoom}
-        hint="Hover to inspect · right-click to edit, add, or remove · drag the edge between two blocks to rebalance their time · drag the timeline to pan when zoomed"
-      >
-        {/* Row order follows video-editor convention: overlays on top, then
-            the visual track, the audio (chunks), sections, and the clock. */}
-        <div className="vp-tl-row">
-          <span className="vp-tl-label">Overlays</span>
-          <div className="vp-tl-track overlays">
-            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
-            {overlayMarks.map((o) => (
-              <div
-                key={o.id}
-                className="vp-overlay-mark"
-                style={{ left: `${pct(o.center)}%` }}
-                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
-              >
-                {o.id} · {o.holdS.toFixed(1)}s
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="vp-tl-row">
-          <span className="vp-tl-label">Visuals</span>
-          <div className="vp-tl-track visuals">
-            {images.map((img) => (
-              <button
-                type="button"
-                key={img.id}
-                className={`vp-seg ${img.id === activeId ? 'on' : ''}`}
-                style={{ left: `${pct(img.startS)}%`, width: `${pct(img.holdS)}%` }}
-                onMouseEnter={() => setActiveFromTimeline(img.id)}
-                onFocus={() => setActiveFromTimeline(img.id)}
-                onContextMenu={(e) => openMenu(e, { chunkId: img.chunkId, beatCode: img.beatCode, imageId: img.id })}
-                title={`${img.id} · ${img.holdS.toFixed(1)}s — right-click to edit`}
-              >
-                <span>{img.id}</span>
-              </button>
-            ))}
-            {/* Drag handles on EVERY boundary between adjacent images —
-                zero-sum: one grows, the other shrinks (total runtime fixed).
-                Real timing supersedes these estimates when audio lands. */}
-            {images.map((img, idx) => {
-              const nxt = images[idx + 1]
-              if (!nxt) return null
-              return (
-                <div
-                  key={`h-${img.id}`}
-                  data-no-pan
-                  title={`Drag to rebalance ${img.id} ↔ ${nxt.id} (total stays ${(img.holdS + nxt.holdS).toFixed(1)}s)`}
-                  onPointerDown={(e) => startHoldDrag(e, img, nxt)}
-                  style={{
-                    position: 'absolute',
-                    left: `calc(${pct(img.startS + img.holdS)}% - 4px)`,
-                    top: 0,
-                    bottom: 0,
-                    width: 8,
-                    cursor: 'ew-resize',
-                    zIndex: 3,
-                    touchAction: 'none',
-                  }}
-                />
-              )
-            })}
-          </div>
-        </div>
-
-        {/* "Audio chunks": the narration owns these units — so the lane only
-            means something when the narration is a separate track. Video-first
-            generates picture and sound together: there is no second timeline to
-            line up against, and drawing one says the audio is separate when it
-            isn't. The chunks stay in the plan (they still group the shots);
-            only the claim that they are an audio track goes away. */}
-        {audioIsSeparate ? (
-        <div className="vp-tl-row">
-          <span className="vp-tl-label">Audio chunks</span>
-          <div className="vp-tl-track ruler">
-            {chunkSpans.map((c, i) => (
-              <div
-                key={c.id}
-                className={`vp-ruler-seg ${i % 2 ? 'alt' : ''} ${active && active.chunkId === c.id ? 'on' : ''}`}
-                style={{ left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%` }}
-                title={`${c.id} · ${c.title} — right-click to edit`}
-                onContextMenu={(e) => openMenu(e, { chunkId: c.id, imageId: images.find((im) => im.chunkId === c.id)?.id })}
-              >
-                <span>{c.id}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        ) : null}
-
-        {/* SECTIONS at the bottom: dimension lines (|— opening · 5/9 img —|).
-            Click a label to edit name/targets; drag the shared tick to move
-            the boundary. Amber = outside a user-set target. */}
-        <div className="vp-tl-row">
-          <span className="vp-tl-label">Sections</span>
-          <div className="vp-tl-track" style={{ position: 'relative', height: 20 }}>
-            {secs.map((s, k) => {
-              const over = isOverBudget(s.imageBudget, s.imageCount) || isOverBudget(s.overlayBudget, s.overlayCount)
-              const under = isUnderBudget(s.imageBudget, s.imageCount) || isUnderBudget(s.overlayBudget, s.overlayCount)
-              const color = over || under ? 'var(--amber)' : 'var(--ink-3)'
-              return (
-                <button
-                  type="button"
-                  key={`${s.name}-${k}`}
-                  onClick={() => openSectionEdit(k)}
-                  title={`${s.name}: ${fmtClock(s.fromS)}–${fmtClock(s.toS)} · ${s.imageCount}${s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} images${s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} overlays` : ''} — click to set targets`}
-                  style={{
-                    position: 'absolute', left: `${pct(s.fromS)}%`, width: `${pct(s.toS - s.fromS)}%`,
-                    top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 6,
-                    background: 'none', border: 'none',
-                    borderLeft: `1px solid ${color}`, borderRight: `1px solid ${color}`,
-                    padding: '0 4px', cursor: 'pointer', color, fontSize: 10, letterSpacing: '.04em',
-                  }}
-                >
-                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s.name} · {s.imageCount}{s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} shots
-                    {s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} ovl` : ''}
-                    {over ? ' · over budget' : under ? ' · under range' : ''}
-                  </span>
-                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
-                </button>
-              )
-            })}
-            {secs.slice(0, -1).map((s, k) => (
-              <div
-                key={`sb-${k}`}
-                data-no-pan
-                title={`Drag to move the ${s.name} boundary (${fmtClock(s.toS)})`}
-                onPointerDown={(e) => startSecDrag(e, k)}
-                style={{
-                  position: 'absolute', left: `calc(${pct(s.toS)}% - 4px)`,
-                  top: -2, bottom: -2, width: 8, cursor: 'ew-resize', zIndex: 3, touchAction: 'none',
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* The clock — the very bottom row. */}
-        <div className="vp-tl-row axis">
-          <span className="vp-tl-label" />
-          <div className="vp-tl-track">
-            {ticks.map((t) => (
-              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
-            ))}
-            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
-          </div>
-        </div>
-      </TimelineScroller>
 
       {editing ? (
         <div
@@ -1389,6 +1244,176 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         </button>
       </div>
 
+      {/* THE TIMELINE RIDES WITH YOU: sticky under the view tabs, so however
+          deep you scroll the script or the board, where-you-are on the clock
+          stays in sight. Clicking a block selects that shot's mapping. */}
+      <div className="vp-tl-sticky">
+      <TimelineScroller
+        zoom={zoom}
+        setZoom={setZoom}
+        hint="Hover to inspect · right-click to edit, add, or remove · drag the edge between two blocks to rebalance their time · drag the timeline to pan when zoomed"
+      >
+        {/* Row order follows video-editor convention: overlays on top, then
+            the visual track, the audio (chunks), sections, and the clock. */}
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Overlays</span>
+          <div className="vp-tl-track overlays">
+            {overlayMarks.length === 0 ? <span className="vp-tl-empty">none</span> : null}
+            {overlayMarks.map((o) => (
+              <div
+                key={o.id}
+                className="vp-overlay-mark"
+                style={{ left: `${pct(o.center)}%` }}
+                title={`${o.id} · "${o.trigger}" · ${o.holdS.toFixed(1)}s · ${o.what}`}
+              >
+                {o.id} · {o.holdS.toFixed(1)}s
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Visuals</span>
+          <div className="vp-tl-track visuals">
+            {images.map((img) => (
+              <button
+                type="button"
+                key={img.id}
+                className={`vp-seg ${img.id === activeId || img.id === mapSel ? 'on' : ''}`}
+                style={{ left: `${pct(img.startS)}%`, width: `${pct(img.holdS)}%` }}
+                onMouseEnter={() => setActiveFromTimeline(img.id)}
+                onFocus={() => setActiveFromTimeline(img.id)}
+                onClick={() => {
+                  // Timeline and board are the same selection: clicking a
+                  // block opens that shot's mapping with its references.
+                  setView('map')
+                  setActiveId(img.id)
+                  setMapSel(img.id)
+                  requestAnimationFrame(() =>
+                    (document.querySelector(`[data-mapshot="${CSS.escape(img.id)}"]`) as HTMLElement | null)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                  )
+                }}
+                onContextMenu={(e) => openMenu(e, { chunkId: img.chunkId, beatCode: img.beatCode, imageId: img.id })}
+                title={`${img.id} · ${img.holdS.toFixed(1)}s — right-click to edit`}
+              >
+                <span>{img.id}</span>
+              </button>
+            ))}
+            {/* Drag handles on EVERY boundary between adjacent images —
+                zero-sum: one grows, the other shrinks (total runtime fixed).
+                Real timing supersedes these estimates when audio lands. */}
+            {images.map((img, idx) => {
+              const nxt = images[idx + 1]
+              if (!nxt) return null
+              return (
+                <div
+                  key={`h-${img.id}`}
+                  data-no-pan
+                  title={`Drag to rebalance ${img.id} ↔ ${nxt.id} (total stays ${(img.holdS + nxt.holdS).toFixed(1)}s)`}
+                  onPointerDown={(e) => startHoldDrag(e, img, nxt)}
+                  style={{
+                    position: 'absolute',
+                    left: `calc(${pct(img.startS + img.holdS)}% - 4px)`,
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    cursor: 'ew-resize',
+                    zIndex: 3,
+                    touchAction: 'none',
+                  }}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        {/* "Audio chunks": the narration owns these units — so the lane only
+            means something when the narration is a separate track. Video-first
+            generates picture and sound together: there is no second timeline to
+            line up against, and drawing one says the audio is separate when it
+            isn't. The chunks stay in the plan (they still group the shots);
+            only the claim that they are an audio track goes away. */}
+        {audioIsSeparate ? (
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Audio chunks</span>
+          <div className="vp-tl-track ruler">
+            {chunkSpans.map((c, i) => (
+              <div
+                key={c.id}
+                className={`vp-ruler-seg ${i % 2 ? 'alt' : ''} ${active && active.chunkId === c.id ? 'on' : ''}`}
+                style={{ left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%` }}
+                title={`${c.id} · ${c.title} — right-click to edit`}
+                onContextMenu={(e) => openMenu(e, { chunkId: c.id, imageId: images.find((im) => im.chunkId === c.id)?.id })}
+              >
+                <span>{c.id}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        ) : null}
+
+        {/* SECTIONS at the bottom: dimension lines (|— opening · 5/9 img —|).
+            Click a label to edit name/targets; drag the shared tick to move
+            the boundary. Amber = outside a user-set target. */}
+        <div className="vp-tl-row">
+          <span className="vp-tl-label">Sections</span>
+          <div className="vp-tl-track" style={{ position: 'relative', height: 20 }}>
+            {secs.map((s, k) => {
+              const over = isOverBudget(s.imageBudget, s.imageCount) || isOverBudget(s.overlayBudget, s.overlayCount)
+              const under = isUnderBudget(s.imageBudget, s.imageCount) || isUnderBudget(s.overlayBudget, s.overlayCount)
+              const color = over || under ? 'var(--amber)' : 'var(--ink-3)'
+              return (
+                <button
+                  type="button"
+                  key={`${s.name}-${k}`}
+                  onClick={() => openSectionEdit(k)}
+                  title={`${s.name}: ${fmtClock(s.fromS)}–${fmtClock(s.toS)} · ${s.imageCount}${s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} images${s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} overlays` : ''} — click to set targets`}
+                  style={{
+                    position: 'absolute', left: `${pct(s.fromS)}%`, width: `${pct(s.toS - s.fromS)}%`,
+                    top: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 6,
+                    background: 'none', border: 'none',
+                    borderLeft: `1px solid ${color}`, borderRight: `1px solid ${color}`,
+                    padding: '0 4px', cursor: 'pointer', color, fontSize: 10, letterSpacing: '.04em',
+                  }}
+                >
+                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {s.name} · {s.imageCount}{s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} shots
+                    {s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} ovl` : ''}
+                    {over ? ' · over budget' : under ? ' · under range' : ''}
+                  </span>
+                  <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
+                </button>
+              )
+            })}
+            {secs.slice(0, -1).map((s, k) => (
+              <div
+                key={`sb-${k}`}
+                data-no-pan
+                title={`Drag to move the ${s.name} boundary (${fmtClock(s.toS)})`}
+                onPointerDown={(e) => startSecDrag(e, k)}
+                style={{
+                  position: 'absolute', left: `calc(${pct(s.toS)}% - 4px)`,
+                  top: -2, bottom: -2, width: 8, cursor: 'ew-resize', zIndex: 3, touchAction: 'none',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* The clock — the very bottom row. */}
+        <div className="vp-tl-row axis">
+          <span className="vp-tl-label" />
+          <div className="vp-tl-track">
+            {ticks.map((t) => (
+              <span key={t} className="vp-tick" style={{ left: `${pct(t)}%` }}>{fmtClock(t)}</span>
+            ))}
+            <span className="vp-tick end" style={{ left: '100%' }}>{fmtClock(totalSec)}</span>
+          </div>
+        </div>
+      </TimelineScroller>
+      </div>
+
       {view === 'map' ? (
         <div
           className="vp-map"
@@ -1429,7 +1454,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     data-mapshot={img.id}
                     data-maprefs={names.join('|')}
                     className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
-                    onClick={() => setMapSel(on ? '' : img.id)}
+                    onClick={() => {
+                      setMapSel(on ? '' : img.id)
+                      setActiveId(on ? '' : img.id)
+                    }}
                   >
                     <div className="vp-map-rowhead">
                       <span className="vp-map-shotid">{img.id}</span>
