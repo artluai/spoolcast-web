@@ -22,7 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
-import { actionUrl, activeSession, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -217,6 +217,33 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       })
       .catch(() => {
         /* engine offline — the neutral word still reads correctly */
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // THE KIT POOL: every World Kit ref with a picked image, for the per-shot
+  // reference chips in the edit popup. Image-backed only — a ref without an
+  // image can still be typed into the free-text field, but there is nothing
+  // to show for it. Same endpoint the World Kit panel itself uses.
+  const [kitRefs, setKitRefs] = useState<{ name: string; path: string }[]>([])
+  useEffect(() => {
+    let live = true
+    fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!live) return
+        const images = out?.data?.images
+        if (!Array.isArray(images)) return
+        setKitRefs(
+          images
+            .filter((img: { ref?: string }) => img.ref)
+            .map((img: { ref: string; path: string }) => ({ name: img.ref, path: img.path })),
+        )
+      })
+      .catch(() => {
+        /* engine offline — the free-text refs field still works */
       })
     return () => {
       live = false
@@ -993,6 +1020,34 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 <label>Hold<input value={editing.hold} onChange={(e) => setDraftField({ hold: e.target.value })} placeholder="6s" /></label>
                 <label>References<input value={editing.refs} onChange={(e) => setDraftField({ refs: e.target.value })} placeholder="builder, meme-chad (from the World Kit)" /></label>
               </div>
+              {/* THE REFERENCE MAP, per shot: the kit's image-backed refs as
+                  toggle chips. These images now genuinely reach generation
+                  (resolve_reference reads the kit), so what you attach here is
+                  what the model is shown. Text-only refs stay in the field above. */}
+              {kitRefs.length ? (
+                <div className="vp-ref-chips">
+                  {kitRefs.map((kr) => {
+                    const current = editing.refs.split(',').map((s) => s.trim()).filter(Boolean)
+                    const on = current.includes(kr.name)
+                    return (
+                      <button
+                        key={kr.name}
+                        type="button"
+                        className={`vp-ref-chip ${on ? 'on' : ''}`}
+                        title={on ? `Remove ${kr.name} from this shot` : `Attach ${kr.name} to this shot`}
+                        onClick={() =>
+                          setDraftField({
+                            refs: (on ? current.filter((n) => n !== kr.name) : [...current, kr.name]).join(', '),
+                          })
+                        }
+                      >
+                        <img src={contentUrl(kr.path)} alt="" />
+                        <span>{kr.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
             </>
           )}
 

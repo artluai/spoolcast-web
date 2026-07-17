@@ -1356,6 +1356,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-edit-field { display: block; margin-bottom: 12px; color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .vp-edit-grid { display: flex; gap: 12px; margin-bottom: 12px; }
 .vp-edit-grid label { flex: 1; display: block; color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+/* Per-shot reference chips: the kit's image-backed refs, toggled onto the shot. */
+.vp-ref-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.vp-ref-chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); color: var(--ink-3); font-size: 11.5px; cursor: pointer; transition: border-color .15s, color .15s; }
+.vp-ref-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; display: block; }
+.vp-ref-chip:hover { border-color: var(--ink-3); color: var(--ink); }
+.vp-ref-chip.on { border-color: var(--accent); color: var(--ink); background: var(--bg-3); }
 .vp-edit input, .vp-edit textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; text-transform: none; letter-spacing: normal; resize: vertical; }
 .vp-edit input:focus, .vp-edit textarea:focus { outline: none; border-color: var(--accent); }
 .vp-json-view { max-height: 45vh; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink-2); font-family: var(--mono); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
