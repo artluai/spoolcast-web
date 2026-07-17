@@ -9,7 +9,10 @@
 //   ## C001 — <Title> (0–22s)     → chunk; the (range) is DERIVED and ignored on parse
 //   Summary: <one line>
 //   **Beat 001A**: "<narration>"
-//   | Img | Hold | Refs | What | Why now |   → one image table per beat
+//   | Shot | Hold | Refs | What | Why now |  → one shot table per beat
+// A SHOT is one continuous take — a generated video clip or a held still.
+// Files written as | Img | with I01 ids (the devlog-era spelling) still
+// parse; the engine renumbers them to S01 on its next pass.
 //   ## Overlays                   → ID | Anchor | Trigger phrase | Overlay | Hold | Placement
 //
 // All timings are estimates until real narration audio exists (step 09):
@@ -182,7 +185,7 @@ export function parsePacingPlan(md: string): PacingPlan {
           name: col(cols, cells, 'Name') || cells[0] || 'section',
           fromS: parseHold(col(cols, cells, 'From')),
           toS: toRaw === 'end' || toRaw === '' ? 'end' : parseHold(toRaw),
-          imageBudget: parseBudget(col(cols, cells, 'Image budget')),
+          imageBudget: parseBudget(col(cols, cells, 'Shot budget') || col(cols, cells, 'Image budget')),
           overlayBudget: parseBudget(col(cols, cells, 'Overlay budget')),
         })
       } else if (section.kind === 'overlays') {
@@ -198,7 +201,7 @@ export function parsePacingPlan(md: string): PacingPlan {
         })
       } else if (section.kind === 'chunk' && beat) {
         beat.images.push({
-          id: col(cols, cells, 'Img') || col(cols, cells, 'ID') || cells[0] || '',
+          id: col(cols, cells, 'Shot') || col(cols, cells, 'Img') || col(cols, cells, 'ID') || cells[0] || '',
           holdS: parseHold(col(cols, cells, 'Hold')),
           refs: col(cols, cells, 'Refs'),
           what: col(cols, cells, 'What'),
@@ -330,7 +333,7 @@ export function serializePacingPlan(plan: PacingPlan): string {
 
   if (plan.sections.length > 0) {
     parts.push('', '## Sections', '')
-    parts.push('| Name | From | To | Image budget | Overlay budget |', '|---|---|---|---|---|')
+    parts.push('| Name | From | To | Shot budget | Overlay budget |', '|---|---|---|---|---|')
     for (const s of plan.sections)
       parts.push(
         `| ${cell(s.name)} | ${Math.round(s.fromS)}s | ${s.toS === 'end' ? 'end' : `${Math.round(s.toS)}s`} ` +
@@ -347,7 +350,7 @@ export function serializePacingPlan(plan: PacingPlan): string {
     if (c.summary) parts.push(`Summary: ${cell(c.summary)}`, '')
     for (const b of c.beats) {
       parts.push(`**Beat ${b.code}**: "${b.narration.replace(/"/g, '”')}"`, '')
-      parts.push('| Img | Hold | Refs | What | Why now |', '|---|---|---|---|---|')
+      parts.push('| Shot | Hold | Refs | What | Why now |', '|---|---|---|---|---|')
       for (const i of b.images)
         parts.push(`| ${cell(i.id)} | ${fmtHold(i.holdS)} | ${cell(i.refs) || '—'} | ${cell(i.what)} | ${cell(i.why)} |`)
       parts.push('')
@@ -375,7 +378,8 @@ export const planIsWellFormed = (plan: PacingPlan): boolean =>
   plan.chunks.length > 0 &&
   plan.chunks.every((c) => c.beats.length > 0 && c.beats.every((b) => b.images.length > 0))
 
-// Next free image id (I01, I02… — house style from dev-log-11).
+// Next free shot id (S01, S02…). Matches the engine's renumber in
+// draft_visual_pacing.enforce_code_law — keep both in sync.
 export function nextImageId(plan: PacingPlan): string {
   let max = 0
   for (const c of plan.chunks)
@@ -384,7 +388,7 @@ export function nextImageId(plan: PacingPlan): string {
         const m = i.id.match(/(\d+)$/)
         if (m) max = Math.max(max, parseInt(m[1], 10))
       }
-  return `I${String(max + 1).padStart(2, '0')}`
+  return `S${String(max + 1).padStart(2, '0')}`
 }
 
 export function nextChunkId(plan: PacingPlan): string {

@@ -22,7 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
-import { actionUrl, activeSession, contentUrl } from '../../lib/api'
+import { actionUrl, activeSession, contentUrl, fileUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -38,6 +38,17 @@ type EditDraft =
   | { scope: 'chunk'; chunkId: string; isNew: boolean; refChunkId?: string; insertPos?: 'before' | 'after'; title: string; summary: string; narration: string }
   | { scope: 'overlay'; overlayId: string; isNew: boolean; anchor: string; trigger: string; what: string; hold: string; placement: string; asset: string }
   | { scope: 'section'; index: number; isNew: boolean; name: string; to: string; imageBudget: string; overlayBudget: string }
+
+// A SHOT is one continuous take. Name the medium when the project has settled
+// on one — "6 video clips" says more than "6 shots" and tells you where the
+// money goes. Under a mixed project, or before the medium is known, the
+// neutral word is the honest one. Never say "images" for generated video: that
+// wording is what let a 2.5s "image" reach a 4s-minimum video model.
+const shotNoun = (n: number, medium?: string) => {
+  if (medium === 'video') return n === 1 ? 'video clip' : 'video clips'
+  if (medium === 'image') return n === 1 ? 'image' : 'images'
+  return n === 1 ? 'shot' : 'shots'
+}
 
 export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
@@ -180,11 +191,32 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     }
   }, [editKey])
 
+  // The project's shot medium (session.json, set at step 1). Blank until it
+  // loads, or when the project mixes — shotNoun falls back to "shots".
+  // MUST sit above the early return below: hooks run in call order.
+  const [shotMedium, setShotMedium] = useState('')
+  useEffect(() => {
+    let live = true
+    fetch(fileUrl('session.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!live || typeof out?.data?.content !== 'string') return
+        const m = String(JSON.parse(out.data.content)?.shot_medium || '')
+        if (m === 'video' || m === 'image') setShotMedium(m)
+      })
+      .catch(() => {
+        /* engine offline — the neutral word still reads correctly */
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
   if (!draft.trim()) {
     // One line — if the step is blocked, the blocker card below explains.
     return (
       <p style={{ color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6, margin: '4px 0 0' }}>
-        No pacing plan yet — this step maps every narration beat to an image (what the viewer
+        No pacing plan yet — this step maps every narration beat to a shot (what the viewer
         sees, when it changes, how long it holds) before the shot list is compiled.
       </p>
     )
@@ -677,7 +709,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       {/* One line of facts — per-section counts live on the dimension lines
           below the timeline. No separate stats row, no divider (clean UI). */}
       <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-        <h3>Visual pacing — {stats.chunks} audio chunks · {stats.images} images · ~{fmtClock(stats.runtimeS)}</h3>
+        <h3>Visual pacing — {stats.chunks} audio chunks · {stats.images} {shotNoun(stats.images, shotMedium)} · ~{fmtClock(stats.runtimeS)}</h3>
         <span>working/visual-pacing-plan.md</span>
       </div>
 
@@ -795,7 +827,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 >
                   <i style={{ flex: 1, height: 1, background: color, opacity: 0.5 }} />
                   <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s.name} · {s.imageCount}{s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} img
+                    {s.name} · {s.imageCount}{s.imageBudget ? `/${fmtBudget(s.imageBudget)}` : ''} shots
                     {s.overlayBudget ? ` · ${s.overlayCount}/${fmtBudget(s.overlayBudget)} ovl` : ''}
                     {over ? ' · over budget' : under ? ' · under range' : ''}
                   </span>
@@ -956,10 +988,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             <div className="vp-menu-h">{menu.imageId ? `${menu.imageId} · ` : ''}{menu.chunkId}</div>
             {menu.imageId ? (
               <>
-                <button type="button" onClick={() => startEditImage(menu.imageId!)}>Edit image</button>
-                <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'before' })}>Add image before</button>
-                <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'after' })}>Add image after</button>
-                <button type="button" className="danger" onClick={() => removeImage(menu.imageId!)}>Remove image</button>
+                <button type="button" onClick={() => startEditImage(menu.imageId!)}>Edit shot</button>
+                <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'before' })}>Add shot before</button>
+                <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'after' })}>Add shot after</button>
+                <button type="button" className="danger" onClick={() => removeImage(menu.imageId!)}>Remove shot</button>
                 <div className="vp-menu-div" />
               </>
             ) : null}

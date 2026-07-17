@@ -565,10 +565,10 @@ export function VisualPacingPanel({ blankProject }: { blankProject: boolean }) {
           <div className="vp-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }} />
           <div className="vp-menu" style={{ left: menu.x, top: menu.y }}>
             <div className="vp-menu-h">{menu.imageId ? `${menu.imageId} · ` : ''}{menu.chunkId}</div>
-            <button type="button" onClick={() => startEditImage(menu.chunkId, menu.imageId!)}>Edit image</button>
-            <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'before' })}>Add image before</button>
-            <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'after' })}>Add image after</button>
-            <button type="button" className="danger" onClick={() => removeImage(menu.chunkId, menu.imageId!)}>Remove image</button>
+            <button type="button" onClick={() => startEditImage(menu.chunkId, menu.imageId!)}>Edit shot</button>
+            <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'before' })}>Add shot before</button>
+            <button type="button" onClick={() => startAddImage(menu.chunkId, { nearImageId: menu.imageId, pos: 'after' })}>Add shot after</button>
+            <button type="button" className="danger" onClick={() => removeImage(menu.chunkId, menu.imageId!)}>Remove shot</button>
             <div className="vp-menu-div" />
             <button type="button" onClick={() => startEditChunk(menu.chunkId)}>Edit chunk</button>
             <button type="button" onClick={() => startAddChunk(menu.chunkId, 'before')}>Add chunk before</button>
