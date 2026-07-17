@@ -1374,6 +1374,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-svg path { fill: none; stroke: rgba(122,162,255,.30); stroke-width: 1.6; transition: stroke .15s; }
 .vp-map-svg path.lit { stroke: rgba(122,162,255,.85); stroke-width: 2.2; }
 .vp-map-svg path.off { stroke: rgba(122,162,255,.08); }
+.vp-map-svg.front { z-index: 40; }
+.vp-map-svg.front path.lit { stroke: rgba(140,175,255,.95); stroke-width: 2.4; }
+.vp-map-svg { transition: opacity .12s; }
+.vp-map-svg.hush { opacity: 0; }
 .vp-map-colhead { display: block; color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
 .vp-map-shots { display: flex; flex-direction: column; position: relative; z-index: 1; }
 .vp-map-shotshead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
@@ -1394,8 +1398,17 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-attached { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: default; }
 .vp-map-att, .vp-map-card { align-self: flex-start; }
 .vp-map-att { position: relative; margin: 0; display: inline-block; padding: 0; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); width: fit-content; overflow: hidden; }
-.vp-map-att img { height: 130px; width: auto; display: block; }
+.vp-map-att img { height: 148px; width: auto; display: block; min-width: 120px; }
+.vp-map-att-top { position: absolute; left: 0; right: 0; top: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 7px 18px; background: linear-gradient(rgba(8,10,15,.92), transparent); }
+.vp-map-ordgrp { display: inline-flex; align-items: center; gap: 4px; }
+.vp-map-ordgrp b { min-width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #0b0d14; font-family: var(--mono); font-size: 11px; }
+.vp-map-ordgrp button { border: 1px solid rgba(255,255,255,.16); background: rgba(10,12,18,.65); color: var(--ink-2); border-radius: 5px; font-size: 8.5px; line-height: 1; padding: 4px 5px; cursor: pointer; }
+.vp-map-ordgrp button:disabled { opacity: .3; cursor: default; }
 .vp-map-att-ov { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 26px 7px 6px; background: linear-gradient(transparent, rgba(8,10,15,.92)); }
+.vp-map-ffbtn { border: 1px solid rgba(255,255,255,.18); background: rgba(10,12,18,.7); color: var(--ink-2); border-radius: 6px; font-family: var(--mono); font-size: 9.5px; padding: 4px 8px; cursor: pointer; }
+.vp-map-ffbtn.on { border-color: var(--accent-2); color: var(--accent-2); }
+.vp-map-detach { border: 1px solid rgba(255,255,255,.18); background: rgba(10,12,18,.7); color: var(--ink-3); border-radius: 6px; font-size: 11px; line-height: 1; padding: 4px 7px; cursor: pointer; }
+.vp-map-detach:hover { color: var(--ink); }
 .vp-map-att.ff { border-color: var(--accent-2); }
 .vp-map-ord { position: absolute; top: -8px; left: -8px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #0b0d14; font-family: var(--mono); font-size: 11px; font-weight: 800; z-index: 1; }
 .vp-map-noimg { height: 120px; min-width: 120px; display: grid; place-items: center; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--ink-3); font-family: var(--mono); font-size: 11px; padding: 0 10px; }
@@ -1413,8 +1426,14 @@ body.chat-pinned .detail-card.full { right: 380px; }
    top-to-bottom and grows SIDEWAYS past the screen — never down. */
 /* Explicit columns (JS shortest-column packing) — flex row of stacks; a
    kit too large for the window grows columns sideways and scrolls. */
-.vp-map-wall { display: flex; align-items: flex-start; gap: 10px; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
-.vp-map-coln { display: flex; flex-direction: column; gap: 10px; flex: none; }
+.vp-map-wall { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.vp-map-krow { display: flex; align-items: flex-start; gap: 10px; }
+.vp-map-kithead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vp-map-showall { border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); border-radius: 7px; font-family: var(--mono); font-size: 10.5px; padding: 4px 10px; cursor: pointer; margin-bottom: 10px; }
+.vp-map-showall:hover { color: var(--ink); border-color: var(--ink-3); }
+.vp-map-hide { position: absolute; top: 10px; right: 10px; z-index: 2; font-family: var(--mono); font-size: 9.5px; padding: 3px 8px; border-radius: 6px; background: rgba(10,12,18,.8); color: var(--ink-3); opacity: 0; transition: opacity .12s; cursor: pointer; }
+.vp-map-card:hover .vp-map-hide { opacity: 1; }
+.vp-map-hide:hover { color: var(--ink); }
 .vp-map-card { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
 .vp-map-card img { display: block; width: 100%; height: auto; }
 .vp-map-card:hover { border-color: var(--ink-3); }

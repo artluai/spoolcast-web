@@ -292,6 +292,27 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // accept the widest layout whose tallest column fits the window. A kit too
   // big at the narrowest width grows extra columns and scrolls SIDEWAYS.
   const [kitDims, setKitDims] = useState({ w: 1000, h: 700 })
+  // User-hidden references (persisted per session): excluded from the wall
+  // and the packing budget until "Show all".
+  const [hiddenRefs, setHiddenRefs] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`sc-map-hidden-${activeSession()}`) || '[]') } catch { return [] }
+  })
+  const persistHidden = (names: string[]) => {
+    setHiddenRefs(names)
+    try { localStorage.setItem(`sc-map-hidden-${activeSession()}`, JSON.stringify(names)) } catch { /* private mode */ }
+  }
+  // Threads vanish while scrolling and reappear (re-measured) at rest —
+  // stale curves pointing at moved cards are worse than none.
+  const [threadsHidden, setThreadsHidden] = useState(false)
+  const scrollIdleRef = useRef(0)
+  const onAnyScroll = () => {
+    setThreadsHidden(true)
+    window.clearTimeout(scrollIdleRef.current)
+    scrollIdleRef.current = window.setTimeout(() => {
+      measureThreads()
+      setThreadsHidden(false)
+    }, 150)
+  }
   const [imgRatios, setImgRatios] = useState<Record<string, number>>({})
   const noteRatio = (name: string) => (e: React.SyntheticEvent<HTMLImageElement>) => {
     const im = e.currentTarget
@@ -312,26 +333,57 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setKitDims((cur) => (Math.abs(cur.w - w) < 8 && Math.abs(cur.h - h) < 8 ? cur : { w, h }))
     measureThreads()
   }
-  // Greedy shortest-column packing for a given column width.
-  const TEXT_CARD_H = 178
+  // THE PACKING EQUATION. Given the kit region's real square footage, find
+  // the LARGEST per-image area A such that everything still fits: each image
+  // takes its own width from its own ratio (w = sqrt(A/r), h = w*r; masters
+  // 1.35A; text objects a fixed sensible card), rows shelf-pack across the
+  // region, binary search on A. Wide images come out wide, portraits tall,
+  // squares square — and they are as big as the space mathematically allows.
+  const TEXT_W = 232
+  const TEXT_H = 170
+  type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number }
   const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
-    const est = (k: { name: string; image_path: string }) =>
-      k.image_path ? Math.round((imgRatios[k.name] ?? 1.25) * 0) : 0 // placeholder, replaced below
-    void est
-    for (let colW = 300; ; colW -= 10) {
-      const ncols = Math.max(1, Math.floor((kitDims.w + 10) / (colW + 10)))
-      const heights = new Array(Math.max(1, ncols)).fill(0)
-      const cols: (typeof objects)[] = Array.from({ length: Math.max(1, ncols) }, () => [])
+    const W = Math.max(320, kitDims.w)
+    const HB = Math.max(240, kitDims.h - 8)
+    const layout = (A: number): { rows: Packed[][]; totalH: number } => {
+      const rows: Packed[][] = [[]]
+      let x = 0
+      let rowH = 0
+      let totalH = 0
       for (const k of objects) {
-        const cardH = (k.image_path ? Math.round(colW * (imgRatios[k.name] ?? 1.25)) : TEXT_CARD_H) + 10
-        let at = 0
-        for (let i = 1; i < heights.length; i += 1) if (heights[i] < heights[at] - 1) at = i
-        cols[at].push(k)
-        heights[at] += cardH
+        let w = TEXT_W
+        let h = TEXT_H
+        if (k.image_path) {
+          const r = imgRatios[k.name] ?? 1.25
+          const area = k.kind === 'master' ? A * 1.35 : A
+          w = Math.min(W - 8, Math.max(96, Math.sqrt(area / r)))
+          h = w * r
+        }
+        if (x > 0 && x + w > W) {
+          totalH += rowH + 10
+          rows.push([])
+          x = 0
+          rowH = 0
+        }
+        rows[rows.length - 1].push({ k, w: Math.round(w), h: Math.round(h) })
+        x += w + 10
+        rowH = Math.max(rowH, h)
       }
-      const tallest = Math.max(...heights)
-      if (tallest <= kitDims.h || colW <= 160) return { cols: cols.filter((c) => c.length), colW }
+      return { rows, totalH: totalH + rowH }
     }
+    let lo = 7000
+    let hi = 120000
+    let best = layout(lo)
+    if (best.totalH > HB) return best // even minimal doesn't fit — show anyway
+    for (let i = 0; i < 14; i += 1) {
+      const mid = (lo + hi) / 2
+      const cand = layout(mid)
+      if (cand.totalH <= HB) {
+        best = cand
+        lo = mid
+      } else hi = mid
+    }
+    return best
   }
 
   // Threads re-measure when the board's data settles.
@@ -351,6 +403,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const scroller = boardRef.current?.closest('.workflow-view')
     let ticking = false
     const onScroll = () => {
+      onAnyScroll()
       if (ticking) return
       ticking = true
       requestAnimationFrame(() => {
@@ -474,7 +527,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
     kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : 'REFERENCE'
-  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }) => {
+  const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number) => {
     const sel = images.find((i) => i.id === mapSel)
     const linkedToSel = sel ? refsOf(sel).includes(k.name) : false
     const linkedAtAll = images.some((i) => refsOf(i).includes(k.name))
@@ -483,11 +536,22 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         key={k.name}
         type="button"
         data-mapref={k.name}
+        style={w ? { width: w } : undefined}
         className={`vp-map-card ${k.image_path ? 'has-img' : 'is-text'} ${k.kind === 'master' ? 'is-master' : ''} ${mapSel ? (linkedToSel ? 'on' : 'dim') : ''} ${!linkedAtAll ? 'unlinked' : ''}`}
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
+        <span
+          className="vp-map-hide"
+          title="Hide this reference from the board (Show all brings it back)"
+          onClick={(e) => {
+            e.stopPropagation()
+            persistHidden([...hiddenRefs, k.name])
+          }}
+        >
+          hide
+        </span>
         {k.image_path ? (
           <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
@@ -1335,10 +1399,16 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button')) setMapSel('')
           }}
         >
-          <svg className="vp-map-svg">
-            {threads.map((th, i) => (
-              <path key={i} d={th.d} className={!mapSel ? '' : mapSel === th.shot ? 'lit' : 'off'} />
+          {/* Two layers: unselected threads run BEHIND the cards; the selected
+              shot's threads render on a front layer ABOVE everything. Both
+              vanish while scrolling and return re-measured at rest. */}
+          <svg className={`vp-map-svg ${threadsHidden ? 'hush' : ''}`}>
+            {threads.filter((th) => th.shot !== mapSel).map((th, i) => (
+              <path key={i} d={th.d} className={mapSel ? 'off' : ''} />
             ))}
+          </svg>
+          <svg className={`vp-map-svg front ${threadsHidden ? 'hush' : ''}`}>
+            {mapSel ? threads.filter((th) => th.shot === mapSel).map((th, i) => <path key={i} d={th.d} className="lit" />) : null}
           </svg>
 
           <div className="vp-map-shots">
@@ -1376,17 +1446,22 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                           const obj = kit.find((k) => k.name === name)
                           return (
                             <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
-                              <span className="vp-map-ord">{idx + 1}</span>
-                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
-                              {/* Controls live ON the image — no chrome bar below. */}
-                              <div className="vp-map-att-ov">
-                                <span className="vp-map-attname">{ff === name ? '1st frame · ' : ''}{name}</span>
-                                <span className="vp-map-attbtns">
+                              {/* Header ON the image: order controls as one cluster
+                                  (◀ n ▶), the name on its own line. */}
+                              <div className="vp-map-att-top">
+                                <span className="vp-map-ordgrp">
                                   <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                                  <b>{idx + 1}</b>
                                   <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
-                                  <button type="button" className={ff === name ? 'on' : ''} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>1st</button>
-                                  <button type="button" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
                                 </span>
+                                <span className="vp-map-attname">{name}</span>
+                              </div>
+                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
+                              <div className="vp-map-att-ov">
+                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
+                                  {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
+                                </button>
+                                <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
                               </div>
                             </figure>
                           )
@@ -1402,14 +1477,23 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           {/* THE WORLD KIT — masters first (upper-left, solid tint), sized to
               fit vertically; a huge kit overflows sideways, never down. */}
           <div className="vp-map-kit">
-            <span className="vp-map-colhead">World Kit</span>
+            <div className="vp-map-kithead">
+              <span className="vp-map-colhead">World Kit</span>
+              {hiddenRefs.length ? (
+                <button type="button" className="vp-map-showall" onClick={() => persistHidden([])}>
+                  Show all · {hiddenRefs.length} hidden
+                </button>
+              ) : null}
+            </div>
             <div className="vp-map-wall">
               {(() => {
-                const sorted = [...kit].sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
-                const { cols, colW } = packKit(sorted)
-                return cols.map((col, i) => (
-                  <div className="vp-map-coln" key={i} style={{ width: colW }}>
-                    {col.map((k) => kitCard(k))}
+                const sorted = [...kit]
+                  .filter((k) => !hiddenRefs.includes(k.name))
+                  .sort((a, b) => (a.kind === 'master' ? -1 : 0) - (b.kind === 'master' ? -1 : 0))
+                const { rows } = packKit(sorted)
+                return rows.map((row, i) => (
+                  <div className="vp-map-krow" key={i}>
+                    {row.map(({ k, w }) => kitCard(k, w))}
                   </div>
                 ))
               })()}
