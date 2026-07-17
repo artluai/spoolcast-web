@@ -1385,8 +1385,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-shotmeta { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
 .vp-map-shotwhat { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
 .vp-map-attached { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: default; }
-.vp-map-att { position: relative; margin: 0; display: flex; flex-direction: column; gap: 5px; padding: 7px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); }
-.vp-map-att img { height: 120px; width: auto; max-width: 100%; object-fit: contain; border-radius: 6px; display: block; }
+.vp-map-att { position: relative; margin: 0; display: inline-flex; flex-direction: column; gap: 5px; padding: 7px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); width: fit-content; }
+.vp-map-att img { height: 130px; width: auto; border-radius: 6px; display: block; }
 .vp-map-att.ff { border-color: var(--accent-2); }
 .vp-map-ord { position: absolute; top: -8px; left: -8px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #0b0d14; font-family: var(--mono); font-size: 11px; font-weight: 800; z-index: 1; }
 .vp-map-noimg { height: 120px; min-width: 120px; display: grid; place-items: center; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--ink-3); font-family: var(--mono); font-size: 11px; padding: 0 10px; }
@@ -1398,13 +1398,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-attbtns button:disabled { opacity: .35; cursor: default; }
 .vp-map-attbtns button.on { border-color: var(--accent-2); color: var(--accent-2); }
 /* The kit column: masters set apart, the rest a two-column image wall. */
-.vp-map-kit { position: relative; z-index: 1; display: flex; flex-direction: column; }
-.vp-map-masters { padding: 12px; margin-bottom: 16px; border: 1px solid color-mix(in srgb, var(--accent-2) 35%, var(--line-2)); border-radius: 14px; background: color-mix(in srgb, var(--accent-2) 6%, var(--bg-2)); display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.vp-map-masters .vp-map-colhead { grid-column: 1 / -1; margin-bottom: 0; }
-.vp-map-wall { columns: 2; column-gap: 12px; }
-.vp-map-wall .vp-map-card { break-inside: avoid; margin-bottom: 12px; }
-.vp-map-card { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
-.vp-map-card img { width: 100%; height: auto; display: block; }
+.vp-map-kit { position: sticky; top: 4px; align-self: start; z-index: 1; display: flex; flex-direction: column; overflow-y: auto; padding-right: 2px; }
+.vp-map-masters { padding: 10px 12px 12px; margin-bottom: 14px; border: 1px solid color-mix(in srgb, var(--accent-2) 35%, var(--line-2)); border-radius: 14px; background: color-mix(in srgb, var(--accent-2) 6%, var(--bg-2)); display: flex; flex-wrap: wrap; gap: 10px; }
+.vp-map-masters .vp-map-colhead { flex-basis: 100%; margin-bottom: 0; }
+.vp-map-wall { display: flex; flex-wrap: wrap; gap: 10px; }
+.vp-map-card { position: relative; display: inline-block; width: fit-content; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s, opacity .15s; }
+.vp-map-card img { display: block; }
 .vp-map-card:hover { border-color: var(--ink-3); }
 .vp-map-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 .vp-map-card.dim { opacity: .35; }
@@ -1416,7 +1415,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-chip.k-prop { color: #f2c66d; }
 .vp-map-cardname { display: block; padding: 9px 12px 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vp-map-card img + .vp-map-cardname { position: absolute; left: 0; right: 0; bottom: 0; padding-top: 26px; background: linear-gradient(transparent, rgba(8,10,15,.88)); color: var(--ink); }
-.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; padding: 40px 12px 6px; color: var(--ink-3); font-size: 11.5px; line-height: 1.55; min-height: 96px; }
+.vp-map-prompttext { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; width: 168px; height: 96px; padding: 34px 11px 0; color: var(--ink-3); font-size: 10.5px; line-height: 1.5; }
 .vp-map-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; }
 .vp-edit input, .vp-edit textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; text-transform: none; letter-spacing: normal; resize: vertical; }
 .vp-edit input:focus, .vp-edit textarea:focus { outline: none; border-color: var(--accent); }

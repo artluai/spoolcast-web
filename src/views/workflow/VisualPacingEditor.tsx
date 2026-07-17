@@ -284,11 +284,37 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const ro = new ResizeObserver(() => measureThreads())
     if (boardRef.current) ro.observe(boardRef.current)
     window.addEventListener('resize', measureThreads)
+    // The kit column is sticky: scrolling moves it relative to the board, so
+    // thread endpoints go stale without a scroll re-measure (rAF-throttled).
+    const scroller = boardRef.current?.closest('.workflow-view')
+    let ticking = false
+    const onScroll = () => {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(() => {
+        ticking = false
+        measureThreads()
+      })
+    }
+    scroller?.addEventListener('scroll', onScroll)
+    // The kit column must keep EVERY reference on screen while the shots
+    // scroll: cap its height to the real scroller viewport (not 100vh — the
+    // embedded preview reports a zero viewport, and the scroller is the truth
+    // in any host). Inner scroll is the fallback if a huge kit still overflows.
+    const sizeKit = () => {
+      const kitEl = boardRef.current?.querySelector<HTMLElement>('.vp-map-kit')
+      if (kitEl && scroller) kitEl.style.maxHeight = `${Math.max(320, scroller.clientHeight - 88)}px`
+    }
+    sizeKit()
+    const kro = new ResizeObserver(sizeKit)
+    if (scroller) kro.observe(scroller)
     return () => {
       cancelAnimationFrame(raf)
       timers.forEach((id) => window.clearTimeout(id))
       ro.disconnect()
+      kro.disconnect()
       window.removeEventListener('resize', measureThreads)
+      scroller?.removeEventListener('scroll', onScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, draft, mapSel, kit])
@@ -380,6 +406,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     ;[nextNames[at], nextNames[to]] = [nextNames[to], nextNames[at]]
     writeRefs(imageId, nextNames, firstFrameOf(img))
   }
+  // EQUAL SQUARE FOOTAGE: every image gets the same AREA on screen whatever
+  // its aspect ratio — a portrait and a landscape reference are equally
+  // important, so neither may take more room. Computed from the image's own
+  // natural ratio on load; the card hugs the result (no empty box).
+  const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    const r = im.naturalWidth / im.naturalHeight || 1
+    const h = Math.sqrt(area / r)
+    im.style.height = `${Math.round(h)}px`
+    im.style.width = `${Math.round(h * r)}px`
+  }
+
   // One kit object as a card: the IMAGE sizes the card (native ratio, full
   // column width); a prompt-only object gets an equally-weighted text card —
   // never a box sized by its name. Kind chip labels what it is.
@@ -400,7 +438,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       >
         <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" />
+          <img src={contentUrl(k.image_path)} alt={k.name} onLoad={sizeToArea(k.kind === 'master' ? 30000 : 19000)} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
@@ -1273,7 +1311,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                         return (
                           <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
                             <span className="vp-map-ord">{idx + 1}</span>
-                            {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} /> : <span className="vp-map-noimg">{name}</span>}
+                            {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(21000)} /> : <span className="vp-map-noimg">{name}</span>}
                             <figcaption>
                               <span className="vp-map-attname">{name}</span>
                               <span className="vp-map-attbtns">
