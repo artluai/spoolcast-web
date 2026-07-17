@@ -1065,8 +1065,9 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                           <thead>
                             <tr>
                               <th style={{ width: 28 }}>#</th>
-                              <th style={{ width: '46%' }}>On screen</th>
+                              <th style={{ width: '42%' }}>On screen</th>
                               <th>Spoken line — empty = silent</th>
+                              <th style={{ width: 86 }} title="Visual consistency group — clips sharing it share one MASTER reference so they match">Group</th>
                               <th style={{ width: 24 }} />
                             </tr>
                           </thead>
@@ -1077,6 +1078,15 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                                   <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{ci + 1}</td>
                                   <td>{editableCell(ci, 'screen')}</td>
                                   <td>{editableCell(ci, 'line')}</td>
+                                  <td>
+                                    <input
+                                      value={doc.clips![ci].group}
+                                      placeholder="—"
+                                      title="Visual consistency group (clips sharing it share one master)"
+                                      onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, group: e.target.value.toLowerCase() } : x)))}
+                                      style={{ width: '100%', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', fontFamily: 'var(--mono)', fontSize: 10.5, padding: '4px 6px' }}
+                                    />
+                                  </td>
                                   <td>
                                     <button
                                       type="button"

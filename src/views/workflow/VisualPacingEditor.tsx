@@ -22,6 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
+import { parseScreenplay } from '../../lib/screenplay-md'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
@@ -228,7 +229,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // THE KIT, AS OBJECTS: every World Kit reference — kind, description, and
   // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
   // real kit object and gets a real card; it just has no image yet.
-  type KitObject = { name: string; kind: string; notes: string; image_path: string }
+  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string }
   const [kit, setKit] = useState<KitObject[]>([])
   useEffect(() => {
     let live = true
@@ -253,7 +254,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // re-measured on resize and settle timers; equality guard stops loops.
   const [mapSel, setMapSel] = useState('')
   const [mapAI, setMapAI] = useState(false)
-  const [tlOpen, setTlOpen] = useState(false)
+  // null = no user preference yet: hidden by default on the mapping board
+  // (the board is the star there), shown by default on script/table.
+  const [tlOpen, setTlOpen] = useState<boolean | null>(null)
+  const tlShown = tlOpen ?? view !== 'map'
   const [threads, setThreads] = useState<{ shot: string; ref: string; d: string }[]>([])
   const boardRef = useRef<HTMLDivElement>(null)
   const measureThreads = () => {
@@ -287,7 +291,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
     const im = e.currentTarget
     const r = im.naturalWidth / im.naturalHeight || 1
-    const h = Math.sqrt(area / r)
+    let h = Math.sqrt(area / r)
+    // Cap the width so two attachments share a row in the shots column.
+    if (h * r > 132) h = 132 / r
     im.style.height = `${Math.round(h)}px`
     im.style.width = `${Math.round(h * r)}px`
   }
@@ -308,6 +314,25 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     setHiddenRefs(names)
     try { localStorage.setItem(`sc-map-hidden-${activeSession()}`, JSON.stringify(names)) } catch { /* private mode */ }
   }
+  // Consistency groups ride in from the screenplay (one clip = one shot, so
+  // index i maps when the counts line up). Shown as badges on shot cards.
+  const [clipGroups, setClipGroups] = useState<string[]>([])
+  useEffect(() => {
+    let live = true
+    fetch(fileUrl('working/screenplay-v3.md'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!live || typeof out?.data?.content !== 'string') return
+        const doc = parseScreenplay(out.data.content)
+        setClipGroups((doc.clips ?? []).map((c) => c.group))
+      })
+      .catch(() => {
+        /* no screenplay yet — no badges */
+      })
+    return () => {
+      live = false
+    }
+  }, [])
   // Threads vanish while scrolling and reappear (re-measured) at rest —
   // stale curves pointing at moved cards are worse than none.
   const [threadsHidden, setThreadsHidden] = useState(false)
@@ -548,7 +573,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         title={mapSel ? (linkedToSel ? `Detach from ${mapSel}` : `Attach to ${mapSel}`) : k.name}
         onClick={() => mapSel && toggleMapRef(mapSel, k.name)}
       >
-        <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}</span>
+        <span className={`vp-map-chip k-${k.kind}`}>{kindLabel(k.kind)}{(k as { group?: string }).group ? ` · ${(k as { group?: string }).group}` : ''}</span>
         <span
           className="vp-map-hide"
           title="Hide this reference from the board (Show all brings it back)"
@@ -1227,12 +1252,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         </>
       ) : null}
 
-      {/* THE TIMELINE, back on top — collapsed by default behind one slim
-          toggle; the Script tab already owns the read-along view. */}
-      <button type="button" className="vp-tl-toggle" onClick={() => setTlOpen((v) => !v)}>
-        {tlOpen ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
-      </button>
-      {tlOpen ? (
+
+      <div className="vp-viewbar">
+        <div className="vp-viewtoggle">
+          <button type="button" className={view === 'map' ? 'on' : ''} onClick={() => setView('map')}>Mapping</button>
+          <button type="button" className={view === 'script' ? 'on' : ''} onClick={() => setView('script')}>Script</button>
+          <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
+        </div>
+        <button type="button" className="vp-tl-toggle" onClick={() => setTlOpen(!tlShown)}>
+          {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
+        </button>
+        <button
+          type="button"
+          className="vp-undo"
+          title="See or edit the exact text file the engine reads"
+          style={{ marginLeft: 8 }}
+          onClick={() => setRaw(true)}
+        >
+          Edit as text
+        </button>
+      </div>
+
+      {tlShown ? (
         <div className="vp-tl-sticky">
       <TimelineScroller
         zoom={zoom}
@@ -1401,24 +1442,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         </div>
       ) : null}
 
-      <div className="vp-viewbar">
-        <h4 className="vp-sub-h">Pacing</h4>
-        <div className="vp-viewtoggle">
-          <button type="button" className={view === 'map' ? 'on' : ''} onClick={() => setView('map')}>Mapping</button>
-          <button type="button" className={view === 'script' ? 'on' : ''} onClick={() => setView('script')}>Script</button>
-          <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
-        </div>
-        <button
-          type="button"
-          className="vp-undo"
-          title="See or edit the exact text file the engine reads"
-          style={{ marginLeft: 8 }}
-          onClick={() => setRaw(true)}
-        >
-          Edit as text
-        </button>
-      </div>
-
 
       {view === 'map' ? (
         <div
@@ -1468,6 +1491,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     <div className="vp-map-rowhead">
                       <span className="vp-map-shotid">{img.id}</span>
                       <span className="vp-map-shotmeta">{img.holdS}s{img.narration ? '' : ' · silent'}</span>
+                      {clipGroups.length === images.length && clipGroups[images.indexOf(img)] ? (
+                        <span className="vp-map-grpchip" title="Visual consistency group — shares a master with its group">{clipGroups[images.indexOf(img)]}</span>
+                      ) : null}
                       {on ? (
                         <button type="button" className="vp-map-collapse" title="Collapse and unselect" onClick={(e) => { e.stopPropagation(); setMapSel(''); setActiveId('') }}>▴</button>
                       ) : null}
@@ -1496,7 +1522,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                                 </span>
                                 <span className="vp-map-attname">{name}</span>
                               </div>
-                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(23000)} /> : <span className="vp-map-noimg">{name}</span>}
+                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} onLoad={sizeToArea(12500)} /> : <span className="vp-map-noimg">{name}</span>}
                               <div className="vp-map-att-ov">
                                 <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
                                   {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
