@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
 import { actionUrl, activeSession, apiUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
@@ -1493,6 +1493,34 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       : [], // ZERO DUMMY DATA RULE: Source material must come from the engine, not hardcoded mocks.
   )
 
+  // FILES ARE TRUTH: list what is actually in source/ rather than only what
+  // this browser tab uploaded. Uploads used to vanish from this step on
+  // reload — they were on disk (the World Kit could map them via the same
+  // endpoint) but this panel never asked the engine.
+  const loadSourceFiles = useCallback(() => {
+    fetch(apiUrl('source-images', { session: activeSession() }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        const images = out?.images ?? out?.data?.images
+        if (!Array.isArray(images)) return
+        setFiles(
+          images.map((img: { path: string; name: string; size: number }) => ({
+            id: img.path,
+            name: img.name,
+            meta: `${(img.size / 1024).toFixed(1)} KB · in source/`,
+            kind: 'image' as const,
+            desc: '',
+          })),
+        )
+      })
+      .catch(() => {
+        /* engine offline — the upload flow below still explains itself */
+      })
+  }, [])
+  useEffect(() => {
+    if (!blankProject) loadSourceFiles()
+  }, [blankProject, loadSourceFiles])
+
   const setDesc = (id: string, desc: string) =>
     setFiles((current) => current.map((file) => (file.id === id ? { ...file, desc } : file)))
   const removeFile = (id: string) =>
@@ -1528,14 +1556,9 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       })
 
       if (res.ok) {
-      await res.json() // Consume the response to ensure request completes
-        setFiles(prev => [...prev, { 
-          id: `f${Date.now()}`, 
-          name: file.name, 
-          meta: `${(file.size / 1024).toFixed(1)} KB · Uploaded`, 
-          kind: 'doc', 
-          desc: '' 
-        }])
+        await res.json() // Consume the response to ensure request completes
+        // Re-list from the engine: the disk is the truth, not this tab.
+        loadSourceFiles()
         alert(`Successfully uploaded ${file.name} to the engine!`)
       } else {
         alert('Failed to upload file to the engine.')
