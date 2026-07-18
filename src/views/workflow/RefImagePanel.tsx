@@ -3,6 +3,7 @@ import { activeSession, apiUrl, contentUrl, getFileJson, getJson, postAction, st
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { ModelPicker } from './ModelPicker'
+import { VariantModule } from './VariantModule'
 
 // WORLD KIT CASTING PANEL — one kit item's reference image. Two labeled paths:
 //   GENERATE (from the item's notes; options: model, canvas ratio, character
@@ -72,6 +73,8 @@ export function RefImagePanel({
   onNotesInput,
   onNotesFocus,
   onToast,
+  onVariantCreated,
+  onAudioAdd,
 }: {
   refId: string
   notes: string
@@ -94,6 +97,10 @@ export function RefImagePanel({
   onNotesInput?: (text: string) => void
   onNotesFocus?: () => void
   onToast: (message: string) => void
+  // The engine writes variant/audio rows to the FILE; these callbacks let the
+  // host editor mirror them into its unsaved draft so saving doesn't erase them.
+  onVariantCreated?: (name: string, instruction: string) => void
+  onAudioAdd?: (audio: { name: string; kind: string; linkedTo: string; source: string; notes: string }) => void
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
@@ -265,6 +272,46 @@ export function RefImagePanel({
     v.kind === 'mapped' ? contentUrl(v.path ?? '') : contentUrl(`source/world-kit-refs/${refId}/${v.file ?? ''}`)
   const versionRelPath = (v: RefVersion) =>
     v.kind === 'mapped' ? (v.path ?? '') : `source/world-kit-refs/${refId}/${v.file ?? ''}`
+  const activeVersion = manifest?.versions.find((v) => v.id === manifest?.active) ?? null
+
+  // VARIANT + LINKED AUDIO state (the buttons at the panel's foot).
+  const [variantOpen, setVariantOpen] = useState(false)
+  const [audioOpen, setAudioOpen] = useState(false)
+  const [aName, setAName] = useState('')
+  const [aKind, setAKind] = useState('voice')
+  const [aNotes, setANotes] = useState('')
+  const [aUrl, setAUrl] = useState('')
+  const [aBusy, setABusy] = useState(false)
+  const saveAudio = async (file?: File) => {
+    setABusy(true)
+    try {
+      let source = aUrl.trim()
+      if (file) {
+        const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, '-')
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const rd = new FileReader()
+          rd.onload = () => resolve(String(rd.result).split(',')[1] || '')
+          rd.onerror = reject
+          rd.readAsDataURL(file)
+        })
+        const up = await postAction<{ path?: string }>({ action: 'upload_file', filename: safe, content: b64, dir: 'audio-refs' })
+        if (!up?.ok) {
+          onToast(`Engine: ${up?.error || 'audio upload failed.'}`)
+          return
+        }
+        source = `source/audio-refs/${safe}`
+      }
+      const name = (aName.trim() || `${refId}-${aKind}`).replace(/-+$/, '')
+      onAudioAdd?.({ name, kind: aKind, linkedTo: refId, source, notes: aNotes.trim() })
+      onToast(`${aKind} object "${name}" added, linked to ${refId} — save the step to keep it.`)
+      setAName('')
+      setANotes('')
+      setAUrl('')
+      setAudioOpen(false)
+    } finally {
+      setABusy(false)
+    }
+  }
 
   // Which kit item an attached image belongs to (by its world-kit-refs path,
   // or by the pool entry's ref for mapped actives).
@@ -916,6 +963,98 @@ export function RefImagePanel({
           </div>
         )}
       </div>
+      {/* VARIANT + LINKED AUDIO — the object's derivatives. A variant is an
+          alternate take (this item as reference 1); linked audio is a voice/
+          music object that belongs to this item (a character's voice rides
+          into every clip that references them). */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        <button type="button" className="vp-undo" onClick={() => setVariantOpen(true)}>
+          + Variant{activeVersion ? '' : ' (of the prompt)'}
+        </button>
+        <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
+          {audioOpen ? '▾' : '+'} Linked audio
+        </button>
+      </div>
+      {audioOpen ? (
+        <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>NAME
+              <input
+                value={aName}
+                onChange={(e) => setAName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
+                placeholder={`${refId}-voice`}
+                style={{ display: 'block', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 12, marginTop: 3 }}
+              />
+            </label>
+            <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>KIND
+              <select
+                value={aKind}
+                onChange={(e) => setAKind(e.target.value)}
+                style={{ display: 'block', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 12, marginTop: 3 }}
+              >
+                <option value="voice">voice</option>
+                <option value="music">music</option>
+                <option value="ambience">ambience</option>
+                <option value="sfx">sfx</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 11, color: 'var(--ink-3)', flex: 1, minWidth: 180 }}>AUDIO URL (optional)
+              <input
+                value={aUrl}
+                onChange={(e) => setAUrl(e.target.value)}
+                placeholder="https://…/sample.mp3"
+                style={{ display: 'block', width: '100%', boxSizing: 'border-box', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 12, marginTop: 3 }}
+              />
+            </label>
+          </div>
+          <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>PROMPT — how it sounds
+            <textarea
+              rows={2}
+              value={aNotes}
+              onChange={(e) => setANotes(e.target.value)}
+              placeholder="e.g. warm casual female voice, early 20s, relaxed pacing — same voice in every clip"
+              style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 13, marginTop: 3 }}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button type="button" className="vp-save" disabled={aBusy || (!aNotes.trim() && !aUrl.trim())} onClick={() => void saveAudio()}>
+              {aBusy ? 'Saving…' : 'Add audio object'}
+            </button>
+            <label className="vp-undo" style={{ cursor: 'pointer' }}>
+              ↑ upload audio file
+              <input
+                type="file"
+                accept="audio/mpeg,audio/wav,audio/mp4,.mp3,.wav,.m4a"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void saveAudio(f)
+                }}
+              />
+            </label>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>a prompt, a file, or a URL — any of the three works</span>
+          </div>
+        </div>
+      ) : null}
+      {variantOpen ? (
+        <VariantModule
+          base={{
+            name: refId,
+            kind,
+            notes,
+            image_path: activeVersion ? versionRelPath(activeVersion) : '',
+            active_prompt: activeVersion?.prompt || '',
+            active_model: activeVersion?.model || '',
+          }}
+          kit={[]}
+          onClose={() => setVariantOpen(false)}
+          onCreated={(name, instruction) => {
+            onToast(`Variant ${name} created.`)
+            onVariantCreated?.(name, instruction)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

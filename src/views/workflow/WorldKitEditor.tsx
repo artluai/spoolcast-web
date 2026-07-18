@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
-import { parseWorldKit, serializeWorldKit, type WKDoc } from '../../lib/worldkit-md'
+import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
 import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import { useWorkflowStore } from '../../store/workflow'
@@ -22,6 +22,8 @@ const SECTION_BLURBS: Record<string, string> = {
   'Master Shots': 'The approved scenes your clips will start from — add cast + environment images as reference images, describe the moment, and generate.',
   'Beat-Specific Refs': 'One-off refs scoped to a single beat.',
   'Beat-Specific References': 'One-off refs scoped to a single beat.',
+  'Master variants': 'Alternate takes of a master — same setup, one deliberate change.',
+  Audio: 'Voices, music and ambience. A voice linked to a cast member rides into every clip that references them.',
 }
 
 /**
@@ -165,6 +167,27 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
     }
   }
   const apply = (d: WKDoc) => setStageDraft(stageId, serializeWorldKit(d))
+
+  // Append a row into a named table section of the DRAFT (creating the
+  // section when missing). Variant/audio creations write the FILE via the
+  // engine; mirroring them here keeps the unsaved draft from erasing them
+  // on the next save.
+  const appendRowToTable = (heading: string, columns: string[], row: string[]) => {
+    if (!doc) return
+    snapshot()
+    const d = JSON.parse(JSON.stringify(doc)) as WKDoc
+    let sec = d.sections.find(
+      (s): s is Extract<WKSection, { kind: 'table' }> => s.kind === 'table' && s.heading.toLowerCase() === heading.toLowerCase(),
+    )
+    if (!sec) {
+      sec = { heading, kind: 'table', columns, rows: [] }
+      d.sections.push(sec)
+    }
+    const out = row.slice(0, sec.columns.length)
+    while (out.length < sec.columns.length) out.push('')
+    sec.rows.push(out)
+    apply(d)
+  }
 
   // Cast reference images from the show data, matched by ref id.
   const castImages: Record<string, string> = {}
@@ -496,6 +519,21 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             setCell(descIdx, text)
                           }}
                           onToast={toast}
+                          onVariantCreated={(name, instruction) => {
+                            const groupIdx = section.columns.findIndex((c) => /group/i.test(c))
+                            appendRowToTable(
+                              'Master variants',
+                              ['Ref', 'Kind', 'Scope', 'Group', 'Variant of', 'Notes'],
+                              [name, 'variant', 'episode-only', groupIdx >= 0 ? row[groupIdx] : '', row[refIdx].trim(), instruction.replace(/\|/g, '/')],
+                            )
+                          }}
+                          onAudioAdd={(a) => {
+                            appendRowToTable(
+                              'Audio',
+                              ['Ref', 'Kind', 'Scope', 'Linked to', 'Source', 'Notes'],
+                              [a.name, a.kind, 'episode-only', a.linkedTo, a.source, a.notes.replace(/\|/g, '/')],
+                            )
+                          }}
                         />
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{fieldRows}</div>
