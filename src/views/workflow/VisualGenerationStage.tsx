@@ -115,8 +115,8 @@ const imageModels = [
 ]
 
 const videoModels = [
-  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 10s', maxSeconds: 10 },
-  { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 10s', maxSeconds: 10 },
+  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 15s', maxSeconds: 15 },
+  { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 15s', maxSeconds: 15 },
 ]
 
 function modelLabel(models: { id: string; label: string }[], id: string) {

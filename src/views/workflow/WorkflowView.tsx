@@ -37,6 +37,7 @@ type WorkflowApiStatus = {
     workflow_graph?: { nodes?: WorkflowNode[] }
     blockers?: string[]
     check_health?: CheckHealth
+    current_stage?: string
   }
 }
 
@@ -135,6 +136,17 @@ export function WorkflowView({
   const workflowNodes = apiStatus?.data?.workflow_graph?.nodes || []
   const firstIncompleteNode = workflowNodes.find((n) => n.status !== 'passed' && n.status !== 'approved')
   const firstIncompleteStageId = firstIncompleteNode?.id
+  // BLOCKED, not "In progress": a step AFTER the engine's current_stage is
+  // gated on an earlier stage's approval — dirty edits or existing artifacts
+  // on it don't make it "in progress", they make it blocked. The current
+  // stage itself (and everything before it) is never gated.
+  const engineCurrentStageId: string | undefined = apiStatus?.data?.current_stage
+  const engineCurrentIdx = workflowNodes.findIndex((n) => n.id === engineCurrentStageId)
+  const isGatedStage = (key: string | undefined) => {
+    if (engineCurrentIdx < 0 || !key) return false
+    const idx = workflowNodes.findIndex((n) => n.id === key)
+    return idx > engineCurrentIdx
+  }
   const finalRender = useWorkflowStore((s) => s.finalRender)
   const steps = rawSteps.map((step) => {
     const key = step.sourceId ?? step.id
@@ -421,7 +433,7 @@ export function WorkflowView({
     && Number(activeStep.progress?.total || 0) > 0
     && Number(activeStep.progress?.done || 0) < Number(activeStep.progress?.total || 0)
 
-  const statusLabel =
+  const rawStatusLabel =
     isCurrentlyEditing ? 'In progress' :
     hasActiveStageProcess ? 'In progress' :
     activeProgressIncomplete ? 'In progress' :
@@ -434,6 +446,12 @@ export function WorkflowView({
     engineStatus === 'not_started' ? 'Not started' :
     engineStatus === 'ready' ? 'Ready' :
     'Pending'
+  // A gated step can't be "In progress" (unless a real process is running on
+  // it): whatever made it look active, it is waiting on an earlier approval.
+  const statusLabel =
+    rawStatusLabel === 'In progress' && !hasActiveStageProcess && isGatedStage(activeStep.sourceId)
+      ? 'Blocked'
+      : rawStatusLabel
   // Width should serve the content: wide is for big editors, grids, tables
   // and timelines. Steps that are reading columns or rows/options (setup)
   // stay at normal width. The screenplay is wide since it became the
@@ -828,7 +846,13 @@ export function WorkflowView({
                 </span>
               ) : null}
               <span className="node-foot">
-                <b>{displayStatus === 'done' ? 'Complete' : displayStatus === 'work' ? 'In progress' : 'Pending'}</b>
+                <b>
+                  {displayStatus === 'done'
+                    ? 'Complete'
+                    : displayStatus === 'work'
+                      ? isGatedStage(step.sourceId ?? step.id) ? 'Blocked' : 'In progress'
+                      : 'Pending'}
+                </b>
                 {step.progress ? <small>{step.progress.done}/{step.progress.total}</small> : null}
               </span>
             </button>
