@@ -641,6 +641,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             const li = section.columns.findIndex((c) => /linked/i.test(c))
                             return li >= 0 ? (row[li] || '').trim() : ''
                           })()}
+                          onApprove={() => setExpanded(null)}
                           onLinkedToChange={(v) => {
                             const li = section.columns.findIndex((c) => /linked/i.test(c))
                             if (li >= 0) {
@@ -688,7 +689,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{fieldRows}</div>
                       )}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-                            <button style={btn} onClick={() => setExpanded(null)}>Done</button>
+                            {!/^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '') && (
+                              <button style={btn} onClick={() => setExpanded(null)}>Done</button>
+                            )}
                             {confirmRemove === expanded ? (
                               <>
                                 <span style={{ color: 'var(--amber)', fontSize: 12 }}>

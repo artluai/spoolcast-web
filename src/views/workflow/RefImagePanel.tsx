@@ -79,6 +79,7 @@ export function RefImagePanel({
   onAudioAdd,
   linkedTo = '',
   onLinkedToChange,
+  onApprove,
 }: {
   refId: string
   notes: string
@@ -108,6 +109,8 @@ export function RefImagePanel({
   // Audio objects: the kit item this sound belongs to (Linked to column).
   linkedTo?: string
   onLinkedToChange?: (name: string) => void
+  // Audio items: the bottom-right slot shows Approve until a link exists.
+  onApprove?: () => void
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
@@ -912,18 +915,24 @@ export function RefImagePanel({
               ) : null}
               {isAudio ? (
                 <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10, gap: 8 }}>
-                  <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
-                  <button
-                    type="button"
-                    className="vp-save"
-                    disabled={describing || !linkedTo}
-                    title={linkedTo
-                      ? `AI derives the voice from ${linkedTo} — its image if it has one, its description otherwise`
-                      : 'Link an object first'}
-                    onClick={() => void generateVoiceFromLinked()}
-                  >
-                    {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate voice from linked object'}
-                  </button>
+                  {linkedTo ? (
+                    <>
+                      <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
+                      <button
+                        type="button"
+                        className="vp-save"
+                        disabled={describing}
+                        title={`AI derives the voice from ${linkedTo} — its image if it has one, its description otherwise`}
+                        onClick={() => void generateVoiceFromLinked()}
+                      >
+                        {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate voice from linked object'}
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="vp-save" title="Keep this audio object as written and close" onClick={() => onApprove?.()}>
+                      ✓ Approve
+                    </button>
+                  )}
                 </div>
               ) : null}
             </div>
