@@ -77,6 +77,7 @@ export function RefImagePanel({
   onToast,
   onVariantCreated,
   onAudioAdd,
+  linkedTo = '',
 }: {
   refId: string
   notes: string
@@ -103,6 +104,8 @@ export function RefImagePanel({
   // host editor mirror them into its unsaved draft so saving doesn't erase them.
   onVariantCreated?: (name: string, instruction: string) => void
   onAudioAdd?: (audio: { name: string; kind: string; linkedTo: string; source: string; notes: string }) => void
+  // Audio objects: the kit item this sound belongs to (Linked to column).
+  linkedTo?: string
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
@@ -287,6 +290,29 @@ export function RefImagePanel({
   const [aNotes, setANotes] = useState('')
   const [aUrl, setAUrl] = useState('')
   const [aBusy, setABusy] = useState(false)
+  // THE EAR: find the linked item's active image and ask AI what voice that
+  // person would have — the user's idea, made a button.
+  const voiceFromImage = async () => {
+    if (!linkedTo) return
+    const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
+      apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
+    )
+    const hit = (out?.data?.images ?? []).find((img) => img.ref === linkedTo)
+    if (!hit) {
+      onToast(`"${linkedTo}" has no image yet — pick or generate one there first.`)
+      return
+    }
+    setDescribing(true)
+    const res = await postAction<{ text?: string }>({ action: 'describe_ref_image', path: hit.path, voice: true, allow_cost: true })
+    setDescribing(false)
+    if (res?.ok && res.data?.text) {
+      onDescribed(res.data.text)
+      onToast(`Voice written from ${linkedTo}'s image — edit it like any prompt.`)
+    } else {
+      onToast(`Engine: ${res?.error || res?.message || 'could not describe the voice.'}`)
+    }
+  }
+
   const saveAudio = async (file?: File) => {
     setABusy(true)
     try {
@@ -701,7 +727,7 @@ export function RefImagePanel({
             <div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 {charPrompt === null ? (
-                  'IMAGE PROMPT — makes this item’s image'
+                  isAudio ? 'SOUND DESCRIPTION — how it sounds; rides into every clip of whatever it’s linked to' : 'IMAGE PROMPT — makes this item’s image'
                 ) : (
                   <>
                     {(['prompt', 'character'] as const).map((v) => (
@@ -751,9 +777,26 @@ export function RefImagePanel({
                 }}
               />
               {/* One row under the prompt: the two create entries left, the
-                  character count right — with the text it measures. */}
+                  character count right — with the text it measures. Audio
+                  items instead get the ear: AI writes the voice the LINKED
+                  item's picture suggests. */}
+              {isAudio ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="vp-undo"
+                    disabled={describing || !linkedTo}
+                    title={linkedTo
+                      ? `AI looks at ${linkedTo}'s picture and writes the voice they'd have`
+                      : 'Set LINKED TO to a kit item with an image first'}
+                    onClick={() => void voiceFromImage()}
+                  >
+                    {describing ? (<><span className="spin" /> Listening…</>) : `✦ Voice from ${linkedTo || 'linked'}’s image`}
+                  </button>
+                </div>
+              ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-                {(isAudio ? [] : (['version', 'variant'] as const)).map((m) => {
+                {(['version', 'variant'] as const).map((m) => {
                   const on = createOpen && createMode === m
                   return (
                     <button
@@ -786,6 +829,7 @@ export function RefImagePanel({
                   {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
                 </span>
               </div>
+              )}
             </div>
       {createOpen && !isAudio && (
         <div style={{ position: 'relative', marginTop: 8 }}>
