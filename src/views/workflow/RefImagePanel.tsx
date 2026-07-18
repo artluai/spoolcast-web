@@ -275,7 +275,7 @@ export function RefImagePanel({
   const activeVersion = manifest?.versions.find((v) => v.id === manifest?.active) ?? null
 
   // VARIANT + LINKED AUDIO state (the buttons at the panel's foot).
-  const [variantOpen, setVariantOpen] = useState(false)
+  const [createMode, setCreateMode] = useState<'version' | 'variant'>('version')
   const [audioOpen, setAudioOpen] = useState(false)
   const [aName, setAName] = useState('')
   const [aKind, setAKind] = useState('voice')
@@ -668,7 +668,9 @@ export function RefImagePanel({
                       background: 'none',
                     }}
                   >
-                    <img src={versionUrl(v)} alt="" style={{ height: 72, width: 'auto', maxWidth: 128, display: 'block' }} />
+                    {/* Natural proportions, generous size — the page scrolls,
+                        cropped postage stamps hide what changed between takes. */}
+                    <img src={versionUrl(v)} alt="" style={{ height: 170, width: 'auto', maxWidth: 340, display: 'block' }} />
                   </button>
                 ))}
               </div>
@@ -728,18 +730,34 @@ export function RefImagePanel({
                 }}
               />
             </div>
-      {/* CREATE — collapsed by default; the whole point when no image exists */}
+      {/* CREATE — collapsed by default; the whole point when no image exists.
+          THREE distinct creations, and the UI says which is which:
+            NEW VERSION — another take of THIS item (lands in its history)
+            VARIANT     — a NEW linked item, one deliberate change (own history)
+            NEW OBJECT  — unrelated item: + Add on the section header. */}
       {!createOpen && (
-        <div style={{ marginTop: 4 }}>
+        <div style={{ marginTop: 4, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => { setCreateMode('version'); setCreateOpen(true) }}
+            title="Another take of THIS item — lands in its history, click a thumbnail to pick the active one"
             style={{
               background: 'none', border: 'none', padding: 0, cursor: 'pointer',
               ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
             }}
           >
             <span style={{ fontSize: 10 }}>▸</span> CREATE A NEW VERSION
+          </button>
+          <button
+            type="button"
+            onClick={() => { setCreateMode('variant'); setCreateOpen(true) }}
+            title="A NEW kit item derived from this one — one deliberate change, gets its own history. (For an unrelated item use + Add on the section.)"
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
+            }}
+          >
+            <span style={{ fontSize: 10 }}>▸</span> CREATE A VARIANT
           </button>
         </div>
       )}
@@ -753,6 +771,49 @@ export function RefImagePanel({
           >
             ▴
           </button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 6 }}>
+            {(['version', 'variant'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setCreateMode(m)}
+                style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  fontSize: 11, letterSpacing: '.08em', fontFamily: 'var(--mono)',
+                  color: createMode === m ? 'var(--ink-1)' : 'var(--ink-3)',
+                  textDecoration: createMode === m ? 'underline' : 'none', textUnderlineOffset: 3,
+                }}
+              >
+                {m === 'version' ? 'NEW VERSION' : 'VARIANT'}
+              </button>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+              {createMode === 'version'
+                ? `another take of ${refId} — lands in its history above`
+                : `a NEW linked item — one deliberate change, its own history · unrelated item? use + Add on the section`}
+            </span>
+          </div>
+          {createMode === 'variant' ? (
+            <VariantModule
+              inline
+              base={{
+                name: refId,
+                kind,
+                notes,
+                image_path: activeVersion ? versionRelPath(activeVersion) : '',
+                active_prompt: activeVersion?.prompt || '',
+                active_model: activeVersion?.model || '',
+              }}
+              kit={[]}
+              onClose={() => setCreateMode('version')}
+              onCreated={(name, instruction) => {
+                onToast(`Variant ${name} created.`)
+                onVariantCreated?.(name, instruction)
+                setCreateMode('version')
+              }}
+            />
+          ) : (
+            <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
             <button type="button" className="core-create" style={{ marginLeft: 0 }} disabled={generating} onClick={generate}>
               {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
@@ -958,19 +1019,16 @@ export function RefImagePanel({
               )}
             </div>
           )}
+            </>
+          )}
         </div>
       )}
           </div>
         )}
       </div>
-      {/* VARIANT + LINKED AUDIO — the object's derivatives. A variant is an
-          alternate take (this item as reference 1); linked audio is a voice/
-          music object that belongs to this item (a character's voice rides
-          into every clip that references them). */}
+      {/* LINKED AUDIO — a voice/music object that belongs to this item (a
+          character's voice rides into every clip that references them). */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-        <button type="button" className="vp-undo" onClick={() => setVariantOpen(true)}>
-          + Variant{activeVersion ? '' : ' (of the prompt)'}
-        </button>
         <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
           {audioOpen ? '▾' : '+'} Linked audio
         </button>
@@ -1036,24 +1094,6 @@ export function RefImagePanel({
             <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>a prompt, a file, or a URL — any of the three works</span>
           </div>
         </div>
-      ) : null}
-      {variantOpen ? (
-        <VariantModule
-          base={{
-            name: refId,
-            kind,
-            notes,
-            image_path: activeVersion ? versionRelPath(activeVersion) : '',
-            active_prompt: activeVersion?.prompt || '',
-            active_model: activeVersion?.model || '',
-          }}
-          kit={[]}
-          onClose={() => setVariantOpen(false)}
-          onCreated={(name, instruction) => {
-            onToast(`Variant ${name} created.`)
-            onVariantCreated?.(name, instruction)
-          }}
-        />
       ) : null}
     </div>
   )

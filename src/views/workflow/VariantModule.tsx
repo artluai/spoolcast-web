@@ -25,6 +25,7 @@ export function VariantModule({
   kit,
   initialPos,
   anchorRect,
+  inline = false,
   onClose,
   onCreated,
 }: {
@@ -35,6 +36,9 @@ export function VariantModule({
   initialPos?: { x: number; y: number }
   // Optional: the on-screen rect of the base's card — draws the dashed thread.
   anchorRect?: () => DOMRect | undefined
+  // Inline mode: render only the fields (no floating window) — for embedding
+  // in a host panel that already shows the base item (World Kit CREATE box).
+  inline?: boolean
   onClose: () => void
   onCreated: (name: string, instruction: string) => void
 }) {
@@ -223,6 +227,100 @@ export function VariantModule({
     setVErr('Still generating — it will appear in the kit when done.')
   }
 
+
+  // The FIELDS are the module; the floating window is only chrome. Inline
+  // mode embeds them straight into a host panel.
+  const fieldsJsx = (
+    <div className="vp-var-fields">
+      <label className="vp-edit-field">What changes (one deliberate change)
+        <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
+      </label>
+      <div className="vp-var-row">
+        <button
+          type="button"
+          className="vp-undo"
+          disabled={!(base.active_prompt || base.notes)}
+          title="Append the prompt that made the base"
+          onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + (base.active_prompt || base.notes || ''))}
+        >
+          Import original prompt
+        </button>
+        <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
+          {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
+        </button>
+        <ModelPicker
+          model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
+          onChange={setVModel}
+          disabled={!!vBusy}
+          models={IMAGE_MODELS}
+          primary={IMAGE_MODELS}
+        />
+      </div>
+      {vExtrasOpen ? (
+        <div className="vp-var-extras">
+          {pool.filter((k) => k.image_path && k.name !== base.name).map((k) => (
+            <button
+              key={k.name}
+              type="button"
+              className={`vp-var-xref ${vExtras.includes(k.image_path) ? 'on' : ''}`}
+              title={k.name}
+              onClick={() => setVExtras((cur) => (cur.includes(k.image_path) ? cur.filter((p) => p !== k.image_path) : [...cur, k.image_path]))}
+            >
+              <img src={contentUrl(k.image_path)} alt={k.name} />
+            </button>
+          ))}
+          {vUploads.map((u) => (
+            <button
+              key={u.path}
+              type="button"
+              className={`vp-var-xref ${vExtras.includes(u.path) ? 'on' : ''}`}
+              title={u.name}
+              onClick={() => setVExtras((cur) => (cur.includes(u.path) ? cur.filter((p) => p !== u.path) : [...cur, u.path]))}
+            >
+              <img src={contentUrl(u.path)} alt={u.name} />
+            </button>
+          ))}
+          <label className="vp-var-xref vp-var-upl" title="Upload your own reference image">
+            ↑ upload
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void uploadExtraRef(f)
+              }}
+            />
+          </label>
+        </div>
+      ) : null}
+      <label className="vp-edit-field">Variant name
+        <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${base.name}--…`} />
+      </label>
+      {vErr ? <p className="vp-var-err">{vErr}</p> : null}
+      <div className="vp-edit-actions">
+        <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
+          ✦ Generate variant
+        </button>
+      </div>
+    </div>
+  )
+
+  if (inline) {
+    return (
+      <div className="vp-var-inline" style={{ position: 'relative', border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 12 }}>
+        {fieldsJsx}
+        {vBusy ? (
+          <div className="vp-var-busyov" style={{ borderRadius: 10 }}>
+            <span className="spin" />
+            <span>{vBusy}</span>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   const rect = anchorRect?.()
   const pos = vPos ?? { x: 120, y: 120 }
   return createPortal(
@@ -265,80 +363,7 @@ export function VariantModule({
                 {(base.active_prompt || base.notes || 'Prompt-only reference.')}
               </div>
             )}
-            <div className="vp-var-fields">
-              <label className="vp-edit-field">What changes (one deliberate change)
-                <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
-              </label>
-              <div className="vp-var-row">
-                <button
-                  type="button"
-                  className="vp-undo"
-                  disabled={!(base.active_prompt || base.notes)}
-                  title="Append the prompt that made the base"
-                  onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + (base.active_prompt || base.notes || ''))}
-                >
-                  Import original prompt
-                </button>
-                <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
-                  {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
-                </button>
-                <ModelPicker
-                  model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
-                  onChange={setVModel}
-                  disabled={!!vBusy}
-                  models={IMAGE_MODELS}
-                  primary={IMAGE_MODELS}
-                />
-              </div>
-              {vExtrasOpen ? (
-                <div className="vp-var-extras">
-                  {pool.filter((k) => k.image_path && k.name !== base.name).map((k) => (
-                    <button
-                      key={k.name}
-                      type="button"
-                      className={`vp-var-xref ${vExtras.includes(k.image_path) ? 'on' : ''}`}
-                      title={k.name}
-                      onClick={() => setVExtras((cur) => (cur.includes(k.image_path) ? cur.filter((p) => p !== k.image_path) : [...cur, k.image_path]))}
-                    >
-                      <img src={contentUrl(k.image_path)} alt={k.name} />
-                    </button>
-                  ))}
-                  {vUploads.map((u) => (
-                    <button
-                      key={u.path}
-                      type="button"
-                      className={`vp-var-xref ${vExtras.includes(u.path) ? 'on' : ''}`}
-                      title={u.name}
-                      onClick={() => setVExtras((cur) => (cur.includes(u.path) ? cur.filter((p) => p !== u.path) : [...cur, u.path]))}
-                    >
-                      <img src={contentUrl(u.path)} alt={u.name} />
-                    </button>
-                  ))}
-                  <label className="vp-var-xref vp-var-upl" title="Upload your own reference image">
-                    ↑ upload
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0]
-                        e.target.value = ''
-                        if (f) void uploadExtraRef(f)
-                      }}
-                    />
-                  </label>
-                </div>
-              ) : null}
-              <label className="vp-edit-field">Variant name
-                <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${base.name}--…`} />
-              </label>
-              {vErr ? <p className="vp-var-err">{vErr}</p> : null}
-              <div className="vp-edit-actions">
-                <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
-                  ✦ Generate variant
-                </button>
-              </div>
-            </div>
+            {fieldsJsx}
           </div>
         </div>
         {vBusy ? (

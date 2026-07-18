@@ -2589,3 +2589,10 @@ body.chat-pinned { padding-right: 380px; }
 .sleek-range::-moz-range-progress { height: 2px; border-radius: 1px; background: var(--ink-2); }
 .sleek-range::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: none; }
 .sleek-range:disabled { opacity: .35; cursor: default; }
+
+/* Inline variant form (World Kit CREATE box): same field styling the popup
+   inherits from .vp-edit, without the popup's window chrome. */
+.vp-var-inline input, .vp-var-inline textarea { display: block; width: 100%; margin-top: 6px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 13px; resize: vertical; }
+.vp-var-inline input:focus, .vp-var-inline textarea:focus { outline: none; border-color: var(--accent); }
+.vp-var-inline .vp-edit-field { display: block; color: var(--ink-3); font-size: 11px; margin-bottom: 10px; }
+.vp-var-inline .vp-edit-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
