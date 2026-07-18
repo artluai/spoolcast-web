@@ -114,6 +114,9 @@ export function RefImagePanel({
   const [pool, setPool] = useState<PoolImage[] | null>(null)
   // Masters are full scenes; the character-sheet rewrite only fits ingredients.
   const isMaster = /master/i.test(kind)
+  // Audio objects (voice/music/ambience/sfx) have no image to generate —
+  // their panel is the fields + prompt + source, nothing else.
+  const isAudio = /^(voice|music|ambience|sfx|audio)\b/i.test(kind)
   // Canvas ratio for THIS generation ('auto' = the video's ratio). A wide
   // character sheet inside a vertical video is normal.
   const [ratio, setRatio] = useState('auto')
@@ -662,7 +665,7 @@ export function RefImagePanel({
                 textAlign: 'center', padding: 10,
               }}
             >
-              {manifest === null ? 'Loading…' : 'No image yet — create one below.'}
+              {manifest === null ? 'Loading…' : isAudio ? 'Audio object — describe the sound; attach a sample via SOURCE (file path or URL).' : 'No image yet — create one below.'}
             </div>
           )}
           {versions.some((v) => v.id !== manifest?.active) && (
@@ -750,7 +753,7 @@ export function RefImagePanel({
               {/* One row under the prompt: the two create entries left, the
                   character count right — with the text it measures. */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-                {(['version', 'variant'] as const).map((m) => {
+                {(isAudio ? [] : (['version', 'variant'] as const)).map((m) => {
                   const on = createOpen && createMode === m
                   return (
                     <button
@@ -784,7 +787,7 @@ export function RefImagePanel({
                 </span>
               </div>
             </div>
-      {createOpen && (
+      {createOpen && !isAudio && (
         <div style={{ position: 'relative', marginTop: 8 }}>
           <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '0 0 8px' }}>
             {createMode === 'version'
@@ -1020,11 +1023,13 @@ export function RefImagePanel({
       </div>
       {/* LINKED AUDIO — a voice/music object that belongs to this item (a
           character's voice rides into every clip that references them). */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-        <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
-          {audioOpen ? '▾' : '+'} Linked audio
-        </button>
-      </div>
+      {!isAudio && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+          <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
+            {audioOpen ? '▾' : '+'} Linked audio
+          </button>
+        </div>
+      )}
       {audioOpen ? (
         <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

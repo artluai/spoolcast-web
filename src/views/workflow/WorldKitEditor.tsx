@@ -110,6 +110,12 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
     doc = null
   }
   const parseFailed = !doc || doc.sections.length === 0
+  // AUDIO IS A FIRST-CLASS AREA: consistent voices, soundtrack, ambience,
+  // SFX. Render the section even before any rows exist — + Add writes it
+  // into the draft the moment the first object lands.
+  if (doc && doc.sections.length > 0 && !doc.sections.some((sec) => sec.kind === 'table' && /^audio$/i.test(sec.heading.trim()))) {
+    doc.sections.push({ heading: 'Audio', kind: 'table', columns: ['Ref', 'Kind', 'Scope', 'Linked to', 'Source', 'Notes'], rows: [] })
+  }
   // Every kit item's kind + notes, keyed by ref — the casting panel uses it
   // to pull referenced items' TEXT into a composed generation's prompt.
   const kitIndex: Record<string, { kind: string; notes: string; section: string }> = {}
@@ -274,7 +280,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
             if (sec.kind === 'table') {
               sec.rows.push(
                 sec.columns.map((c) =>
-                  /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? 'prop' : /scope/i.test(c) ? 'episode-only' : '',
+                  /ref/i.test(c) ? 'new-item' : /kind/i.test(c) ? (/audio/i.test(section.heading) ? 'voice' : 'prop') : /scope/i.test(c) ? 'episode-only' : '',
                 ),
               )
               apply(d)
@@ -425,6 +431,41 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                         </button>
                       )
                     }
+                    const descText = descIdx !== refIdx ? (row[descIdx] || '').trim() : ''
+                    if (descText && !(expanded ?? '').startsWith(`${si}:`)) {
+                      // PROMPT-ONLY TEXT CARD — same rule as the mapping wall:
+                      // a text object is a visual object and takes up space,
+                      // in a footprint comparable to the image cards.
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setExpanded(expanded === key ? null : key)}
+                          title={shared ? 'Shared with the show/template' : 'This episode only'}
+                          style={{
+                            width: 232, height: 205, textAlign: 'left',
+                            background: 'rgba(255,255,255,.03)',
+                            border: `1px solid ${expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
+                            borderRadius: 10, padding: 0, overflow: 'hidden', cursor: 'pointer',
+                            display: 'flex', flexDirection: 'column',
+                          }}
+                        >
+                          <span style={{ padding: '10px 12px 0', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
+                            {row[refIdx] || '(unnamed)'}
+                            {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
+                          </span>
+                          <span
+                            style={{
+                              flex: 1, padding: '6px 12px 10px', color: 'var(--ink-3)', fontSize: 11.5, lineHeight: 1.5,
+                              overflow: 'hidden',
+                              maskImage: 'linear-gradient(180deg, #000 68%, transparent 98%)',
+                              WebkitMaskImage: 'linear-gradient(180deg, #000 68%, transparent 98%)',
+                            }}
+                          >
+                            {descText}
+                          </span>
+                        </button>
+                      )
+                    }
                     return (
                       <button
                         key={key}
@@ -506,6 +547,25 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                                 </select>
                               </label>
                             )}
+                            {/* The section's OTHER columns (Linked to, Source,
+                                Group, Variant of…) — every cell is editable,
+                                not just the famous three. */}
+                            {section.columns.map((col, ci) =>
+                              ci !== refIdx && ci !== kindIdx && ci !== scopeIdx && ci !== descIdx ? (
+                                <label key={col} style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                                  {col.toUpperCase()}
+                                  <input
+                                    value={row[ci] ?? ''}
+                                    onFocus={snapshot}
+                                    onChange={(e) => setCell(ci, e.target.value)}
+                                    style={{
+                                      display: 'block', width: 170, background: 'transparent', color: 'var(--ink-2)',
+                                      border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 13, marginTop: 3,
+                                    }}
+                                  />
+                                </label>
+                              ) : null,
+                            )}
                           </div>
                           {/* With a casting panel, the prompt textarea moves INTO
                               RefImagePanel (it owns the prompt/character toggle). */}
@@ -533,7 +593,15 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     </>
                   )
                   return (
-                    <div style={{ border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
+                    <div style={{ position: 'relative', border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
+                      {/* Exit lives top-right too — Done stays at the foot. */}
+                      <button
+                        type="button"
+                        className="vp-var-close"
+                        title="Close"
+                        onClick={() => setExpanded(null)}
+                        style={{ position: 'absolute', top: 10, right: 10, zIndex: 2 }}
+                      >✕</button>
                       {row[refIdx].trim() !== '' ? (
                         <RefImagePanel
                           refId={row[refIdx].trim()}
