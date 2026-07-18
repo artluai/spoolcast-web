@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   fmtBudget,
   fmtClock,
@@ -311,6 +312,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // until the first resize touches it.
   const [vSize, setVSize] = useState<{ w: number; h: number | null }>({ w: 680, h: null })
   const vModalRef = useRef<HTMLDivElement>(null)
+  // The drag handle must stay reachable: never above the app header, never
+  // fully off any edge — a module dragged out of reach is dragged forever.
+  const clampVXY = (x: number, y: number) => {
+    const vw = window.innerWidth || 1600
+    const vh = window.innerHeight || 1000
+    const w = vModalRef.current?.offsetWidth ?? 680
+    const topMin = (document.querySelector('header')?.getBoundingClientRect().bottom ?? 56) + 4
+    return {
+      x: Math.min(Math.max(x, 140 - w), vw - 140),
+      y: Math.min(Math.max(y, topMin), vh - 48),
+    }
+  }
   const onVResize = (e: React.PointerEvent, dir: string) => {
     e.preventDefault()
     e.stopPropagation()
@@ -329,10 +342,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       w = Math.min(Math.max(w, 460), Math.max(460, (window.innerWidth || 1600) - 24))
       h = Math.min(Math.max(h, 300), Math.max(300, (window.innerHeight || 1000) - 24))
       setVSize({ w: Math.round(w), h: Math.round(h) })
-      setVPos({
-        x: dir.includes('w') ? start.px + (start.w - w) : start.px,
-        y: dir.includes('n') ? start.py + (start.h - h) : start.py,
-      })
+      setVPos(
+        clampVXY(
+          dir.includes('w') ? start.px + (start.w - w) : start.px,
+          dir.includes('n') ? start.py + (start.h - h) : start.py,
+        ),
+      )
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -349,7 +364,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     vDragRef.current = { dx: e.clientX - (vPos?.x ?? 0), dy: e.clientY - (vPos?.y ?? 0) }
     const move = (ev: PointerEvent) => {
       const d = vDragRef.current
-      if (d) setVPos({ x: ev.clientX - d.dx, y: ev.clientY - d.dy })
+      if (d) setVPos(clampVXY(ev.clientX - d.dx, ev.clientY - d.dy))
     }
     const up = () => {
       vDragRef.current = null
@@ -886,7 +901,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 setVErr('')
                 setVSize({ w: 680, h: null })
                 const card = (e.target as HTMLElement).closest('.vp-map-card')?.getBoundingClientRect()
-                setVPos({ x: Math.max(16, Math.min(window.innerWidth - 700, (card?.left ?? 200) - 690)), y: Math.max(70, (card?.top ?? 120) - 20) })
+                setVPos(clampVXY((card?.left ?? 200) - 690, (card?.top ?? 120) - 20))
               }}
             >+</span>
           ) : null}
@@ -1893,7 +1908,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           {variantFor ? (() => {
             const cardRect = boardRef.current?.querySelector(`[data-mapref="${CSS.escape(variantFor.name)}"]`)?.getBoundingClientRect()
             const pos = vPos ?? { x: 120, y: 120 }
-            return (
+            // PORTAL to <body>: the host .detail-card is a stacking context
+            // (z-index 8), so inside it the module's z-index can never beat
+            // the app header — dragged under the top bar, its handle became
+            // unreachable. At body level its z-index is real.
+            return createPortal(
               <>
                 {cardRect ? (
                   <svg className="vp-var-thread">
@@ -1921,7 +1940,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       onClick={() => setVariantFor(null)}
                     >✕</button>
                   </div>
-                  <div className="vp-var-scroll">
+                  <div className={`vp-var-scroll ${vBusy ? 'busy' : ''}`}>
                   <div className="vp-var-body">
                     {/* The base owns the left: its image — or, for a
                         prompt-only object, the prompt itself. */}
@@ -2002,14 +2021,23 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       {vErr ? <p className="vp-var-err">{vErr}</p> : null}
                       <div className="vp-edit-actions">
                         <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
-                          {vBusy || '✦ Generate variant'}
+                          ✦ Generate variant
                         </button>
                       </div>
                     </div>
                   </div>
                   </div>
+                  {/* GENERATING: the app's standard loader over the content;
+                      everything underneath is disabled until it lands. */}
+                  {vBusy ? (
+                    <div className="vp-var-busyov">
+                      <span className="spin" />
+                      <span>{vBusy}</span>
+                    </div>
+                  ) : null}
                 </div>
-              </>
+              </>,
+              document.body,
             )
           })() : null}
 

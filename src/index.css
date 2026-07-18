@@ -1393,6 +1393,11 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-var-row .vp-menu-btn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; font-size: 10px !important; padding: 5px 11px !important; }
 /* Generate lives bottom-right of the module. */
 .vp-var-modal .vp-edit-actions { justify-content: flex-end; }
+/* GENERATING: the house spinner over the module; the content underneath is
+   visibly dimmed and dead to input until the variant lands. */
+.vp-var-scroll.busy { pointer-events: none; opacity: .4; }
+.vp-var-busyov { position: absolute; inset: 0; z-index: 6; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--ink); font-family: var(--mono); font-size: 12px; background: rgba(10,12,18,.35); border-radius: inherit; }
+.vp-var-busyov .spin { width: 26px; height: 26px; border-width: 3px; color: var(--accent); }
 .vp-var-model { flex: 1; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); font-family: var(--sans); font-size: 12px; padding: 6px 8px; }
 .vp-var-extras { display: flex; flex-wrap: wrap; gap: 8px; }
 .vp-var-xref { padding: 0; border: 2px solid var(--line-2); border-radius: 9px; overflow: hidden; background: none; cursor: pointer; line-height: 0; }
