@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { activeSession, apiUrl, contentUrl, getFileJson, getJson, postAction, statusUrl } from '../../lib/api'
-import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { DEFAULT_MODEL_ID, DEFAULT_VISION_MODEL_ID, VISION_MODELS, draftReasoning } from '../../lib/draft-models'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { ModelPicker } from './ModelPicker'
 import { VariantModule } from './VariantModule'
@@ -115,6 +115,8 @@ export function RefImagePanel({
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
   const [txtModel, setTxtModel] = useState(DEFAULT_MODEL_ID)
+  // Vision tasks (reading the linked image) — GLM has no eyes; Qwen default.
+  const [visionModel, setVisionModel] = useState(DEFAULT_VISION_MODEL_ID)
   const [generating, setGenerating] = useState(false)
   const [detailing, setDetailing] = useState(false)
   const [describing, setDescribing] = useState(false)
@@ -338,7 +340,7 @@ export function RefImagePanel({
       const hit = (out?.data?.images ?? []).find((img) => img.ref === linkedTo)
       let res: { ok?: boolean; error?: string; message?: string; data?: { text?: string } } | null
       if (hit) {
-        res = await postAction<{ text?: string }>({ action: 'describe_ref_image', path: hit.path, voice: true, model: txtModel, allow_cost: true })
+        res = await postAction<{ text?: string }>({ action: 'describe_ref_image', path: hit.path, voice: true, model: visionModel, allow_cost: true })
       } else {
         // No image on the linked object — derive the voice from its PROMPT.
         const linkedNotes = (kitIndex[linkedTo]?.notes || '').trim()
@@ -351,7 +353,7 @@ export function RefImagePanel({
           text: linkedNotes,
           instruction:
             'Write a one-sentence VOICE description for AI video generation matching this subject: age range, gender if evident, tone, pacing, energy, texture — worded so a generator produces the same voice in every clip. Output only the sentence.',
-          model: txtModel,
+          model: visionModel,
           allow_cost: true,
         })
       }
@@ -854,7 +856,7 @@ export function RefImagePanel({
                   >
                     {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate sound description with AI'}
                   </button>
-                  <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
+                  <ModelPicker model={visionModel} onChange={setVisionModel} disabled={describing} models={VISION_MODELS} primary={VISION_MODELS} />
                 </div>
               ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>

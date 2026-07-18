@@ -237,7 +237,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // the shoe's side/detail views were sitting in external-assets, visible in
   // prompts but never importable from the board.
   const [srcPool, setSrcPool] = useState<{ path: string; ref?: string }[]>([])
-  const isDisplayable = (p: string) => /\.(png|jpe?g|webp)$/i.test(p)
+  // heic included: /api/content transcodes for display, and import converts
+  // to JPEG before registering (kie can't take HEIC itself).
+  const isDisplayable = (p: string) => /\.(png|jpe?g|webp|heic)$/i.test(p)
   useEffect(() => {
     let live = true
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
