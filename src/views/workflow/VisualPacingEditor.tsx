@@ -1923,6 +1923,12 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                   className="vp-edit vp-var-modal"
                   ref={vModalRef}
                   style={{ left: pos.x, top: pos.y, width: vSize.w, ...(vSize.h ? { height: vSize.h } : {}) }}
+                  // The module is portaled to <body>, but React still bubbles
+                  // its events up the COMPONENT tree — into the canvas's
+                  // drag-to-pan mousedown, whose DOM closest() check can't see
+                  // this detached subtree. Without this, dragging the module
+                  // also pans the whole board.
+                  onMouseDown={(e) => e.stopPropagation()}
                 >
                   {/* Resize from any edge or corner. */}
                   {['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((dir) => (
