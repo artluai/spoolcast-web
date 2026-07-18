@@ -344,11 +344,14 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
                     const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
                     if (img && expanded !== key) {
-                      // CHARACTER SHEET CARD: reference image + name + prompt
-                      // excerpt — natural proportions, generous size (the page
-                      // scrolls). The EXPANDED item's card collapses to a name
-                      // chip instead: its image is already large in the panel
-                      // below, and showing it twice said nothing.
+                      // CHARACTER SHEET CARD — same law as the mapping wall:
+                      // visuals first. Every image gets the SAME square
+                      // footage, shaped by its own w/h (portrait tall+narrow,
+                      // landscape wide+short), the card HUGS the image, and
+                      // the text wraps to the image's width — text is never
+                      // the decider of the card's size. The EXPANDED item's
+                      // card collapses to a name chip: its image is already
+                      // large in the panel below.
                       return (
                         <button
                           key={key}
@@ -356,7 +359,6 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                           title={shared ? 'Shared with the show/template' : 'This episode only'}
                           style={{
                             width: 'fit-content',
-                            maxWidth: 440,
                             textAlign: 'left',
                             background: 'rgba(255,255,255,.03)',
                             border: `1px solid ${expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
@@ -366,24 +368,40 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             overflow: 'hidden',
                           }}
                         >
-                          <img src={img} alt="" style={{ height: 230, width: 'auto', maxWidth: 440, display: 'block' }} />
-                          <span style={{ display: 'block', padding: '8px 10px 2px', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
-                            {row[refIdx]}
-                            {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
-                          </span>
-                          <span
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              padding: '0 10px 10px',
-                              color: 'var(--ink-3)',
-                              fontSize: 12,
-                              lineHeight: 1.4,
+                          <img
+                            src={img}
+                            alt=""
+                            style={{ height: 220, width: 'auto', display: 'block' }}
+                            onLoad={(e) => {
+                              const im = e.currentTarget
+                              const r = im.naturalWidth / im.naturalHeight || 1
+                              let h = Math.sqrt(52000 / r)
+                              if (h * r > 460) h = 460 / r
+                              im.style.height = `${Math.round(h)}px`
+                              im.style.width = `${Math.round(h * r)}px`
                             }}
-                          >
-                            {row[descIdx]}
+                          />
+                          {/* width:0/minWidth:100% — the text takes the width
+                              the IMAGE set, never widens the card. */}
+                          <span style={{ display: 'block', width: 0, minWidth: '100%', boxSizing: 'border-box' }}>
+                            <span style={{ display: 'block', padding: '8px 10px 2px', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
+                              {row[refIdx]}
+                              {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
+                            </span>
+                            <span
+                              style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                padding: '0 10px 10px',
+                                color: 'var(--ink-3)',
+                                fontSize: 12,
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {row[descIdx]}
+                            </span>
                           </span>
                         </button>
                       )
