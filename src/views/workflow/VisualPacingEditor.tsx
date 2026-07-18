@@ -46,6 +46,10 @@ type EditDraft =
 // money goes. Under a mixed project, or before the medium is known, the
 // neutral word is the honest one. Never say "images" for generated video: that
 // wording is what let a 2.5s "image" reach a 4s-minimum video model.
+// Audio-kind kit objects: never on the visual wall; attachable to shots
+// (music spans) or linked to characters (voices).
+const AUDIO_KINDS = new Set(['voice', 'music', 'ambience', 'sfx', 'audio'])
+
 const shotNoun = (n: number, medium?: string) => {
   if (medium === 'video') return n === 1 ? 'video clip' : 'video clips'
   if (medium === 'image') return n === 1 ? 'image' : 'images'
@@ -1668,7 +1672,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     {on ? (
                       <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
                         {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
-                        {names.map((name, idx) => {
+                        {names.filter((name) => !AUDIO_KINDS.has(kit.find((k) => k.name === name)?.kind ?? '')).map((name, idx) => {
                           const obj = kit.find((k) => k.name === name)
                           return (
                             <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
@@ -1695,14 +1699,17 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       </div>
                     ) : null}
                     {on ? (() => {
-                      // THE SHOT'S VOICE: audio objects linked to any attached
-                      // reference (variants inherit their base's link) show on
-                      // the expanded shot — with unlink / link-another. These
-                      // controls edit the KIT (world-kit.md via the engine),
-                      // not the shot: the link belongs to the character.
-                      const voices = kit.filter((k) => k.kind === 'voice')
-                      if (!voices.length) return null
-                      const rows = names.map((name) => {
+                      // THE SHOT'S AUDIO, both kinds of belonging:
+                      //   character-linked voices ride in via the shot's
+                      //   references (variants inherit the base's link);
+                      //   shot-attached audio (music across 4 shots) sits in
+                      //   the shot's own refs like any attachment.
+                      const audioObjs = kit.filter((k) => AUDIO_KINDS.has(k.kind))
+                      if (!audioObjs.length) return null
+                      const visualNames = names.filter((n) => !AUDIO_KINDS.has(kit.find((k) => k.name === n)?.kind ?? ''))
+                      const attachedAudio = names.filter((n) => AUDIO_KINDS.has(kit.find((k) => k.name === n)?.kind ?? ''))
+                      const voices = audioObjs.filter((k) => k.kind === 'voice')
+                      const charRows = visualNames.map((name) => {
                         const item = kit.find((k) => k.name === name)
                         const voice = voices.find((v) => (v as { linked_to?: string }).linked_to === name
                           || (item?.variant_of && (v as { linked_to?: string }).linked_to === item.variant_of))
@@ -1718,37 +1725,61 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       }
                       return (
                         <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-                          {rows.filter((r) => r.voice).map((r) => (
+                          {attachedAudio.map((name) => {
+                            const obj = kit.find((k) => k.name === name)
+                            return (
+                              <span key={name} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={obj?.notes || name}>
+                                ♪ {name} · this shot{obj?.kind && obj.kind !== 'voice' ? ` (${obj.kind})` : ''}
+                                <button
+                                  type="button"
+                                  title={`Detach ${name} from this shot`}
+                                  onClick={() => toggleMapRef(img.id, name)}
+                                  style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
+                                >×</button>
+                              </span>
+                            )
+                          })}
+                          {charRows.filter((r) => r.voice).map((r) => (
                             <span key={r.name} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={(r.voice as KitObject).notes || r.voice!.name}>
                               ♪ {r.voice!.name} · via {r.name}
                               <button
                                 type="button"
-                                title={`Unlink ${r.voice!.name} from ${r.name}`}
+                                title={`Unlink ${r.voice!.name} from ${r.name} (everywhere — the link belongs to the character)`}
                                 onClick={() => void linkAudio(r.voice!.name, '')}
                                 style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
                               >×</button>
                             </span>
                           ))}
-                          {rows.some((r) => !r.voice) ? (
-                            <select
-                              className="sc-select"
-                              value=""
-                              title="Link a voice to one of this shot's references (edits the World Kit)"
-                              onChange={(e) => {
-                                const [audio, target] = e.target.value.split('→')
+                          <select
+                            className="sc-select"
+                            value=""
+                            title="Attach audio to THIS shot (music/ambience spans), or link a voice to a character (rides everywhere they appear)"
+                            onChange={(e) => {
+                              const v = e.target.value
+                              if (!v) return
+                              if (v.startsWith('shot:')) toggleMapRef(img.id, v.slice(5))
+                              else {
+                                const [audio, target] = v.slice(5).split('→')
                                 if (audio && target) void linkAudio(audio, target)
-                              }}
-                            >
-                              <option value="">♪ link voice…</option>
-                              {rows.filter((r) => !r.voice).flatMap((r) =>
+                              }
+                            }}
+                          >
+                            <option value="">♪ add audio…</option>
+                            <optgroup label="attach to this shot">
+                              {audioObjs.filter((a) => !attachedAudio.includes(a.name)).map((a) => (
+                                <option key={`s-${a.name}`} value={`shot:${a.name}`}>{a.name} ({a.kind})</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="link voice to a character (rides everywhere)">
+                              {charRows.filter((r) => !r.voice).flatMap((r) =>
                                 voices.map((v) => (
-                                  <option key={`${v.name}→${r.name}`} value={`${v.name}→${r.name}`}>
+                                  <option key={`c-${v.name}→${r.name}`} value={`char:${v.name}→${r.name}`}>
                                     {v.name} → {r.name}
                                   </option>
                                 )),
                               )}
-                            </select>
-                          ) : null}
+                            </optgroup>
+                          </select>
                         </div>
                       )
                     })() : null}
@@ -1767,7 +1798,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             {(() => {
               // Audio objects (voices, music) are kit objects but not VISUAL
               // ones — they never pack onto the wall.
-              const AUDIO_KINDS = new Set(['voice', 'music', 'ambience', 'sfx', 'audio'])
               const visible = kit.filter((k) => !hiddenRefs.includes(k.name) && !AUDIO_KINDS.has(k.kind))
               const masters = visible.filter((k) => k.kind === 'master')
               const ordered = [
