@@ -610,6 +610,13 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             const li = section.columns.findIndex((c) => /linked/i.test(c))
                             return li >= 0 ? (row[li] || '').trim() : ''
                           })()}
+                          onLinkedToChange={(v) => {
+                            const li = section.columns.findIndex((c) => /linked/i.test(c))
+                            if (li >= 0) {
+                              snapshot()
+                              setCell(li, v)
+                            }
+                          }}
                           notes={descIdx !== refIdx ? row[descIdx] : ''}
                           notesLabel={descIdx !== refIdx ? section.columns[descIdx].toUpperCase() : ''}
                           fields={fieldRows}

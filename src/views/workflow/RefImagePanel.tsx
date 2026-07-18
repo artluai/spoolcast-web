@@ -78,6 +78,7 @@ export function RefImagePanel({
   onVariantCreated,
   onAudioAdd,
   linkedTo = '',
+  onLinkedToChange,
 }: {
   refId: string
   notes: string
@@ -106,6 +107,7 @@ export function RefImagePanel({
   onAudioAdd?: (audio: { name: string; kind: string; linkedTo: string; source: string; notes: string }) => void
   // Audio objects: the kit item this sound belongs to (Linked to column).
   linkedTo?: string
+  onLinkedToChange?: (name: string) => void
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
@@ -290,6 +292,36 @@ export function RefImagePanel({
   const [aNotes, setANotes] = useState('')
   const [aUrl, setAUrl] = useState('')
   const [aBusy, setABusy] = useState(false)
+  // LINK BY PICTURE: pick the kit item this sound belongs to from a grid of
+  // its images instead of typing the name. "Whole family" stores the BASE
+  // name — the engine already makes variants inherit their base's voice, so
+  // one link covers the base and every variant (child/parent alike).
+  type KitLite = { name: string; kind: string; image_path: string; variant_of?: string }
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkPool, setLinkPool] = useState<KitLite[] | null>(null)
+  const [linkFamily, setLinkFamily] = useState(true)
+  const openLinkPicker = async () => {
+    setLinkOpen((v) => !v)
+    if (linkPool === null) {
+      const out = await getJson<{ ok?: boolean; data?: { kit?: KitLite[] } }>(
+        apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
+      )
+      setLinkPool((out?.data?.kit ?? []).filter((k) => k.image_path))
+    }
+  }
+  const familyRoot = (k: KitLite) => (k.variant_of || k.name)
+  const pickLink = (k: KitLite) => {
+    const target = linkFamily ? familyRoot(k) : k.name
+    onLinkedToChange?.(target)
+    setLinkOpen(false)
+    const hasFamily = !!k.variant_of || (linkPool ?? []).some((x) => x.variant_of === k.name)
+    onToast(
+      linkFamily && hasFamily
+        ? `Linked to ${target} — its variants inherit this voice.`
+        : `Linked to ${target}.`,
+    )
+  }
+
   // THE EAR: find the linked item's active image and ask AI what voice that
   // person would have — the user's idea, made a button.
   const voiceFromImage = async () => {
@@ -785,10 +817,18 @@ export function RefImagePanel({
                   <button
                     type="button"
                     className="vp-undo"
+                    title="Pick which kit item this sound belongs to — from its picture"
+                    onClick={() => void openLinkPicker()}
+                  >
+                    ⧉ Link image{linkedTo ? ` · ${linkedTo}` : ''} {linkOpen ? '▴' : '▾'}
+                  </button>
+                  <button
+                    type="button"
+                    className="vp-undo"
                     disabled={describing || !linkedTo}
                     title={linkedTo
                       ? `AI looks at ${linkedTo}'s picture and writes the voice they'd have`
-                      : 'Set LINKED TO to a kit item with an image first'}
+                      : 'Link an image first'}
                     onClick={() => void voiceFromImage()}
                   >
                     {describing ? (<><span className="spin" /> Listening…</>) : `✦ Voice from ${linkedTo || 'linked'}’s image`}
@@ -830,6 +870,39 @@ export function RefImagePanel({
                 </span>
               </div>
               )}
+              {isAudio && linkOpen ? (
+                <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 10, marginTop: 8 }}>
+                  <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--ink-3)', cursor: 'pointer', marginBottom: 8 }}>
+                    <input type="checkbox" checked={linkFamily} style={{ margin: 0, accentColor: 'var(--accent)' }} onChange={(e) => setLinkFamily(e.target.checked)} />
+                    include its variants — the whole family shares this voice
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {linkPool === null ? (
+                      <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading kit…</span>
+                    ) : linkPool.length === 0 ? (
+                      <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No image-backed kit items yet.</span>
+                    ) : (
+                      linkPool.map((k) => {
+                        const on = linkedTo && (k.name === linkedTo || (linkFamily && familyRoot(k) === linkedTo))
+                        return (
+                          <button
+                            key={k.name}
+                            type="button"
+                            title={k.variant_of ? `${k.name} — variant of ${k.variant_of}` : k.name}
+                            onClick={() => pickLink(k)}
+                            style={{
+                              padding: 0, border: `2px solid ${on ? 'var(--accent)' : 'var(--line, #2a3142)'}`,
+                              borderRadius: 9, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0,
+                            }}
+                          >
+                            <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" style={{ height: 84, width: 'auto', display: 'block' }} onLoad={equalArea(9500, 140)} />
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
       {createOpen && !isAudio && (
         <div style={{ position: 'relative', marginTop: 8 }}>
