@@ -465,7 +465,11 @@ function SpoolcastApp() {
       setToast('Answer the format question first.')
       return false
     }
-    const template = s1Now.narrator === 'no' ? 'ad' : 'explainer'
+    // A blank project doesn't need a template — that's the whole point of
+    // starting blank. The session runs on the base contract; the template is
+    // picked (or AI-picked from the idea) at step 1, and the wizard's answers
+    // are plain session settings that survive whatever template lands.
+    const template = 'undecided'
     const base =
       s1Now.projectId.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-_]/g, '') || 'untitled'
     const listing = await getJson<{ ok?: boolean; data?: { sessions?: { id: string }[] } }>(sessionsUrl())
