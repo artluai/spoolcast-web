@@ -48,6 +48,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   const [historyLen, setHistoryLen] = useState(0)
   const [redoLen, setRedoLen] = useState(0)
   const [raw, setRaw] = useState(false)
+  const [rawEditable, setRawEditable] = useState(false)
   // HOLD MY PLACE: which item is expanded survives hopping to other steps
   // (module memory — the component unmounts when the user leaves the step).
   const memKey = `${activeSession()}:${stageId}`
@@ -152,7 +153,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   }
   const reset = async () => {
     // Reset to default = re-import the inherited kit (shared items only),
-    // discarding every local edit and episode-only addition.
+    // discarding every local edit and episode-only addition. DESTRUCTIVE:
+    // confirm first; the engine snapshots the old file into save-points.
+    if (!window.confirm('Reset to default discards every edit and episode-only item in this kit. A backup lands in working/save-points. Continue?')) return
     snapshot()
     try {
       const r = await fetch(actionUrl(), {
@@ -229,22 +232,38 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
         <button style={btn} onClick={reset} title="Discard all edits and re-import the show's shared items">
           Reset to default
         </button>
-        <button style={btn} onClick={() => setRaw((v) => !v)}>
+        <button style={btn} onClick={() => { setRawEditable(false); setRaw((v) => !v) }}>
           {raw ? 'Formatted' : 'Raw .md'}
         </button>
       </div>
 
       {raw || parseFailed ? (
-        <textarea
-          value={draft}
-          onFocus={snapshot}
-          onChange={(e) => setStageDraft(stageId, e.target.value)}
-          style={{
-            width: '100%', minHeight: 320, resize: 'vertical', background: 'transparent',
-            color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
-            padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
-          }}
-        />
+        <>
+          {/* READ-ONLY BY DEFAULT: this file is the registry behind every
+              image in the kit — a stray edit (or an accidental select-all)
+              in a raw textarea can wipe it. Editing is an explicit unlock,
+              and parse failures still open editable (fixing IS the point). */}
+          {!parseFailed && !rawEditable && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '0 0 8px' }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Read-only — the images above hang off these rows.</span>
+              <button type="button" className="vp-undo" onClick={() => { snapshot(); setRawEditable(true) }}>✎ Edit raw (snapshots undo)</button>
+            </div>
+          )}
+          <textarea
+            value={draft}
+            readOnly={!parseFailed && !rawEditable}
+            onFocus={parseFailed || rawEditable ? snapshot : undefined}
+            onChange={(e) => {
+              if (parseFailed || rawEditable) setStageDraft(stageId, e.target.value)
+            }}
+            style={{
+              width: '100%', minHeight: 320, resize: 'vertical', background: 'transparent',
+              color: !parseFailed && !rawEditable ? 'var(--ink-3)' : 'var(--ink-1, inherit)',
+              border: '1px solid var(--line, #2a3142)', borderRadius: 8,
+              padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
+            }}
+          />
+        </>
       ) : (
         doc!.sections.map((section, si) => {
           const isStyleAnchor = /style anchor/i.test(section.heading)

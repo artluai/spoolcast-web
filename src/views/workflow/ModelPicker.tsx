@@ -64,10 +64,12 @@ export function ModelPicker({
       <button
         type="button"
         ref={btnRef}
+        // Same footprint as every other button (.vp-menu-btn == .vp-undo
+        // sizing) — dropdowns don't get to be bigger than their row.
         className="vp-menu-btn"
         disabled={disabled}
         onClick={toggle}
-        style={{ fontSize: 12, padding: '8px 12px' }}
+        style={{ whiteSpace: 'nowrap', maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis' }}
       >
         {labelOf(model)} ▾
       </button>

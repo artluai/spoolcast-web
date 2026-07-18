@@ -1388,9 +1388,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-var-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* The model pill can carry a raw model id — one line, ellipsized, never a
    six-line tower. */
-/* The model pill sits in a row of .vp-undo buttons — same size as them
-   (the picker's own inline size is for toolbar contexts, hence !important). */
-.vp-var-row .vp-menu-btn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; font-size: 10px !important; padding: 5px 11px !important; }
+/* The model pill matches every other button globally now (ModelPicker). */
 /* Generate lives bottom-right of the module. */
 .vp-var-modal .vp-edit-actions { justify-content: flex-end; }
 /* GENERATING: the house spinner over the module; the content underneath is

@@ -64,7 +64,9 @@ const jobErrorMessage = (raw: string): string => {
 export function RefImagePanel({
   refId,
   notes,
-  notesLabel = 'NOTES',
+  // notesLabel kept for API compat — the label now says what the prompt IS
+  // (image vs subject), not which md column it came from.
+  notesLabel: _notesLabel = 'NOTES',
   kind = '',
   fields,
   kitIndex = {},
@@ -694,18 +696,16 @@ export function RefImagePanel({
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
             <div>
-              <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 {charPrompt === null ? (
-                  `${notesLabel} — PROMPT DESCRIPTION`
+                  'IMAGE PROMPT — makes this item’s image'
                 ) : (
                   <>
-                    {notesLabel} —
                     {(['prompt', 'character'] as const).map((v) => (
                       <button
                         key={v}
                         type="button"
                         onClick={() => setPromptView(v)}
-                        title={v === 'prompt' ? 'What Generate uses to make this item’s image' : 'What other prompts import when they reference this image'}
                         style={{
                           background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                           fontSize: 11, letterSpacing: 'inherit', fontFamily: 'inherit',
@@ -713,9 +713,14 @@ export function RefImagePanel({
                           textDecoration: promptView === v ? 'underline' : 'none', textUnderlineOffset: 3,
                         }}
                       >
-                        {v === 'prompt' ? 'GENERATION PROMPT' : 'CHARACTER PROMPT'}
+                        {v === 'prompt' ? 'IMAGE PROMPT' : 'SUBJECT PROMPT'}
                       </button>
                     ))}
+                    <span>
+                      {promptView === 'prompt'
+                        ? '— makes this item’s image'
+                        : '— describes the subject; other shots import this when they reference the item'}
+                    </span>
                   </>
                 )}
               </div>
@@ -742,47 +747,43 @@ export function RefImagePanel({
                   padding: '8px 10px', fontSize: 13, lineHeight: 1.5, marginTop: 3,
                 }}
               />
-              {/* Prompt length vs the selected model's cap — lives with the
-                  text it measures, bottom right. */}
-              <div
-                title="Prompt length vs. the selected model's limit"
-                style={{
-                  textAlign: 'right', marginTop: 3, fontSize: 10.5, fontFamily: 'var(--mono)',
-                  color: notes.trim().length > promptLimit ? 'var(--red, #e5534b)' : notes.trim().length > promptLimit * 0.8 ? 'var(--amber, #d29922)' : 'var(--ink-3)',
-                }}
-              >
-                {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
+              {/* One row under the prompt: the two create entries left, the
+                  character count right — with the text it measures. */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                {(['version', 'variant'] as const).map((m) => {
+                  const on = createOpen && createMode === m
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      className="vp-undo"
+                      title={m === 'version'
+                        ? 'Another take of THIS item — lands in its history, click a thumbnail to pick the active one'
+                        : 'A NEW kit item derived from this one — one deliberate change, gets its own history. (Unrelated item? + Add on the section.)'}
+                      style={on ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+                      onClick={() => {
+                        if (on) setCreateOpen(false)
+                        else {
+                          setCreateMode(m)
+                          setCreateOpen(true)
+                        }
+                      }}
+                    >
+                      {m === 'version' ? `${on ? '▾' : '▸'} Update existing` : `${on ? '▾' : '▸'} New variant`}
+                    </button>
+                  )
+                })}
+                <span
+                  title="Prompt length vs. the selected model's limit"
+                  style={{
+                    marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)',
+                    color: notes.trim().length > promptLimit ? 'var(--red, #e5534b)' : notes.trim().length > promptLimit * 0.8 ? 'var(--amber, #d29922)' : 'var(--ink-3)',
+                  }}
+                >
+                  {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
+                </span>
               </div>
             </div>
-      {/* CREATE — three distinct creations, and the UI says which is which:
-            UPDATE EXISTING — another take of THIS item (lands in its history)
-            NEW VARIANT     — a NEW linked item, one deliberate change (own history)
-            NEW OBJECT      — unrelated item: + Add on the section header. */}
-      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {(['version', 'variant'] as const).map((m) => {
-          const on = createOpen && createMode === m
-          return (
-            <button
-              key={m}
-              type="button"
-              className="vp-undo"
-              title={m === 'version'
-                ? 'Another take of THIS item — lands in its history, click a thumbnail to pick the active one'
-                : 'A NEW kit item derived from this one — one deliberate change, gets its own history. (Unrelated item? + Add on the section.)'}
-              style={on ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
-              onClick={() => {
-                if (on) setCreateOpen(false)
-                else {
-                  setCreateMode(m)
-                  setCreateOpen(true)
-                }
-              }}
-            >
-              {m === 'version' ? `${on ? '▾' : '▸'} Update existing` : `${on ? '▾' : '▸'} New variant`}
-            </button>
-          )
-        })}
-      </div>
       {createOpen && (
         <div style={{ position: 'relative', marginTop: 8 }}>
           <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '0 0 8px' }}>
@@ -843,7 +844,7 @@ export function RefImagePanel({
                       }
                     }}
                   />
-                  Generate as character sheet
+                  Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
                 </label>
                 {/* The description lives NEXT TO the control it explains. */}
                 <span style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>
@@ -863,6 +864,7 @@ export function RefImagePanel({
             <button type="button" className="vp-undo" onClick={() => setImproveOpen((v) => !v)}>
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
             </button>
+            <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
             <button
               type="button"
               className="vp-undo"
@@ -889,7 +891,6 @@ export function RefImagePanel({
                 }}
               />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
                 {lessMode && (
                   <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                     save this instruction:
