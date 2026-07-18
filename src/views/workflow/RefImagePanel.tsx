@@ -843,6 +843,18 @@ export function RefImagePanel({
                   >
                     ⧉ Link image{linkedTo ? ` · ${linkedTo}` : ''} {linkOpen ? '▴' : '▾'}
                   </button>
+                  <button
+                    type="button"
+                    className="vp-undo"
+                    disabled={describing || !linkedTo}
+                    title={linkedTo
+                      ? `AI derives the sound from ${linkedTo} — its image if it has one, its description otherwise`
+                      : 'Link an object first'}
+                    onClick={() => void generateVoiceFromLinked()}
+                  >
+                    {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate sound description with AI'}
+                  </button>
+                  <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
                 </div>
               ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
@@ -914,25 +926,16 @@ export function RefImagePanel({
                 </div>
               ) : null}
               {isAudio ? (
-                <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10, gap: 8 }}>
-                  {linkedTo ? (
-                    <>
-                      <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
-                      <button
-                        type="button"
-                        className="vp-save"
-                        disabled={describing}
-                        title={`AI derives the voice from ${linkedTo} — its image if it has one, its description otherwise`}
-                        onClick={() => void generateVoiceFromLinked()}
-                      >
-                        {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate voice from linked object'}
-                      </button>
-                    </>
-                  ) : (
-                    <button type="button" className="vp-save" title="Keep this audio object as written and close" onClick={() => onApprove?.()}>
-                      ✓ Approve
-                    </button>
-                  )}
+                <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="vp-save"
+                    disabled={!notes.trim()}
+                    title={notes.trim() ? 'Keep this audio prompt and close' : 'Write or generate the sound description first'}
+                    onClick={() => onApprove?.()}
+                  >
+                    ✓ Add audio prompt
+                  </button>
                 </div>
               ) : null}
             </div>
