@@ -1483,6 +1483,106 @@ export function Step01Flow({ stepId }: { stepId: string }) {
 
 type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock' | 'image'; desc: string }
 
+// TEMPLATE AT STEP 1, order-interchangeable: an UNDECIDED session (created
+// without a template, running on the base contract) picks here — by hand, or
+// "let AI pick" from the idea already written. Invisible once decided; the
+// engine's lock rule refuses changes after work starts, so this bar only
+// ever appears while changing is still legal.
+export function TemplatePickerBar() {
+  type Tpl = { id: string; name?: string; format?: string; description?: string }
+  const [tpls, setTpls] = useState<Tpl[]>([])
+  const [current, setCurrent] = useState<string | null>(null)
+  const [choice, setChoice] = useState('')
+  const [busy, setBusy] = useState('')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([sess, reg]) => {
+      if (!live) return
+      try {
+        setCurrent(String(JSON.parse(sess?.data?.content || '{}')?.template || ''))
+      } catch {
+        setCurrent('')
+      }
+      setTpls(reg?.data?.templates ?? [])
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  if (current === null || current !== '' || tpls.length === 0) return null
+
+  const post = async (body: Record<string, unknown>) => {
+    const r = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', ...body }),
+    })
+    return r.json().catch(() => null)
+  }
+  const apply = async (id: string) => {
+    if (!id) return
+    setBusy('apply')
+    setNote('')
+    const out = await post({ action: 'apply_template', template: id })
+    if (out?.ok) {
+      // The template changes the contract and the step list wholesale — a
+      // full reload is the honest refresh.
+      window.location.reload()
+    } else {
+      setNote(out?.message || out?.error || 'Could not apply the template.')
+      setBusy('')
+    }
+  }
+  const suggest = async () => {
+    setBusy('suggest')
+    setNote('')
+    const out = await post({ action: 'suggest_template', allow_cost: true })
+    if (out?.ok && out?.data?.template) {
+      setChoice(out.data.template)
+      setNote(`AI suggests ${out.data.template}${out.data.reason ? ` — ${out.data.reason}` : ''}`)
+    } else {
+      setNote(out?.message || out?.error || 'Could not get a suggestion — is the idea written yet?')
+    }
+    setBusy('')
+  }
+  return (
+    <div className="panel-flat" style={{ marginBottom: 14 }}>
+      <div className="ch">
+        <h3>Template — not decided yet</h3>
+        <span>picks the step list; locks once work starts</span>
+      </div>
+      <p className="vp-hint" style={{ margin: '0 0 10px' }}>
+        Pick the video's template now, or write the idea below first and let AI pick from it.
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {tpls.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`vp-undo ${choice === t.id ? 'on' : ''}`}
+            style={choice === t.id ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+            title={t.description || t.id}
+            onClick={() => setChoice(t.id)}
+          >
+            {t.name || t.id}{t.format ? ` · ${t.format}` : ''}
+          </button>
+        ))}
+        <button type="button" className="vp-undo vp-aimap" disabled={!!busy} onClick={suggest}>
+          ✦ {busy === 'suggest' ? 'Reading the idea…' : 'Let AI pick from the idea'}
+        </button>
+        <button type="button" className="vp-save" disabled={!choice || !!busy} onClick={() => void apply(choice)}>
+          {busy === 'apply' ? 'Applying…' : `Apply${choice ? ` ${choice}` : ''}`}
+        </button>
+      </div>
+      {note ? <p className="vp-hint" style={{ margin: '10px 0 0' }}>{note}</p> : null}
+    </div>
+  )
+}
+
 export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boolean; stepId: string }) {
   const brief = useWorkflowStore((s) => s.ideaBrief)
   const setIdeaBrief = useWorkflowStore((s) => s.setIdeaBrief)
@@ -1573,6 +1673,8 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
 
   return (
     <div className="idea-v2">
+      {/* Undecided sessions pick their template here — invisible otherwise. */}
+      {!blankProject ? <TemplatePickerBar /> : null}
       <h3 className="idea-q">What's this video about?</h3>
 
       <textarea
