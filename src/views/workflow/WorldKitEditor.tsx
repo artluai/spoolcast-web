@@ -49,6 +49,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   const [redoLen, setRedoLen] = useState(0)
   const [raw, setRaw] = useState(false)
   const [rawEditable, setRawEditable] = useState(false)
+  // Descriptions under image cards — OFF by default: the wall is visual,
+  // the words live one click away (expand the item).
+  const [showDesc, setShowDesc] = useState(false)
   // HOLD MY PLACE: which item is expanded survives hopping to other steps
   // (module memory — the component unmounts when the user leaves the step).
   const memKey = `${activeSession()}:${stageId}`
@@ -238,6 +241,13 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
         <button style={btn} onClick={reset} title="Discard all edits and re-import the show's shared items">
           Reset to default
         </button>
+        <button
+          style={{ ...btn, color: showDesc ? 'var(--accent-2)' : undefined }}
+          title="Show or hide the description text under image cards"
+          onClick={() => setShowDesc((v) => !v)}
+        >
+          Descriptions {showDesc ? 'on' : 'off'}
+        </button>
         <button style={btn} onClick={() => { setRawEditable(false); setRaw((v) => !v) }}>
           {raw ? 'Formatted' : 'Raw .md'}
         </button>
@@ -363,6 +373,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, alignItems: 'flex-start' }}>
                   {section.rows.map((row, ri) => {
                     const refIdx = Math.max(0, section.columns.findIndex((c) => /ref/i.test(c)))
+                    const kindIdx = section.columns.findIndex((c) => /kind/i.test(c))
                     const scopeIdx = section.columns.findIndex((c) => /scope/i.test(c))
                     const descIdx = section.columns.length - 1
                     const key = `${si}:${ri}`
@@ -393,41 +404,61 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             overflow: 'hidden',
                           }}
                         >
-                          <img
-                            src={img}
-                            alt=""
-                            style={{ height: 220, width: 'auto', display: 'block' }}
-                            onLoad={(e) => {
-                              const im = e.currentTarget
-                              const r = im.naturalWidth / im.naturalHeight || 1
-                              let h = Math.sqrt(52000 / r)
-                              if (h * r > 460) h = 460 / r
-                              im.style.height = `${Math.round(h)}px`
-                              im.style.width = `${Math.round(h * r)}px`
-                            }}
-                          />
-                          {/* width:0/minWidth:100% — the text takes the width
-                              the IMAGE set, never widens the card. */}
-                          <span style={{ display: 'block', width: 0, minWidth: '100%', boxSizing: 'border-box' }}>
-                            <span style={{ display: 'block', padding: '8px 10px 2px', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
+                          <span style={{ position: 'relative', display: 'block', lineHeight: 0 }}>
+                            <img
+                              src={img}
+                              alt=""
+                              style={{ height: 220, width: 'auto', display: 'block' }}
+                              onLoad={(e) => {
+                                const im = e.currentTarget
+                                const r = im.naturalWidth / im.naturalHeight || 1
+                                let h = Math.sqrt(52000 / r)
+                                if (h * r > 460) h = 460 / r
+                                im.style.height = `${Math.round(h)}px`
+                                im.style.width = `${Math.round(h * r)}px`
+                              }}
+                            />
+                            {/* Same labeling language as the mapping wall:
+                                kind chip top-left, name ON the image. */}
+                            {kindIdx >= 0 && row[kindIdx] ? (
+                              <span
+                                className={`vp-map-chip k-${(row[kindIdx] || '').trim().toLowerCase()}`}
+                                style={{ position: 'absolute', top: 8, left: 8, lineHeight: 1.4, backdropFilter: 'blur(4px)' }}
+                              >
+                                {(row[kindIdx] || '').trim().toUpperCase()}
+                              </span>
+                            ) : null}
+                            <span
+                              style={{
+                                position: 'absolute', left: 0, right: 0, bottom: 0,
+                                padding: '24px 10px 8px', lineHeight: 1.4,
+                                background: 'linear-gradient(transparent, rgba(8,10,15,.88))',
+                                color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 11,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left',
+                              }}
+                            >
                               {row[refIdx]}
                               {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
                             </span>
-                            <span
-                              style={{
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                padding: '0 10px 10px',
-                                color: 'var(--ink-3)',
-                                fontSize: 12,
-                                lineHeight: 1.4,
-                              }}
-                            >
-                              {row[descIdx]}
-                            </span>
                           </span>
+                          {showDesc && (row[descIdx] || '').trim() ? (
+                            <span style={{ display: 'block', width: 0, minWidth: '100%', boxSizing: 'border-box' }}>
+                              <span
+                                style={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  padding: '8px 10px 10px',
+                                  color: 'var(--ink-3)',
+                                  fontSize: 12,
+                                  lineHeight: 1.4,
+                                }}
+                              >
+                                {row[descIdx]}
+                              </span>
+                            </span>
+                          ) : null}
                         </button>
                       )
                     }
