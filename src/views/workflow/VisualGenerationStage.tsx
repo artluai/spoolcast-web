@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
-import { API_BASE, activeSession, actionUrl, downloadUrl, fileUrl } from '../../lib/api'
+import { API_BASE, activeSession, actionUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
 
 const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
@@ -525,6 +525,32 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
+  }, [])
+
+  // THE MEDIUM WAS DECIDED UPSTREAM (template clock / session shot_medium) —
+  // the pre-build type picker READS that decision instead of assuming stills.
+  // Video-first templates force video; a mix policy starts on "Let AI choose".
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
+      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([sess, reg]) => {
+        if (!live || typeof sess?.data?.content !== 'string') return
+        const cfg = JSON.parse(sess.data.content)
+        const hit = reg?.data?.templates?.find((t: { id?: string; format?: string }) => t.id === String(cfg?.template || ''))
+        const policy = String(cfg?.shot_medium || '')
+        if (hit?.format === 'video-first' || policy === 'video') setDefaultType('video')
+        else if (policy === 'mix') setDefaultType('auto')
+        else if (policy === 'image') setDefaultType('image')
+      })
+      .catch(() => {
+        /* engine offline — the picker keeps its stills default */
+      })
+    return () => {
+      live = false
+    }
   }, [])
 
   useEffect(() => {

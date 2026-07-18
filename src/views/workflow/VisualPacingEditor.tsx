@@ -1851,7 +1851,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                               </div>
                               {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={sizeToArea(12500)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} /> : <span className="vp-map-noimg">{name}</span>}
                               <div className="vp-map-att-ov">
-                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references are then not sent)" onClick={() => setFirstFrame(img.id, name)}>
+                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references can't attach as images and ride along as prompt text instead)" onClick={() => setFirstFrame(img.id, name)}>
                                   {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
                                 </button>
                               </div>
