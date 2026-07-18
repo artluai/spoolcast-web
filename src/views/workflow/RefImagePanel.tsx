@@ -389,6 +389,17 @@ export function RefImagePanel({
 
   // kie.ai rejects prompts over the selected model's documented cap — stop
   // before spending the credit, with the counter showing how far over.
+  // EVERY thumbnail grid obeys the same law as the walls: equal square
+  // footage per image, shaped by its own w/h — never uniform crops.
+  const equalArea = (area: number, capW = 240) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    const r = im.naturalWidth / im.naturalHeight || 1
+    let h = Math.sqrt(area / r)
+    if (h * r > capW) h = capW / r
+    im.style.height = `${Math.round(h)}px`
+    im.style.width = `${Math.round(h * r)}px`
+  }
+
   const promptLimit = IMAGE_MODELS.find((m) => m.id === imgModel)?.maxChars ?? 20000
 
   const generate = async () => {
@@ -731,6 +742,17 @@ export function RefImagePanel({
                   padding: '8px 10px', fontSize: 13, lineHeight: 1.5, marginTop: 3,
                 }}
               />
+              {/* Prompt length vs the selected model's cap — lives with the
+                  text it measures, bottom right. */}
+              <div
+                title="Prompt length vs. the selected model's limit"
+                style={{
+                  textAlign: 'right', marginTop: 3, fontSize: 10.5, fontFamily: 'var(--mono)',
+                  color: notes.trim().length > promptLimit ? 'var(--red, #e5534b)' : notes.trim().length > promptLimit * 0.8 ? 'var(--amber, #d29922)' : 'var(--ink-3)',
+                }}
+              >
+                {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
+              </div>
             </div>
       {/* CREATE — three distinct creations, and the UI says which is which:
             UPDATE EXISTING — another take of THIS item (lands in its history)
@@ -795,7 +817,7 @@ export function RefImagePanel({
               value={ratio}
               onChange={(e) => setRatio(e.target.value)}
               title="Canvas ratio for this generation"
-              style={{ background: 'var(--bg-3)', color: 'var(--ink-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, fontFamily: 'var(--mono)' }}
+              className="sc-select"
             >
               <option value="auto">ratio: {sessionRatio}</option>
               {['1:1', '16:9', '9:16', '4:3', '3:4'].filter((r) => r !== sessionRatio).map((r) => (
@@ -803,30 +825,34 @@ export function RefImagePanel({
               ))}
             </select>
             {!isMaster && (
-              <button
-                type="button"
-                className="vp-undo"
-                title="Rewrite the prompt with AI into a multi-angle character sheet on a blank background"
-                onClick={() => {
-                  setSheetMode(true)
-                  setImproveOpen(true)
-                  // Sheets are wide (multiple angles side by side) — default the
-                  // canvas to 16:9; still changeable in the ratio select.
-                  setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
-                }}
-              >
-                ⊞ Character sheet…
-              </button>
+              <>
+                <label className="vp-undo" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={sheetMode}
+                    style={{ margin: 0, accentColor: 'var(--accent)' }}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSheetMode(true)
+                        setImproveOpen(true)
+                        // Sheets are wide (multiple angles side by side) —
+                        // default the canvas to 16:9; still changeable above.
+                        setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
+                      } else {
+                        setSheetMode(false)
+                      }
+                    }}
+                  />
+                  Generate as character sheet
+                </label>
+                {/* The description lives NEXT TO the control it explains. */}
+                <span style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>
+                  {sheetMode
+                    ? 'Improve writes 2 prompts: character (imported when referenced elsewhere) + sheet (what Generate uses).'
+                    : 'multi-angle views of the same subject on a blank background'}
+                </span>
+              </>
             )}
-            <span
-              title="Prompt length vs. the selected model's limit"
-              style={{
-                fontSize: 10.5, fontFamily: 'var(--mono)',
-                color: notes.trim().length > promptLimit ? 'var(--red, #e5534b)' : notes.trim().length > promptLimit * 0.8 ? 'var(--amber, #d29922)' : 'var(--ink-3)',
-              }}
-            >
-              {notes.trim().length.toLocaleString()} / {promptLimit.toLocaleString()}
-            </span>
           </div>
           {genError !== '' && (
             <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>
@@ -851,12 +877,6 @@ export function RefImagePanel({
           </div>
           {improveOpen && (
             <div style={{ marginBottom: 6 }}>
-              {dualImprove && (
-                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 6 }}>
-                  Makes 2 prompts: <b>character</b> (imported when this item is referenced elsewhere) and{' '}
-                  <b>sheet</b> (what Generate uses for the sheet image). Toggle between them above the text box.
-                </div>
-              )}
               <textarea
                 value={guidance}
                 onChange={(e) => setGuidance(e.target.value)}
@@ -869,9 +889,6 @@ export function RefImagePanel({
                 }}
               />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="button" className="vp-undo" disabled={detailing} onClick={detailPrompt}>
-                  {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
-                </button>
                 <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
                 {lessMode && (
                   <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -891,7 +908,7 @@ export function RefImagePanel({
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 6 }}>
               {attached.map((path) => (
                 <span key={path} style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 96 }}>
-                  <img src={contentUrl(path)} alt="" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--accent)', display: 'block' }} />
+                  <img src={contentUrl(path)} alt="" style={{ height: 96, width: 'auto', borderRadius: 8, border: '1px solid var(--accent)', display: 'block' }} onLoad={equalArea(11000, 150)} />
                   <span style={{ fontSize: 10.5, color: 'var(--ink-3)', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {itemForPath(path)?.ref ?? path.split('/').pop()}
                   </span>
@@ -933,7 +950,7 @@ export function RefImagePanel({
                       border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
                     }}
                   >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 120, height: 120, objectFit: 'cover', display: 'block' }} />
+                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
                     <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 10.5, lineHeight: '16px', background: 'rgba(5,6,8,.78)', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>
                       {img.ref ?? img.name}
                     </span>
@@ -973,17 +990,25 @@ export function RefImagePanel({
                     onClick={() => mapImage(img.path)}
                     style={{ padding: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none' }}
                   >
-                    <img src={contentUrl(img.path)} alt="" style={{ width: 120, height: 120, objectFit: 'cover', display: 'block' }} />
+                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
                   </button>
                 ))
               )}
             </div>
           )}
-          {/* THE ACTION lives bottom-right, like every other module. */}
+          {/* ONE primary action, bottom-right, like every other module. While
+              the improve panel is open, improving IS the action; it closes on
+              success and Generate returns. */}
           <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-            <button type="button" className="vp-save" disabled={generating} onClick={generate}>
-              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
-            </button>
+            {improveOpen ? (
+              <button type="button" className="vp-save" disabled={detailing} onClick={detailPrompt}>
+                {detailing ? (<><span className="spin" /> Improving…</>) : '✦ Improve prompt'}
+              </button>
+            ) : (
+              <button type="button" className="vp-save" disabled={generating} onClick={generate}>
+                {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
+              </button>
+            )}
           </div>
             </>
           )}
@@ -1014,7 +1039,8 @@ export function RefImagePanel({
               <select
                 value={aKind}
                 onChange={(e) => setAKind(e.target.value)}
-                style={{ display: 'block', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 12, marginTop: 3 }}
+                className="sc-select"
+                style={{ display: 'block', marginTop: 3 }}
               >
                 <option value="voice">voice</option>
                 <option value="music">music</option>

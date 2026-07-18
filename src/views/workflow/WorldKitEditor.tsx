@@ -343,7 +343,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
                     const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
-                    if (img && expanded !== key) {
+                    if (img && !(expanded ?? '').startsWith(`${si}:`)) {
                       // CHARACTER SHEET CARD — same law as the mapping wall:
                       // visuals first. Every image gets the SAME square
                       // footage, shaped by its own w/h (portrait tall+narrow,
@@ -477,11 +477,8 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                                   value={scope}
                                   onFocus={snapshot}
                                   onChange={(e) => setCell(scopeIdx, e.target.value)}
-                                  style={{
-                                    display: 'block', background: 'transparent',
-                                    color: isSharedScope(scope) ? 'var(--amber)' : 'var(--ink-2)',
-                                    border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '6px 8px', fontSize: 12, marginTop: 3,
-                                  }}
+                                  className="sc-select"
+                                  style={{ display: 'block', marginTop: 3, color: isSharedScope(scope) ? 'var(--amber)' : undefined }}
                                 >
                                   {!scopeKnown && <option value={scope}>{scope}</option>}
                                   {SCOPE_OPTIONS.map((o) => (

@@ -2596,3 +2596,9 @@ body.chat-pinned { padding-right: 380px; }
 .vp-var-inline input:focus, .vp-var-inline textarea:focus { outline: none; border-color: var(--accent); }
 .vp-var-inline .vp-edit-field { display: block; color: var(--ink-3); font-size: 11px; margin-bottom: 10px; }
 .vp-var-inline .vp-edit-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+/* GLOBAL CONTROL SIZE: selects are buttons too — same footprint as .vp-undo
+   (mono, 5x11 padding) so toggles/dropdowns never tower over their row. */
+.sc-select { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 5px 11px; font-family: var(--mono); font-size: 10px; cursor: pointer; }
+.sc-select:hover { border-color: var(--ink-3); color: var(--ink); }
+.sc-select:focus { outline: none; border-color: var(--accent); }
