@@ -322,26 +322,44 @@ export function RefImagePanel({
     )
   }
 
-  // THE EAR: find the linked item's active image and ask AI what voice that
-  // person would have — the user's idea, made a button.
-  const voiceFromImage = async () => {
+  // THE EAR: derive the voice from the LINKED OBJECT — its image when it has
+  // one, its prompt text otherwise. Either way AI writes the voice that
+  // subject would have.
+  const generateVoiceFromLinked = async () => {
     if (!linkedTo) return
-    const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
-      apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
-    )
-    const hit = (out?.data?.images ?? []).find((img) => img.ref === linkedTo)
-    if (!hit) {
-      onToast(`"${linkedTo}" has no image yet — pick or generate one there first.`)
-      return
-    }
     setDescribing(true)
-    const res = await postAction<{ text?: string }>({ action: 'describe_ref_image', path: hit.path, voice: true, allow_cost: true })
-    setDescribing(false)
-    if (res?.ok && res.data?.text) {
-      onDescribed(res.data.text)
-      onToast(`Voice written from ${linkedTo}'s image — edit it like any prompt.`)
-    } else {
-      onToast(`Engine: ${res?.error || res?.message || 'could not describe the voice.'}`)
+    try {
+      const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
+        apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
+      )
+      const hit = (out?.data?.images ?? []).find((img) => img.ref === linkedTo)
+      let res: { ok?: boolean; error?: string; message?: string; data?: { text?: string } } | null
+      if (hit) {
+        res = await postAction<{ text?: string }>({ action: 'describe_ref_image', path: hit.path, voice: true, model: txtModel, allow_cost: true })
+      } else {
+        // No image on the linked object — derive the voice from its PROMPT.
+        const linkedNotes = (kitIndex[linkedTo]?.notes || '').trim()
+        if (!linkedNotes) {
+          onToast(`"${linkedTo}" has no image or description yet — add one there first.`)
+          return
+        }
+        res = await postAction<{ text?: string }>({
+          action: 'edit_snippet',
+          text: linkedNotes,
+          instruction:
+            'Write a one-sentence VOICE description for AI video generation matching this subject: age range, gender if evident, tone, pacing, energy, texture — worded so a generator produces the same voice in every clip. Output only the sentence.',
+          model: txtModel,
+          allow_cost: true,
+        })
+      }
+      if (res?.ok && res.data?.text) {
+        onDescribed(res.data.text)
+        onToast(`Voice written from ${linkedTo}'s ${hit ? 'image' : 'description'} — edit it like any prompt.`)
+      } else {
+        onToast(`Engine: ${res?.error || res?.message || 'could not write the voice.'}`)
+      }
+    } finally {
+      setDescribing(false)
     }
   }
 
@@ -822,17 +840,6 @@ export function RefImagePanel({
                   >
                     ⧉ Link image{linkedTo ? ` · ${linkedTo}` : ''} {linkOpen ? '▴' : '▾'}
                   </button>
-                  <button
-                    type="button"
-                    className="vp-undo"
-                    disabled={describing || !linkedTo}
-                    title={linkedTo
-                      ? `AI looks at ${linkedTo}'s picture and writes the voice they'd have`
-                      : 'Link an image first'}
-                    onClick={() => void voiceFromImage()}
-                  >
-                    {describing ? (<><span className="spin" /> Listening…</>) : `✦ Voice from ${linkedTo || 'linked'}’s image`}
-                  </button>
                 </div>
               ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
@@ -901,6 +908,22 @@ export function RefImagePanel({
                       })
                     )}
                   </div>
+                </div>
+              ) : null}
+              {isAudio ? (
+                <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10, gap: 8 }}>
+                  <ModelPicker model={txtModel} onChange={setTxtModel} disabled={describing} />
+                  <button
+                    type="button"
+                    className="vp-save"
+                    disabled={describing || !linkedTo}
+                    title={linkedTo
+                      ? `AI derives the voice from ${linkedTo} — its image if it has one, its description otherwise`
+                      : 'Link an object first'}
+                    onClick={() => void generateVoiceFromLinked()}
+                  >
+                    {describing ? (<><span className="spin" /> Listening…</>) : '✦ Generate voice from linked object'}
+                  </button>
                 </div>
               ) : null}
             </div>
