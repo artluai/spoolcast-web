@@ -147,6 +147,28 @@ export function PickerView({
               onUse={() => setCreating(t)}
             />
           ))}
+          {/* THE INTERCHANGEABLE ORDER: start from the idea alone and pick
+              the template at step 1 (by hand or let AI pick from the idea).
+              The engine runs the session on the base contract until then. */}
+          <PickerTile
+            tpl={{
+              id: 'undecided',
+              name: 'Decide at step 1',
+              format: 'template picked later',
+              contract: 'base',
+              description: 'Start with the idea; pick the template at step 1 — or let AI pick it from the idea. Locks once real work starts.',
+            }}
+            hidden={q.trim().length > 0 && !'decide later undecided idea first'.includes(q.trim().toLowerCase())}
+            onUse={() =>
+              setCreating({
+                id: 'undecided',
+                name: 'Decide at step 1',
+                format: 'template picked later',
+                contract: 'base',
+                description: 'The template is picked at step 1 — by hand, or AI picks it from the idea.',
+              })
+            }
+          />
         </div>
         {engineDown ? (
           <div className="no-results show">The engine isn’t reachable — start it to see your projects and templates.</div>
