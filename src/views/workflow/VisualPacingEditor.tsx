@@ -1694,6 +1694,64 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                         })}
                       </div>
                     ) : null}
+                    {on ? (() => {
+                      // THE SHOT'S VOICE: audio objects linked to any attached
+                      // reference (variants inherit their base's link) show on
+                      // the expanded shot — with unlink / link-another. These
+                      // controls edit the KIT (world-kit.md via the engine),
+                      // not the shot: the link belongs to the character.
+                      const voices = kit.filter((k) => k.kind === 'voice')
+                      if (!voices.length) return null
+                      const rows = names.map((name) => {
+                        const item = kit.find((k) => k.name === name)
+                        const voice = voices.find((v) => (v as { linked_to?: string }).linked_to === name
+                          || (item?.variant_of && (v as { linked_to?: string }).linked_to === item.variant_of))
+                        return { name, voice }
+                      })
+                      const linkAudio = async (audio: string, linkedTo: string) => {
+                        await fetch(actionUrl(), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_audio_link', audio, linked_to: linkedTo }),
+                        }).catch(() => null)
+                        await refetchKit()
+                      }
+                      return (
+                        <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                          {rows.filter((r) => r.voice).map((r) => (
+                            <span key={r.name} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={(r.voice as KitObject).notes || r.voice!.name}>
+                              ♪ {r.voice!.name} · via {r.name}
+                              <button
+                                type="button"
+                                title={`Unlink ${r.voice!.name} from ${r.name}`}
+                                onClick={() => void linkAudio(r.voice!.name, '')}
+                                style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
+                              >×</button>
+                            </span>
+                          ))}
+                          {rows.some((r) => !r.voice) ? (
+                            <select
+                              className="sc-select"
+                              value=""
+                              title="Link a voice to one of this shot's references (edits the World Kit)"
+                              onChange={(e) => {
+                                const [audio, target] = e.target.value.split('→')
+                                if (audio && target) void linkAudio(audio, target)
+                              }}
+                            >
+                              <option value="">♪ link voice…</option>
+                              {rows.filter((r) => !r.voice).flatMap((r) =>
+                                voices.map((v) => (
+                                  <option key={`${v.name}→${r.name}`} value={`${v.name}→${r.name}`}>
+                                    {v.name} → {r.name}
+                                  </option>
+                                )),
+                              )}
+                            </select>
+                          ) : null}
+                        </div>
+                      )
+                    })() : null}
                   </div>
                 )
               })}

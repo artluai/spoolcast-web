@@ -685,9 +685,67 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             )
                           }}
                         />
-                      ) : (
+                      ) : null}
+                      {row[refIdx].trim() !== '' && !/^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '') && (() => {
+                        // THE OTHER SIDE OF THE LINK: audio objects pointing at
+                        // this item show here too — unlink or re-link without
+                        // hunting through the Audio section. Draft edits only.
+                        const asi = doc!.sections.findIndex(
+                          (sec) => sec.kind === 'table' && /audio/i.test(sec.heading) && sec.columns.some((c) => /linked/i.test(c)),
+                        )
+                        if (asi < 0) return null
+                        const aSec = doc!.sections[asi]
+                        if (aSec.kind !== 'table') return null
+                        const aRef = Math.max(0, aSec.columns.findIndex((c) => /ref/i.test(c)))
+                        const aKindI = aSec.columns.findIndex((c) => /kind/i.test(c))
+                        const aLink = aSec.columns.findIndex((c) => /linked/i.test(c))
+                        if (aLink < 0) return null
+                        const me = row[refIdx].trim()
+                        const setAudioLink = (ri2: number, v: string) => {
+                          snapshot()
+                          const d = JSON.parse(JSON.stringify(doc)) as WKDoc
+                          const sec2 = d.sections[asi]
+                          if (sec2.kind === 'table') sec2.rows[ri2][aLink] = v
+                          apply(d)
+                        }
+                        const mine = aSec.rows.map((r2, ri2) => ({ r2, ri2 })).filter(({ r2 }) => (r2[aLink] || '').trim() === me)
+                        const free = aSec.rows.map((r2, ri2) => ({ r2, ri2 })).filter(({ r2 }) => (r2[aLink] || '').trim() !== me && (r2[aRef] || '').trim())
+                        if (!mine.length && !free.length) return null
+                        return (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+                            {mine.map(({ r2, ri2 }) => (
+                              <span key={ri2} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }}>
+                                ♪ {r2[aRef]}{aKindI >= 0 ? ` · ${r2[aKindI]}` : ''}
+                                <button
+                                  type="button"
+                                  title={`Unlink ${r2[aRef]} from ${me}`}
+                                  onClick={() => setAudioLink(ri2, '')}
+                                  style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
+                                >×</button>
+                              </span>
+                            ))}
+                            {free.length > 0 && (
+                              <select
+                                className="sc-select"
+                                value=""
+                                title="Link an existing audio object to this item"
+                                onChange={(e) => {
+                                  const ri2 = Number(e.target.value)
+                                  if (Number.isFinite(ri2) && e.target.value !== '') setAudioLink(ri2, me)
+                                }}
+                              >
+                                <option value="">♪ link audio…</option>
+                                {free.map(({ r2, ri2 }) => (
+                                  <option key={ri2} value={ri2}>{r2[aRef]}{aKindI >= 0 ? ` (${r2[aKindI]})` : ''}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      {row[refIdx].trim() === '' ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{fieldRows}</div>
-                      )}
+                      ) : null}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
                             {!/^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '') && (
                               <button style={btn} onClick={() => setExpanded(null)}>Done</button>
