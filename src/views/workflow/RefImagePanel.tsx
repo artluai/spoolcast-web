@@ -405,7 +405,7 @@ export function RefImagePanel({
     }
     if (/^Reference image \d+/m.test(prompt) && attached.length === 0) {
       setGenError(
-        'The prompt mentions reference images but none are attached — attach them under 🖇 Reference images, or delete those lines.',
+        'The prompt mentions reference images but none are attached — attach them under ⧉ Reference images, or delete those lines.',
       )
       return
     }
@@ -652,11 +652,13 @@ export function RefImagePanel({
               {manifest === null ? 'Loading…' : 'No image yet — create one below.'}
             </div>
           )}
-          {versions.length > 1 && (
+          {versions.some((v) => v.id !== manifest?.active) && (
             <div style={{ marginTop: 8 }}>
               <div style={{ ...clusterLabel, marginBottom: 5 }}>HISTORY — CLICK TO SWITCH</div>
               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                {versions.map((v) => (
+                {/* The ACTIVE version is the big image above — repeating it
+                    here showed the same picture twice. */}
+                {versions.filter((v) => v.id !== manifest?.active).map((v) => (
                   <button
                     key={v.id}
                     type="button"
@@ -730,69 +732,42 @@ export function RefImagePanel({
                 }}
               />
             </div>
-      {/* CREATE — collapsed by default; the whole point when no image exists.
-          THREE distinct creations, and the UI says which is which:
-            NEW VERSION — another take of THIS item (lands in its history)
-            VARIANT     — a NEW linked item, one deliberate change (own history)
-            NEW OBJECT  — unrelated item: + Add on the section header. */}
-      {!createOpen && (
-        <div style={{ marginTop: 4, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={() => { setCreateMode('version'); setCreateOpen(true) }}
-            title="Another take of THIS item — lands in its history, click a thumbnail to pick the active one"
-            style={{
-              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
-            }}
-          >
-            <span style={{ fontSize: 10 }}>▸</span> CREATE A NEW VERSION
-          </button>
-          <button
-            type="button"
-            onClick={() => { setCreateMode('variant'); setCreateOpen(true) }}
-            title="A NEW kit item derived from this one — one deliberate change, gets its own history. (For an unrelated item use + Add on the section.)"
-            style={{
-              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              ...clusterLabel, display: 'inline-flex', gap: 6, alignItems: 'center',
-            }}
-          >
-            <span style={{ fontSize: 10 }}>▸</span> CREATE A VARIANT
-          </button>
-        </div>
-      )}
+      {/* CREATE — three distinct creations, and the UI says which is which:
+            UPDATE EXISTING — another take of THIS item (lands in its history)
+            NEW VARIANT     — a NEW linked item, one deliberate change (own history)
+            NEW OBJECT      — unrelated item: + Add on the section header. */}
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {(['version', 'variant'] as const).map((m) => {
+          const on = createOpen && createMode === m
+          return (
+            <button
+              key={m}
+              type="button"
+              className="vp-undo"
+              title={m === 'version'
+                ? 'Another take of THIS item — lands in its history, click a thumbnail to pick the active one'
+                : 'A NEW kit item derived from this one — one deliberate change, gets its own history. (Unrelated item? + Add on the section.)'}
+              style={on ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+              onClick={() => {
+                if (on) setCreateOpen(false)
+                else {
+                  setCreateMode(m)
+                  setCreateOpen(true)
+                }
+              }}
+            >
+              {m === 'version' ? `${on ? '▾' : '▸'} Update existing` : `${on ? '▾' : '▸'} New variant`}
+            </button>
+          )
+        })}
+      </div>
       {createOpen && (
         <div style={{ position: 'relative', marginTop: 8 }}>
-          <button
-            type="button"
-            title="Collapse"
-            onClick={() => setCreateOpen(false)}
-            style={{ position: 'absolute', right: 8, top: 6, background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12, padding: 2 }}
-          >
-            ▴
-          </button>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 6 }}>
-            {(['version', 'variant'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setCreateMode(m)}
-                style={{
-                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                  fontSize: 11, letterSpacing: '.08em', fontFamily: 'var(--mono)',
-                  color: createMode === m ? 'var(--ink-1)' : 'var(--ink-3)',
-                  textDecoration: createMode === m ? 'underline' : 'none', textUnderlineOffset: 3,
-                }}
-              >
-                {m === 'version' ? 'NEW VERSION' : 'VARIANT'}
-              </button>
-            ))}
-            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {createMode === 'version'
-                ? `another take of ${refId} — lands in its history above`
-                : `a NEW linked item — one deliberate change, its own history · unrelated item? use + Add on the section`}
-            </span>
-          </div>
+          <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '0 0 8px' }}>
+            {createMode === 'version'
+              ? `Another take of ${refId} — lands in its history above; click a thumbnail to pick the active one.`
+              : `A NEW linked item — one deliberate change, its own history. Unrelated item? Use + Add on the section.`}
+          </p>
           {createMode === 'variant' ? (
             <VariantModule
               inline
@@ -815,9 +790,6 @@ export function RefImagePanel({
           ) : (
             <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" className="core-create" style={{ marginLeft: 0 }} disabled={generating} onClick={generate}>
-              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
-            </button>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
             <select
               value={ratio}
@@ -833,7 +805,7 @@ export function RefImagePanel({
             {!isMaster && (
               <button
                 type="button"
-                style={small}
+                className="vp-undo"
                 title="Rewrite the prompt with AI into a multi-angle character sheet on a blank background"
                 onClick={() => {
                   setSheetMode(true)
@@ -862,25 +834,19 @@ export function RefImagePanel({
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button
-              type="button"
-              className="save-continue"
-              style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
-              onClick={() => setImproveOpen((v) => !v)}
-            >
+            <button type="button" className="vp-undo" onClick={() => setImproveOpen((v) => !v)}>
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
             </button>
             <button
               type="button"
-              className="save-continue"
-              style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
+              className="vp-undo"
               title="Opens Improve with the saved instruction pre-filled — the AI rewrites the prompt to read like a casual phone snapshot instead of a clean AI render"
               onClick={openLessMode}
             >
-              📷 Reduce AI aesthetic
+              ◎ Reduce AI aesthetic
             </button>
-            <button type="button" style={small} onClick={openAttach}>
-              🖇 Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
+            <button type="button" className="vp-undo" onClick={openAttach}>
+              ⧉ Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
             </button>
           </div>
           {improveOpen && (
@@ -903,13 +869,7 @@ export function RefImagePanel({
                 }}
               />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="save-continue"
-                  style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}
-                  disabled={detailing}
-                  onClick={detailPrompt}
-                >
+                <button type="button" className="vp-undo" disabled={detailing} onClick={detailPrompt}>
                   {detailing ? (<><span className="spin" /> Improving…</>) : '✎ Improve'}
                 </button>
                 <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
@@ -984,8 +944,8 @@ export function RefImagePanel({
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
             <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>or add your own:</span>
-            <button type="button" style={small} onClick={() => fileRef.current?.click()}>↑ Upload</button>
-            <button type="button" style={small} onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
+            <button type="button" className="vp-undo" onClick={() => fileRef.current?.click()}>↑ Upload</button>
+            <button type="button" className="vp-undo" onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
             <input
               ref={fileRef}
               type="file"
@@ -1019,6 +979,12 @@ export function RefImagePanel({
               )}
             </div>
           )}
+          {/* THE ACTION lives bottom-right, like every other module. */}
+          <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+            <button type="button" className="vp-save" disabled={generating} onClick={generate}>
+              {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
+            </button>
+          </div>
             </>
           )}
         </div>

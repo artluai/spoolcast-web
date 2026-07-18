@@ -343,15 +343,20 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
                     const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
-                    if (img) {
-                      // CHARACTER SHEET CARD: reference image + name + prompt excerpt
+                    if (img && expanded !== key) {
+                      // CHARACTER SHEET CARD: reference image + name + prompt
+                      // excerpt — natural proportions, generous size (the page
+                      // scrolls). The EXPANDED item's card collapses to a name
+                      // chip instead: its image is already large in the panel
+                      // below, and showing it twice said nothing.
                       return (
                         <button
                           key={key}
                           onClick={() => setExpanded(expanded === key ? null : key)}
                           title={shared ? 'Shared with the show/template' : 'This episode only'}
                           style={{
-                            width: 170,
+                            width: 'fit-content',
+                            maxWidth: 440,
                             textAlign: 'left',
                             background: 'rgba(255,255,255,.03)',
                             border: `1px solid ${expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)'}`,
@@ -361,7 +366,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                             overflow: 'hidden',
                           }}
                         >
-                          <img src={img} alt="" style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
+                          <img src={img} alt="" style={{ height: 230, width: 'auto', maxWidth: 440, display: 'block' }} />
                           <span style={{ display: 'block', padding: '8px 10px 2px', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
                             {row[refIdx]}
                             {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
