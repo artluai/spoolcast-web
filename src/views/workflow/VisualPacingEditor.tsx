@@ -366,19 +366,27 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const box = board.getBoundingClientRect()
     const out: { shot: string; ref: string; d: string }[] = []
     const listBox = board.querySelector('.vp-map-shotlist')?.getBoundingClientRect()
+    // The VISIBLE window of the shot column: the list clipped to the viewport
+    // and pushed below the sticky step header. The list's own rect extends
+    // off-screen when the page scrolls — clamping against it anchored threads
+    // to points nobody can see.
+    const headEl = board.closest('.vp-sticky-host')?.querySelector('.detail-head')
+    const scrollerBox = (board.closest('.workflow-view') as HTMLElement | null)?.getBoundingClientRect()
+    const visTop = Math.max(listBox?.top ?? 0, headEl ? headEl.getBoundingClientRect().bottom : 0, scrollerBox?.top ?? 0, 0)
+    const visBottom = Math.min(listBox?.bottom ?? Infinity, scrollerBox?.bottom ?? Infinity, window.innerHeight)
     board.querySelectorAll<HTMLElement>('[data-mapshot]').forEach((shotEl) => {
       const names = (shotEl.dataset.maprefs || '').split('|').filter(Boolean)
       const a = shotEl.getBoundingClientRect()
-      // A shot scrolled fully out of its column gets no threads; a partly
-      // visible one anchors them to its visible sliver, not off-section.
-      if (listBox && (a.bottom < listBox.top + 4 || a.top > listBox.bottom - 4)) return
+      // A shot with no part in the visible window gets no threads; a partly
+      // visible one anchors them to its on-screen sliver.
+      if (a.bottom < visTop + 4 || a.top > visBottom - 4) return
       for (const name of names) {
         const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
         if (!refEl) continue
         const b = refEl.getBoundingClientRect()
         const x1 = a.right - box.left
         let yAnchor = a.top + Math.min(28, a.height / 2)
-        if (listBox) yAnchor = Math.max(listBox.top + 12, Math.min(listBox.bottom - 12, yAnchor))
+        yAnchor = Math.max(visTop + 12, Math.min(visBottom - 12, yAnchor))
         const y1 = yAnchor - box.top
         const x2 = b.left - box.left
         const y2 = b.top - box.top + Math.min(40, b.height / 2)
@@ -675,7 +683,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // as every other edit (step Undo covers them). The refs cell is an ORDERED
   // comma list; `^name` marks the shot's FIRST FRAME (the generator opens on
   // that exact image — mirrors _first_frame_from_cell in build_shot_list.py).
-  const refsOf = (img: { refs: string }) => img.refs.split(',').map((s) => s.trim().replace(/^\^/, '')).filter(Boolean)
+  // "—" (and "-") is the plan's EMPTY-CELL placeholder, not a reference —
+  // letting it through rendered a ghost attachment with no name and no image.
+  const refsOf = (img: { refs: string }) => img.refs.split(',').map((s) => s.trim().replace(/^\^/, '')).filter((s) => s && s !== '—' && s !== '-')
   const firstFrameOf = (img: { refs: string }) =>
     img.refs.split(',').map((s) => s.trim()).find((s) => s.startsWith('^'))?.slice(1) ?? ''
   const writeRefs = (imageId: string, names: string[], firstFrame: string) => {
