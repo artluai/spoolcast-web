@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   fmtBudget,
   fmtClock,
@@ -26,6 +26,7 @@ import { parseScreenplay } from '../../lib/screenplay-md'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
+import { mergeKitWithDraft, patchDraftAudioLink, useWorldKitDraft } from '../../lib/kit-draft'
 import { TimelineScroller } from './TimelineScroller'
 
 // The Visual Pacing panel, made real: the timeline/table/script views are a
@@ -235,7 +236,11 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
   // real kit object and gets a real card; it just has no image yet.
   type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string; active_prompt?: string; active_model?: string }
-  const [kit, setKit] = useState<KitObject[]>([])
+  const [rawKit, setKit] = useState<KitObject[]>([])
+  // THE KIT THE BOARD SEES = engine file + unsaved step-5 draft overlaid.
+  // Linking audio in the World Kit shows here immediately, no save required.
+  const wkDraft = useWorldKitDraft()
+  const kit = useMemo(() => mergeKitWithDraft(rawKit, wkDraft), [rawKit, wkDraft])
   // The session's raw source pool (intake uploads, external assets). Images
   // here that no kit object maps yet show on the board as importable cards —
   // the shoe's side/detail views were sitting in external-assets, visible in
@@ -1876,6 +1881,9 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_audio_link', audio, linked_to: linkedTo }),
                         }).catch(() => null)
+                        // Keep the unsaved step-5 draft in agreement — the
+                        // draft overlays the file everywhere the kit shows.
+                        patchDraftAudioLink(audio, linkedTo)
                         await refetchKit()
                       }
                       return (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FeedbackButton } from './FeedbackButton'
 import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
@@ -6,6 +6,7 @@ import { TimelineScroller } from './TimelineScroller'
 import { activeSession, actionUrl, apiUrl, contentUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
 
 // COMPILE SHOT LIST (step 08): the machine-precise lens over the pacing plan.
 // The engine compiles shot-list/shot-list.json (code-law structure, AI polish,
@@ -163,8 +164,10 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   // The World Kit, for CONFIRMING each clip's references visually: image refs
   // as thumbnails, prompt-only objects as chips, audio as ♪ chips — including
   // audio riding in via an object link (variants inherit).
-  type KitLite = { name: string; kind: string; notes?: string; image_path?: string; linked_to?: string; variant_of?: string }
-  const [kit, setKit] = useState<KitLite[]>([])
+  type KitLite = { name: string; kind: string; notes: string; image_path: string; linked_to?: string; variant_of?: string }
+  const [rawKit, setKit] = useState<KitLite[]>([])
+  const wkDraft = useWorldKitDraft()
+  const kit = useMemo(() => mergeKitWithDraft(rawKit, wkDraft), [rawKit, wkDraft])
   useEffect(() => {
     let live = true
     Promise.all([

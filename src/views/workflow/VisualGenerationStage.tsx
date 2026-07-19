@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
 import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
+import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
 
 const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
@@ -431,8 +432,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // The World Kit — so every association shows for what it IS: image refs
   // attach as reference images (1st frame flagged), prompt-only objects join
   // the prompt as text, audio rides as sound (attached or via object link).
-  type KitLite = { name: string; kind: string; notes?: string; image_path?: string; linked_to?: string; variant_of?: string }
-  const [kitObjs, setKitObjs] = useState<KitLite[]>([])
+  type KitLite = { name: string; kind: string; notes: string; image_path: string; linked_to?: string; variant_of?: string }
+  const [rawKitObjs, setKitObjs] = useState<KitLite[]>([])
+  const wkDraft = useWorldKitDraft()
+  const kitObjs = useMemo(() => mergeKitWithDraft(rawKitObjs, wkDraft), [rawKitObjs, wkDraft])
   useEffect(() => {
     let live = true
     fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`)
