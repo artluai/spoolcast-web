@@ -240,7 +240,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // here that no kit object maps yet show on the board as importable cards —
   // the shoe's side/detail views were sitting in external-assets, visible in
   // prompts but never importable from the board.
-  const [srcPool, setSrcPool] = useState<{ path: string; ref?: string }[]>([])
+  const [srcPool, setSrcPool] = useState<{ path: string; ref?: string; imported_as?: string }[]>([])
   // heic included: /api/content transcodes for display, and import converts
   // to JPEG before registering (kie can't take HEIC itself).
   const isDisplayable = (p: string) => /\.(png|jpe?g|webp|heic)$/i.test(p)
@@ -332,6 +332,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         // the same pixels under its new name.
         if (name) setImgRatios((cur) => (cur[path] != null ? { ...cur, [name]: cur[path] } : cur))
         await refetchKit()
+        // A shot is open: clicking a wall card means ATTACH — importing was
+        // just the necessary first half (the engine dedupes by source path,
+        // so a re-click attaches the existing object instead of duplicating).
+        if (name && mapSel) toggleMapRef(mapSel, name)
       }
     } catch {
       /* engine offline — the card stays importable */
@@ -1978,7 +1982,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
               // WITH the images, as importable cards.
               const kitPaths = new Set(kit.map((k) => k.image_path).filter(Boolean))
               const sources = srcPool
-                .filter((s) => !s.ref && isDisplayable(s.path) && !kitPaths.has(s.path) && !hiddenRefs.includes(s.path))
+                .filter((s) => !s.ref && !s.imported_as && isDisplayable(s.path) && !kitPaths.has(s.path) && !hiddenRefs.includes(s.path))
                 .map((s) => ({ name: s.path, kind: 'source', notes: '', image_path: s.path }))
               // Images first, text-only refs last: image rows stay pure (every
               // pixel of row width goes to pictures) and the text cards form
