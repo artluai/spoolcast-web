@@ -400,16 +400,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     })
     setThreads((cur) => (JSON.stringify(cur) === JSON.stringify(out) ? cur : out))
   }
-  // Attached (expanded-shot) images share one comfortable footprint.
-  const sizeToArea = (area: number) => (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const im = e.currentTarget
-    const r = im.naturalWidth / im.naturalHeight || 1
-    let h = Math.sqrt(area / r)
-    // Cap the width so two attachments share a row in the shots column.
-    if (h * r > 132) h = 132 / r
-    im.style.height = `${Math.round(h)}px`
-    im.style.width = `${Math.round(h * r)}px`
-  }
   // KIT LAYOUT IS OURS, NOT THE BROWSER'S. CSS multicol kept reverting to
   // sequential fill (balance is spec'd to switch off whenever content
   // overflows), which resurrected the dead-space staircase at laptop sizes.
@@ -422,6 +412,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // and the packing budget until "Show all".
   // Which shot's "♪ add audio" menu is open (img.id) — one at a time.
   const [audioMenuFor, setAudioMenuFor] = useState<string | null>(null)
+  // Which attachment's position picker is open (`shotId:name`).
+  const [posMenuFor, setPosMenuFor] = useState<string | null>(null)
   const [hiddenRefs, setHiddenRefs] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(`sc-map-hidden-${activeSession()}`) || '[]') } catch { return [] }
   })
@@ -732,16 +724,19 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     const nextNames = cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]
     writeRefs(imageId, nextNames, nextNames.includes(ff) ? ff : '')
   }
-  const moveMapRef = (imageId: string, name: string, dir: -1 | 1) => {
+  // Reorder among the IMAGE refs only — that order is what kie receives;
+  // text/audio associations have no order and stay behind.
+  const moveImgToPos = (imageId: string, name: string, target: number) => {
     const img = images.find((i) => i.id === imageId)
     if (!img) return
     const cur = refsOf(img)
-    const at = cur.indexOf(name)
-    const to = at + dir
-    if (at < 0 || to < 0 || to >= cur.length) return
-    const nextNames = [...cur]
-    ;[nextNames[at], nextNames[to]] = [nextNames[to], nextNames[at]]
-    writeRefs(imageId, nextNames, firstFrameOf(img))
+    const imgs = cur.filter((n) => kit.find((k) => k.name === n)?.image_path)
+    const rest = cur.filter((n) => !imgs.includes(n))
+    const from = imgs.indexOf(name)
+    if (from < 0) return
+    imgs.splice(from, 1)
+    imgs.splice(Math.max(0, Math.min(imgs.length, target)), 0, name)
+    writeRefs(imageId, [...imgs, ...rest], firstFrameOf(img))
   }
   // One kit object as a card: the IMAGE sizes the card (native ratio, full
   // column width); a prompt-only object gets an equally-weighted text card —
@@ -1791,20 +1786,40 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                             <>
                               {imgNames.map((name, idx) => {
                                 const obj = kit.find((k) => k.name === name)!
+                                const hw = imgRatios[name]
+                                const r = hw ? 1 / hw : 4 / 3
+                                const posOpen = posMenuFor === `${img.id}:${name}`
                                 return (
-                                  <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
-                                    {/* Header ON the image: order controls as one cluster
-                                        (◀ n ▶), the name on its own line. */}
+                                  <figure
+                                    key={name}
+                                    className={`vp-map-att ${ff === name ? 'ff' : ''}`}
+                                    style={{ flexGrow: r, flexBasis: `${Math.round(r * 130)}px`, aspectRatio: `${r}`, minWidth: 0 }}
+                                  >
+                                    {/* Header ON the image: the position number
+                                        (click to place it), the name below. */}
                                     <div className="vp-map-att-top">
                                       <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
                                       <span className="vp-map-ordgrp">
-                                        <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
-                                        <b>{idx + 1}</b>
-                                        <button type="button" title="Later" disabled={idx === imgNames.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                                        <button
+                                          type="button"
+                                          className="vp-map-posnum"
+                                          title="Reference order — the order the model receives. Click to choose the position."
+                                          onClick={() => setPosMenuFor(posOpen ? null : `${img.id}:${name}`)}
+                                        ><b>{idx + 1}</b></button>
+                                        {posOpen ? imgNames.map((_, p) => (
+                                          <button
+                                            key={p}
+                                            type="button"
+                                            className="vp-map-posopt"
+                                            disabled={p === idx}
+                                            title={`Move to position ${p + 1}`}
+                                            onClick={() => { moveImgToPos(img.id, name, p); setPosMenuFor(null) }}
+                                          >{p + 1}</button>
+                                        )) : null}
                                       </span>
                                       <span className="vp-map-attname">{name}</span>
                                     </div>
-                                    <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={sizeToArea(12500)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} />
+                                    <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={noteRatio(name)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} />
                                     <div className="vp-map-att-ov">
                                       <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references can't attach as images and ride along as prompt text instead)" onClick={() => setFirstFrame(img.id, name)}>
                                         {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
@@ -1839,13 +1854,18 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                       if (!audioObjs.length) return null
                       const visualNames = names.filter((n) => !AUDIO_KINDS.has(kit.find((k) => k.name === n)?.kind ?? ''))
                       const attachedAudio = names.filter((n) => AUDIO_KINDS.has(kit.find((k) => k.name === n)?.kind ?? ''))
-                      const voices = audioObjs.filter((k) => k.kind === 'voice')
-                      const charRows = visualNames.map((name) => {
-                        const item = kit.find((k) => k.name === name)
-                        const voice = voices.find((v) => (v as { linked_to?: string }).linked_to === name
-                          || (item?.variant_of && (v as { linked_to?: string }).linked_to === item.variant_of))
-                        return { name, voice }
-                      })
+                      // EVERY audio kind rides its object's link — a song
+                      // linked to the bedroom follows the bedroom, same as a
+                      // voice follows its character (variants inherit).
+                      const inherited = audioObjs
+                        .filter((a) => !attachedAudio.includes(a.name))
+                        .flatMap((a) => {
+                          const target = (a as { linked_to?: string }).linked_to
+                          if (!target) return []
+                          const via = visualNames.find((n) => n === target || kit.find((k) => k.name === n)?.variant_of === target)
+                          return via ? [{ audio: a, via }] : []
+                        })
+                      const unlinkedTargets = visualNames.filter((n) => !inherited.some((r) => r.via === n))
                       const linkAudio = async (audio: string, linkedTo: string) => {
                         await fetch(actionUrl(), {
                           method: 'POST',
@@ -1870,13 +1890,13 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                               </span>
                             )
                           })}
-                          {charRows.filter((r) => r.voice).map((r) => (
-                            <span key={r.name} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={(r.voice as KitObject).notes || r.voice!.name}>
-                              ♪ {r.voice!.name} · via {r.name}
+                          {inherited.map(({ audio, via }) => (
+                            <span key={audio.name} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={(audio as KitObject).notes || audio.name}>
+                              ♪ {audio.name}{audio.kind !== 'voice' ? ` (${audio.kind})` : ''} · via {via}
                               <button
                                 type="button"
-                                title={`Unlink ${r.voice!.name} from ${r.name} (everywhere — the link belongs to the character)`}
-                                onClick={() => void linkAudio(r.voice!.name, '')}
+                                title={`Unlink ${audio.name} from ${via} (everywhere — the link belongs to the object)`}
+                                onClick={() => void linkAudio(audio.name, '')}
                                 style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
                               >×</button>
                             </span>
@@ -1908,19 +1928,19 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                                   ))}
                                 </>
                               )}
-                              {charRows.filter((r) => !r.voice).length > 0 && voices.length > 0 && (
+                              {unlinkedTargets.length > 0 && audioObjs.some((a) => !(a as { linked_to?: string }).linked_to) && (
                                 <>
-                                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>LINK VOICE</span>
-                                  {charRows.filter((r) => !r.voice).flatMap((r) =>
-                                    voices.map((v) => (
+                                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>LINK TO OBJECT</span>
+                                  {unlinkedTargets.flatMap((n) =>
+                                    audioObjs.filter((a) => !(a as { linked_to?: string }).linked_to).map((a) => (
                                       <button
-                                        key={`c-${v.name}-${r.name}`}
+                                        key={`c-${a.name}-${n}`}
                                         type="button"
                                         className="vp-undo"
-                                        title={`Link ${v.name} to ${r.name} — rides into every shot referencing them`}
-                                        onClick={() => { void linkAudio(v.name, r.name); setAudioMenuFor(null) }}
+                                        title={`Link ${a.name} to ${n} — rides into every shot referencing it`}
+                                        onClick={() => { void linkAudio(a.name, n); setAudioMenuFor(null) }}
                                       >
-                                        ♪ {v.name} → {r.name}
+                                        ♪ {a.name} → {n}
                                       </button>
                                     )),
                                   )}
