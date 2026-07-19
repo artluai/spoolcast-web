@@ -26,6 +26,7 @@ import { Footer } from './components/Footer'
 import { Header } from './components/Header'
 import { ProfileDrawer } from './components/ProfileDrawer'
 import { SavePointsModal } from './components/SavePointsModal'
+import { ShowSettingsModal } from './components/ShowSettingsModal'
 import { LibraryView } from './views/LibraryView'
 import { LoginView, SignupModal } from './views/LoginView'
 import { OnboardingView } from './views/OnboardingView'
@@ -129,6 +130,10 @@ function SpoolcastApp() {
   // 'standalone' (no show, empty cast/kit) is the DEFAULT guess everywhere;
   // only the session's own series field — or an explicit mock flow — upgrades it.
   const [showName, setShowName] = useState('standalone')
+  // The RAW series id behind showName (showName may be a display alias) — the
+  // show-settings panel edits series/<id>/ files, so it needs the real id.
+  const [seriesId, setSeriesId] = useState('')
+  const [showSettingsOpen, setShowSettingsOpen] = useState(false)
   const [steps, setSteps] = useState(() => buildStepsFromContract(FALLBACK_CONTRACT, initialStandalone, null))
   const [gates, setGates] = useState(() => buildGates(FALLBACK_CONTRACT, initialStandalone, null))
   const [selected, setSelected] = useState<string>('setup') // Will be updated by useEffect once API loads
@@ -234,6 +239,7 @@ function SpoolcastApp() {
       if (cancelled || cfg === null) return
       const series = typeof cfg.series === 'string' ? cfg.series : ''
       setShowName(series ? (showBySeries[series] ?? series) : 'standalone')
+      setSeriesId(series)
     })
     return () => {
       cancelled = true
@@ -567,6 +573,7 @@ function SpoolcastApp() {
       route={route}
       setupMode={setupMode}
       showName={showName}
+      onShowSettings={seriesId ? () => setShowSettingsOpen(true) : undefined}
       isWorkflow={isWorkflow}
       isWorldKit={isWorldKit}
       autopilot={autopilot}
@@ -1078,6 +1085,9 @@ function SpoolcastApp() {
       )}
       <ProfileDrawer open={profileOpen} onClose={() => setProfileOpen(false)} />
       {savesOpen ? <SavePointsModal onClose={() => setSavesOpen(false)} onToast={setToast} /> : null}
+      {showSettingsOpen && seriesId ? (
+        <ShowSettingsModal series={seriesId} showName={showName} onClose={() => setShowSettingsOpen(false)} onToast={setToast} />
+      ) : null}
       {pendingFinish ? (
         <SignupModal
           auto={pendingFinish.auto}

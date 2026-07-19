@@ -5,6 +5,7 @@ export function Header({
   route,
   setupMode,
   showName,
+  onShowSettings,
   isWorkflow,
   isWorldKit,
   isRules,
@@ -23,6 +24,9 @@ export function Header({
   route: string
   setupMode: SetupMode
   showName: string
+  // Present only when a real show sits behind the session — makes the show
+  // name in the crumb clickable (show settings).
+  onShowSettings?: () => void
   isWorkflow: boolean
   isWorldKit: boolean
   isRules?: boolean
@@ -100,7 +104,19 @@ export function Header({
           <>
             <b>{projectLabel}</b>
             <span className="sep">·</span>
-            <span className="crumb-secondary">{showName}</span>
+            {onShowSettings ? (
+              <button
+                type="button"
+                className="crumb-secondary"
+                title={`Show settings — what every ${showName} episode inherits`}
+                onClick={onShowSettings}
+                style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+              >
+                {showName}
+              </button>
+            ) : (
+              <span className="crumb-secondary">{showName}</span>
+            )}
           </>
         ) : (
           <>
