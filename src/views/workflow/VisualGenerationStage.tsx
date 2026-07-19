@@ -436,6 +436,77 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [rawKitObjs, setKitObjs] = useState<KitLite[]>([])
   const wkDraft = useWorldKitDraft()
   const kitObjs = useMemo(() => mergeKitWithDraft(rawKitObjs, wkDraft), [rawKitObjs, wkDraft])
+  // UPSTREAM TRUTH for refs: the pacing plan (draft over file) and the shot
+  // list. Anything attached there that hasn't reached this doc shows as a
+  // PENDING chip, and one free sync carries it all the way through.
+  const pacingDraft = useWorkflowStore((st) => st.stageDrafts['visual_pacing'] ?? '')
+  const [planFileMd, setPlanFileMd] = useState('')
+  const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
+  const [refSyncing, setRefSyncing] = useState(false)
+  const planRefsByPid = useMemo(() => {
+    const md = (pacingDraft || planFileMd || '').trim()
+    const map: Record<string, string[]> = {}
+    if (!md) return map
+    for (const line of md.split('\n')) {
+      const m = /^\|\s*(I\d+)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
+      if (!m) continue
+      map[m[1]] = m[2].split(',').map((x) => x.trim().replace(/^\^/, '')).filter((x) => x && x !== '—' && x !== '-')
+    }
+    return map
+  }, [pacingDraft, planFileMd])
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('working/visual-pacing-plan.md')).then((r) => (r.ok ? r.json() : null)),
+      fetch(fileUrl('shot-list/shot-list.json')).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([plan, slOut]) => {
+      if (!live) return
+      if (typeof plan?.data?.content === 'string') setPlanFileMd(plan.data.content)
+      try {
+        const sl = JSON.parse(slOut?.data?.content ?? 'null')
+        const map: Record<string, { refs: string[]; pid: string }> = {}
+        for (const e of sl?.base_layer ?? []) {
+          map[String(e.id ?? '')] = { refs: (e.references ?? []).map(String), pid: String(e.pacing_image_id ?? '') }
+        }
+        setShotEvents(map)
+      } catch { /* no shot list yet */ }
+    })
+    return () => { live = false }
+  }, [])
+  const syncRefsThrough = async () => {
+    setRefSyncing(true)
+    try {
+      if (pacingDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: 'visual_pacing', path: 'working/visual-pacing-plan.md', content: pacingDraft }),
+        }).catch(() => null)
+      }
+      for (const act of ['sync_shot_refs', 'sync_prompt_refs']) {
+        const r = await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: act }),
+        })
+        const out = await r.json().catch(() => null)
+        if (!r.ok || out?.ok === false) throw new Error(out?.error || `${act} failed`)
+      }
+      await load()
+      const slOut = await fetch(fileUrl('shot-list/shot-list.json')).then((r) => (r.ok ? r.json() : null))
+      try {
+        const sl = JSON.parse(slOut?.data?.content ?? 'null')
+        const map: Record<string, { refs: string[]; pid: string }> = {}
+        for (const e of sl?.base_layer ?? []) map[String(e.id ?? '')] = { refs: (e.references ?? []).map(String), pid: String(e.pacing_image_id ?? '') }
+        setShotEvents(map)
+      } catch { /* fine */ }
+      setSaveNote('References synced from the plan — prompt text untouched.')
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'Could not sync references.')
+    } finally {
+      setRefSyncing(false)
+    }
+  }
   useEffect(() => {
     let live = true
     fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`)
@@ -1467,6 +1538,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               const audioInherited = kitObjs
                 .filter((k) => AUD.has(k.kind) && k.linked_to && !audioAssoc.includes(k.name))
                 .filter((k) => namedRefs.some((n) => n === k.linked_to || kitOf(n)?.variant_of === k.linked_to))
+              // Freshest upstream refs for this clip: plan (draft over file)
+              // by pacing id, else the compiled shot list. Anything there but
+              // not in THIS doc is pending a free sync.
+              const ev = shotEvents[row.id]
+              const freshest = (ev && planRefsByPid[ev.pid]) || ev?.refs || null
+              const pendingRefs = freshest ? freshest.filter((n) => !namedRefs.includes(n)) : []
               const renderAssetThumb = ({ ref, index }: { ref: PromptReference; index: number }, variant: 'first_frame' | 'reference') => {
                 const value = referenceValue(ref)
                 const src = referenceSrc(value)
@@ -1615,7 +1692,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         {!kitImageEntries.length && !referenceEntries.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
-                    {textAssoc.length || audioAssoc.length || audioInherited.length ? (
+                    {textAssoc.length || audioAssoc.length || audioInherited.length || pendingRefs.length ? (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                         {textAssoc.map(({ name, index }) => (
                           <span key={`t-${index}`} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
@@ -1632,6 +1709,16 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
                           </span>
                         ))}
+                        {pendingRefs.map((n) => (
+                          <span key={`pd-${n}`} className="vp-undo" style={{ cursor: 'default', borderColor: 'var(--amber)', color: 'var(--amber)' }} title={`${n} is attached upstream (plan/shot list) but not in these prompts yet — Sync refs (free) carries it through without touching prompt text.`}>
+                            {AUD.has(kitOf(n)?.kind ?? '') ? '♪ ' : ''}{n} · upstream, not synced
+                          </span>
+                        ))}
+                        {pendingRefs.length ? (
+                          <button type="button" className="vp-undo" disabled={refSyncing || activeProcess} onClick={() => void syncRefsThrough()} title="Free — plan → shot list → these prompts. Reference rows update; prompt text is untouched.">
+                            {refSyncing ? 'Syncing…' : '⟳ Sync refs'}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
