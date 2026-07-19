@@ -320,6 +320,25 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const processLabel = stageProcess?.label || (checking ? 'Checking shot list…' : 'AI is compiling the shot list…')
   const isBusy = building || checking || activeProcess
 
+  // SYNC IS AUTOMATIC here too — one attempt per distinct upstream diff.
+  const autoSyncSigRef = useRef('')
+  useEffect(() => {
+    if (!videoFirst || syncing || isBusy) return
+    const parts: string[] = []
+    for (const e of list?.base_layer ?? []) {
+      const planned = planRefsById[String(e.pacing_image_id ?? '')]
+      if (!planned) continue
+      const cur = (e.references ?? []).map(String)
+      const missing = planned.filter((n) => !cur.includes(n))
+      if (missing.length) parts.push(`${e.id}:${missing.join(',')}`)
+    }
+    const sig = parts.join(';')
+    if (!sig || autoSyncSigRef.current === sig) return
+    autoSyncSigRef.current = sig
+    void syncRefsFromPlan()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoFirst, syncing, isBusy, list, planRefsById])
+
   const loadFreshShotList = async () => {
     const fr = await fetch(fileUrl(FILE_PATH))
     const fileOut = await fr.json().catch(() => null)

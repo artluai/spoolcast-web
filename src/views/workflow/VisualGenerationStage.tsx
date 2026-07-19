@@ -526,6 +526,26 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const staleFinalRender = useWorkflowStore((s) => s.staleFinalRender)
 
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
+  // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
+  // flush together the moment the job ends (the batch parallelizes inside).
+  const [genQueue, setGenQueue] = useState<{ id: string; type: 'image' | 'video' }[]>([])
+  const queueRowGeneration = (id: string, type: 'image' | 'video') => {
+    if (!activeProcess) {
+      if (type === 'video') void generateVideos([id])
+      else void generateImages([id])
+      return
+    }
+    setGenQueue((q) => (q.some((e) => e.id === id) ? q : [...q, { id, type }]))
+  }
+  useEffect(() => {
+    if (activeProcess || !genQueue.length) return
+    const vids = genQueue.filter((e) => e.type === 'video').map((e) => e.id)
+    const imgs = genQueue.filter((e) => e.type === 'image').map((e) => e.id)
+    setGenQueue([])
+    if (vids.length) void generateVideos(vids)
+    else if (imgs.length) void generateImages(imgs)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProcess, genQueue.length])
 
   const queueSavePromptDoc = (nextDoc: GenerationPromptsDoc) => {
     const save = savePromptChainRef.current.catch(() => undefined).then(() => savePromptDoc(nextDoc))
@@ -698,6 +718,30 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     const done = rows.filter((row) => ready.has(row.id) || row.status === 'image_ready' || row.status === 'video_ready').length
     return { total, done, pct: total ? Math.round((done / total) * 100) : 0 }
   }, [rows, sceneManifest])
+  const pendingSignature = useMemo(() => {
+    const parts: string[] = []
+    for (const row of rows) {
+      const ev = shotEvents[row.id]
+      const freshest = (ev && planRefsByPid[ev.pid]) || ev?.refs || null
+      if (!freshest) continue
+      const names = row.references.map((ref) => String(ref.name || '')).filter(Boolean)
+      const missing = freshest.filter((n) => !names.includes(n))
+      if (missing.length) parts.push(`${row.id}:${missing.join(',')}`)
+    }
+    return parts.join(';')
+  }, [rows, shotEvents, planRefsByPid])
+  const autoSyncedRef = useRef('')
+  useEffect(() => {
+    // SYNC IS AUTOMATIC: an upstream attach flows through without a click.
+    // Free, prompt-text-safe; one attempt per distinct diff (no retry loops),
+    // and never while a generation batch is running.
+    if (!pendingSignature || refSyncing || activeProcess) return
+    if (autoSyncedRef.current === pendingSignature) return
+    autoSyncedRef.current = pendingSignature
+    void syncRefsThrough()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSignature, refSyncing, activeProcess])
+
   const showProgressBar = activeProcess || progress.done > 0
 
   const selectedRows = rows.filter((row) => selected.has(row.id))
@@ -1654,18 +1698,24 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
                         </label>
                         {row.type === 'image' ? (
-                          <button type="button" className="vp-undo vg-generate-main" disabled={activeProcess} onClick={() => generateImages([row.id], row.status === 'image_ready')}>
-                            {row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
+                          <button
+                            type="button"
+                            className="vp-undo vg-generate-main"
+                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating'}
+                            title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
+                            onClick={() => queueRowGeneration(row.id, 'image')}
+                          >
+                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
                           </button>
                         ) : (
                           <button
                             type="button"
                             className="vp-undo vg-generate-main"
-                            disabled={activeProcess || videoTooLong(row)}
-                            title={videoTooLong(row) ? videoDisabledTitle(row) : `Use ${modelLabel(videoModels, videoModel)} for this row`}
-                            onClick={() => generateVideos([row.id], row.status === 'video_ready')}
+                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating' || videoTooLong(row)}
+                            title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, videoModel)} for this row`}
+                            onClick={() => queueRowGeneration(row.id, 'video')}
                           >
-                            {row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
+                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
                           </button>
                         )}
                       </div>
