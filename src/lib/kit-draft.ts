@@ -99,3 +99,37 @@ export function patchDraftAudioLink(audioName: string, linkedTo: string): void {
     /* unparseable draft — the file edit still lands; draft resolves on save */
   }
 }
+
+/**
+ * Mirror a backward shot-refs edit (attach/detach/first-frame from step 9)
+ * into the unsaved PACING draft, same reason as the audio-link mirror: the
+ * engine edits the plan FILE, and a live draft would otherwise overlay it
+ * with the stale cell.
+ */
+export function patchDraftShotRefs(imageId: string, name: string, opts?: { detach?: boolean; firstFrame?: boolean }): void {
+  const store = useWorkflowStore.getState()
+  const md = store.stageDrafts['visual_pacing'] ?? ''
+  if (!md.trim()) return
+  const lines = md.split('\n')
+  const rowRe = new RegExp(`^\\|\\s*${imageId}\\s*\\|`)
+  let changed = false
+  for (let i = 0; i < lines.length; i++) {
+    const st = lines[i].trim()
+    if (!rowRe.test(st)) continue
+    const cells = st.replace(/^\|/, '').replace(/\|$/, '').split('|')
+    if (cells.length < 3) continue
+    let names = cells[2].split(',').map((n) => n.trim()).filter((n) => n && n !== '—' && n !== '-')
+    const bare = names.map((n) => n.replace(/^\^/, ''))
+    if (opts?.detach) {
+      names = names.filter((n) => n.replace(/^\^/, '') !== name)
+    } else {
+      if (!bare.includes(name)) names.push(name)
+      if (opts?.firstFrame) names = names.map((n) => n.replace(/^\^/, '')).map((n) => (n === name ? `^${n}` : n))
+    }
+    cells[2] = ` ${names.join(', ')} `
+    lines[i] = `| ${cells.map((c) => c.trim()).join(' | ')} |`
+    changed = true
+    break
+  }
+  if (changed) store.setStageDraft('visual_pacing', lines.join('\n'))
+}

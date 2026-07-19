@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
 import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
-import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
+import { mergeKitWithDraft, patchDraftShotRefs, useWorldKitDraft } from '../../lib/kit-draft'
 
 const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
@@ -443,6 +443,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [planFileMd, setPlanFileMd] = useState('')
   const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
   const [refSyncing, setRefSyncing] = useState(false)
+  const [kitPickFor, setKitPickFor] = useState<string | null>(null)
   const planRefsByPid = useMemo(() => {
     const md = (pacingDraft || planFileMd || '').trim()
     const map: Record<string, string[]> = {}
@@ -473,6 +474,24 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     })
     return () => { live = false }
   }, [])
+  // BACKWARD EDIT from step 9: write the shot's refs in the PLAN (upstream
+  // truth), mirror any live pacing draft, refresh, and let auto-sync carry it
+  // forward. Editing only the doc would fight the sync (uploads vanish,
+  // removals resurrect).
+  const editShotRef = async (rowId: string, name: string, opts?: { detach?: boolean; firstFrame?: boolean }) => {
+    const pid = shotEvents[rowId]?.pid
+    if (!pid) throw new Error(`No pacing id for ${rowId} — re-compile the shot list first.`)
+    const r = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'attach_ref_to_shot', image: pid, name, detach: !!opts?.detach, first_frame: !!opts?.firstFrame }),
+    })
+    const out = await r.json().catch(() => null)
+    if (!r.ok || out?.ok === false) throw new Error(out?.error || 'Could not update the shot refs.')
+    patchDraftShotRefs(pid, name, opts)
+    const plan = await fetch(fileUrl('working/visual-pacing-plan.md')).then((x) => (x.ok ? x.json() : null))
+    if (typeof plan?.data?.content === 'string') setPlanFileMd(plan.data.content)
+  }
   const syncRefsThrough = async () => {
     setRefSyncing(true)
     try {
@@ -1223,6 +1242,24 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   const removeReferenceAsset = async (rowId: string, refIndex: number) => {
     if (!doc) return
+    // A ref that exists upstream must be detached THERE — deleting only the
+    // doc row would resurrect it on the next auto-sync.
+    {
+      const item = (doc.items ?? []).find((it) => String(it.id || it.chunk_id || '') === rowId)
+      const name = String(item?.references?.[refIndex]?.name || '')
+      const ev = shotEvents[rowId]
+      const upstream = (ev && ((planRefsByPid[ev.pid] ?? ev.refs) || [])) || []
+      if (name && upstream.includes(name)) {
+        try {
+          await editShotRef(rowId, name, { detach: true })
+          setPreviewRef(null)
+          setSaveNote(`${name} detached from ${rowId} — synced everywhere.`)
+        } catch (err) {
+          setBuildError(err instanceof Error ? err.message : 'Could not detach the reference.')
+        }
+        return
+      }
+    }
     const nextDoc = {
       ...doc,
       items: (doc.items ?? []).map((item) => {
@@ -1306,31 +1343,22 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) throw new Error(out?.error || 'Could not upload asset.')
       const localPath = `source/${safeName}`
-      const nextDoc = {
-        ...doc,
-        items: (doc.items ?? []).map((item) => {
-          if (String(item.id || item.chunk_id || '') !== rowId) return item
-          const refs = item.references ?? []
-          const uploadedRef = {
-            name: role === 'first_frame' ? `${rowId} first frame` : file.name,
-            role: role === 'first_frame' ? 'first_frame' : undefined,
-            status: 'uploaded',
-            local_path: localPath,
-          }
-          return {
-            ...item,
-            first_frame_removed: role === 'first_frame' ? false : item.first_frame_removed,
-            references: role === 'first_frame'
-              ? [uploadedRef, ...refs.filter((ref) => ref.role !== 'first_frame')]
-              : [...refs, uploadedRef],
-          }
-        }),
-      }
-      snapshotDoc()
-      await queueSavePromptDoc(nextDoc)
-      setDoc(nextDoc)
+      // BACKWARD COMPATIBLE: the upload becomes a World Kit object (idempotent
+      // by path) attached to this shot in the plan — visible at steps 5/7/8 —
+      // and auto-sync carries it into these prompts.
+      const imp = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'import_source_ref', path: localPath }),
+      })
+      const impOut = await imp.json().catch(() => null)
+      const kitName = impOut?.data?.name as string | undefined
+      if (!imp.ok || impOut?.ok === false || !kitName) throw new Error(impOut?.error || 'Could not import the upload into the World Kit.')
+      await editShotRef(rowId, kitName, { firstFrame: role === 'first_frame' })
       setPreviewRef(null)
-      setSaveNote(role === 'first_frame' ? `${rowId} first frame uploaded` : `${rowId} reference image uploaded`)
+      setSaveNote(role === 'first_frame'
+        ? `${rowId} first frame set — "${kitName}" joined the World Kit and syncs through.`
+        : `"${kitName}" joined the World Kit, attached to ${rowId} — syncing through.`)
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : 'Could not upload asset.')
     }
@@ -1693,6 +1721,14 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
                           </span>
                         ) : null}
+                        <button
+                          type="button"
+                          className="vp-undo"
+                          title="Attach an existing World Kit image to this shot — lands in the plan and syncs everywhere"
+                          onClick={() => setKitPickFor(kitPickFor === row.id ? null : row.id)}
+                        >
+                          {kitPickFor === row.id ? '▾' : '⧉'} Attach from kit
+                        </button>
                         <label className="vp-undo">
                           Upload reference image
                           <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
@@ -1720,6 +1756,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         )}
                       </div>
                     </div>
+                    {kitPickFor === row.id ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', border: '1px dashed var(--line-2)', borderRadius: 10, padding: 10, marginTop: 8 }}>
+                        {(() => {
+                          const ev = shotEvents[row.id]
+                          const current = new Set([...namedRefs, ...(((ev && planRefsByPid[ev.pid]) || ev?.refs) ?? [])])
+                          const options = kitObjs.filter((k) => k.image_path && !current.has(k.name))
+                          if (!options.length) return <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Every kit image is already on this shot.</span>
+                          return options.map((k) => (
+                            <button
+                              key={k.name}
+                              type="button"
+                              title={`Attach ${k.name} to ${row.id}`}
+                              style={{ padding: 0, border: '1px solid var(--line-2)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0 }}
+                              onClick={() => { setKitPickFor(null); void editShotRef(row.id, k.name).catch((err) => setBuildError(err instanceof Error ? err.message : 'attach failed')) }}
+                            >
+                              <img src={contentUrl(k.image_path)} alt={k.name} loading="lazy" style={{ height: 72, width: 'auto', display: 'block' }} />
+                            </button>
+                          ))
+                        })()}
+                      </div>
+                    ) : null}
                     {row.parseError ? <p className="run-error">{row.parseError}</p> : null}
                     {row.status === 'failed' && batchStatus?.failed?.[row.id] ? <p className="run-error">{batchStatus.failed[row.id]}</p> : null}
                     <div className="vg-assetbar">
@@ -1736,6 +1793,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             <span className="vg-ref-img" style={{ cursor: 'default' }}>
                               <img src={contentUrl(kitOf(name)!.image_path!)} alt={name} />
                             </span>
+                            <button
+                              type="button"
+                              className="vg-ref-remove"
+                              title={`Detach ${name} from this shot — everywhere (plan, shot list, prompts)`}
+                              onClick={(e) => { e.stopPropagation(); void editShotRef(row.id, name, { detach: true }).catch((err) => setBuildError(err instanceof Error ? err.message : 'detach failed')) }}
+                            >×</button>
                           </span>
                         ))}
                         {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
