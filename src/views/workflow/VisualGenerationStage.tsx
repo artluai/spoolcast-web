@@ -444,6 +444,28 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
   const [refSyncing, setRefSyncing] = useState(false)
   const [kitPickFor, setKitPickFor] = useState<string | null>(null)
+  // Previous generated versions per clip — regeneration archives what it
+  // replaces; nothing is ever silently overwritten.
+  const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video' }[]>>({})
+  const loadMediaHistory = async () => {
+    const out = await fetch(`${API}/media-history?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (out?.ok && out.data?.history) setMediaHistory(out.data.history)
+  }
+  useEffect(() => { void loadMediaHistory() }, [])
+  const restoreVersion = async (rowId: string, path: string) => {
+    const r = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'restore_media_version', path }),
+    })
+    const out = await r.json().catch(() => null)
+    if (!r.ok || out?.ok === false) {
+      setBuildError(out?.error || 'Could not restore the version.')
+      return
+    }
+    setSaveNote(`${rowId}: previous version restored (the replaced one is archived too).`)
+    await loadMediaHistory()
+  }
   const planRefsByPid = useMemo(() => {
     const md = (pacingDraft || planFileMd || '').trim()
     const map: Record<string, string[]> = {}
@@ -545,6 +567,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const staleFinalRender = useWorkflowStore((s) => s.staleFinalRender)
 
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
+  useEffect(() => { if (!activeProcess) void loadMediaHistory() }, [activeProcess])
   // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
   // flush together the moment the job ends (the batch parallelizes inside).
   const [genQueue, setGenQueue] = useState<{ id: string; type: 'image' | 'video' }[]>([])
@@ -1688,6 +1711,43 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         <span>{row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
                     </div>
+                    {(mediaHistory[row.id] ?? []).length ? (
+                      <div style={{ marginTop: 8 }}>
+                        <span style={{ fontSize: 10, letterSpacing: '.08em', color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>PREVIOUS VERSIONS</span>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
+                          {(mediaHistory[row.id] ?? []).map((v) => (
+                            <span key={v.path} style={{ position: 'relative', border: '1px solid var(--line-2)', borderRadius: 7, overflow: 'hidden', lineHeight: 0 }}>
+                              {v.kind === 'video' ? (
+                                <video
+                                  src={`${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`}
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                  style={{ height: 74, width: 'auto', display: 'block', cursor: 'zoom-in' }}
+                                  title={`Archived ${v.stamp} — click to view`}
+                                  onClick={() => setMediaLightbox({ kind: 'video', src: `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}` })}
+                                />
+                              ) : (
+                                <img
+                                  src={`${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`}
+                                  alt=""
+                                  style={{ height: 74, width: 'auto', display: 'block', cursor: 'zoom-in' }}
+                                  title={`Archived ${v.stamp} — click to view`}
+                                  onClick={() => setMediaLightbox({ kind: 'image', src: `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}` })}
+                                />
+                              )}
+                              <button
+                                type="button"
+                                className="vp-undo"
+                                style={{ position: 'absolute', bottom: 3, right: 3, fontSize: 9, padding: '2px 6px' }}
+                                title="Make this the active version again (the current one is archived, not lost)"
+                                onClick={() => void restoreVersion(row.id, v.path)}
+                              >restore</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {row.type === 'video' ? (
                       <div className="vg-first-frame">
                         <div className="vg-asset-head">
