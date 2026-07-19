@@ -819,6 +819,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
 
   const generateImages = async (onlyIds?: string[], force = false) => {
+    // Same regenerate rule as videos: an existing image + generate = force.
+    {
+      const src = onlyIds ? rows.filter((row) => onlyIds.includes(row.id)) : selectedImageRows
+      force = force || src.some((row) => row.status === 'image_ready')
+    }
     const ids = onlyIds ?? selectedRows.filter((row) => row.type !== 'video').map((row) => row.id)
     if (!ids.length) return
     setBuildError('')
@@ -902,6 +907,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   const generateVideos = async (onlyIds?: string[], force = false) => {
     const sourceRows = onlyIds ? rows.filter((row) => onlyIds.includes(row.id)) : selectedVideoRows
+    // Generating a row whose clip already EXISTS means regenerate — without
+    // --force the batch skips it, reports "succeeded", and nothing reaches
+    // kie (observed: 3 "regenerated" clips, zero requests).
+    force = force || sourceRows.some((row) => row.status === 'video_ready')
     if (sourceRows.some(videoTooLong)) {
       setBuildError(`Video generation disabled: one selected row exceeds ${modelLabel(videoModels, videoModel)} max ${videoMaxSeconds}s.`)
       return
