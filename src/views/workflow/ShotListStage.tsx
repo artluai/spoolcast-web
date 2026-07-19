@@ -3,7 +3,7 @@ import { FeedbackButton } from './FeedbackButton'
 import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
-import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
+import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
@@ -117,6 +117,16 @@ const eventEnd = (event: BaseLayerEvent) => {
 }
 const reactionOffset = (reaction: Reaction) => Number(reaction.timing_start_s ?? 0)
 const chunkNarration = (chunk: Chunk) => (chunk.beats ?? []).map((beat) => beat.narration).filter(Boolean).join(' ')
+// The words THIS clip performs: sliced by the compiler's word indices when
+// present, else the whole chunk (single-clip chunks).
+const clipSpoken = (event: BaseLayerEvent, chunk?: Chunk) => {
+  const all = chunk ? chunkNarration(chunk) : ''
+  const words = all.split(/\s+/).filter(Boolean)
+  const a = Number(event.first_word_idx)
+  const b = Number(event.last_word_idx)
+  if (Number.isFinite(a) && Number.isFinite(b) && b >= a && words.length) return words.slice(a, b + 1).join(' ')
+  return all
+}
 const shortPath = (path?: string) => (path || '').split('/').slice(-2).join('/') || '—'
 
 export function ShotListStage({ stageId }: { stageId: string }) {
@@ -142,6 +152,40 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const [xlsxLoading, setXlsxLoading] = useState(false)
   const [xlsxMessage, setXlsxMessage] = useState('')
   const [xlsxPreview, setXlsxPreview] = useState<XlsxPreview | null>(null)
+  // TWO SHAPES, one signal. Audio-first: narration owns the clock, visuals
+  // slot under it — the chunk-centric lens below. Video-first: each clip
+  // generates picture AND sound, so the honest unit is the CLIP.
+  const [videoFirst, setVideoFirst] = useState(false)
+  // The exact assembled prompt per clip (working/generation-prompts.json,
+  // built+approved at the generation step). READ-ONLY here: building it from
+  // this step would reset its approval under a running batch.
+  const [assembled, setAssembled] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
+      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
+      fetch(fileUrl('working/generation-prompts.json')).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([sess, reg, prompts]) => {
+      if (!live) return
+      try {
+        const cfg = JSON.parse(sess?.data?.content ?? 'null')
+        const hit = reg?.data?.templates?.find((t: { id?: string }) => t.id === String(cfg?.template || ''))
+        if (hit?.format === 'video-first') setVideoFirst(true)
+      } catch { /* unknown template stays audio-first-shaped */ }
+      try {
+        const doc = JSON.parse(prompts?.data?.content ?? 'null')
+        const map: Record<string, string> = {}
+        for (const it of doc?.items ?? []) {
+          const id = String(it?.id ?? '')
+          const text = String(it?.prompt || it?.kie_request_preview?.input?.prompt || '')
+          if (id && text) map[id] = text
+        }
+        setAssembled(map)
+      } catch { /* no prompts doc yet — the clip cards say so */ }
+    })
+    return () => { live = false }
+  }, [])
   const [xlsxSheetIndex, setXlsxSheetIndex] = useState(0)
   const autoExportRef = useRef(false)
   // Engine truth: is this stage actually buildable yet? A paid button must
@@ -587,7 +631,9 @@ export function ShotListStage({ stageId }: { stageId: string }) {
         <>
           {/* One line of facts. */}
           <div className="ch" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-            <h3>Compile Shot List — {chunks.length} audio chunks · {baseLayer.length} base visuals · {reactions.length} reactions · ~{fmtTime(totalSec)}</h3>
+            <h3>{videoFirst
+              ? `Compile Shot List — ${baseLayer.length} clips · ~${fmtTime(totalSec)} · picture + sound per clip`
+              : `Compile Shot List — ${chunks.length} audio chunks · ${baseLayer.length} base visuals · ${reactions.length} reactions · ~${fmtTime(totalSec)}`}</h3>
             <span>shot-list/shot-list.json · shot-list.xlsx</span>
           </div>
           {unresolved.length > 0 ? (
@@ -603,6 +649,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
             setZoom={setZoom}
             hint="Click a base visual or reaction to highlight the audio section it belongs to · drag the timeline to pan when zoomed"
           >
+              {!videoFirst ? (
               <div className="vp-tl-row">
                 <span className="vp-tl-label">Audio</span>
                 <div className="vp-tl-track ruler">
@@ -618,8 +665,9 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                   ))}
                 </div>
               </div>
+              ) : null}
               <div className="vp-tl-row">
-                <span className="vp-tl-label">Base</span>
+                <span className="vp-tl-label">{videoFirst ? 'Clips' : 'Base'}</span>
                 <div className="vp-tl-track visuals">
                   {positioned.map(({ event, start, dur }) => (
                     <button
@@ -635,6 +683,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                   ))}
                 </div>
               </div>
+              {!videoFirst ? (
               <div className="vp-tl-row">
                 <span className="vp-tl-label">React</span>
                 <div className="vp-tl-track">
@@ -652,8 +701,58 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                   )) : <span className="vp-tl-empty">no reaction overlays</span>}
                 </div>
               </div>
+              ) : null}
           </TimelineScroller>
 
+          {videoFirst ? (
+          <div className="sl-review">
+            {positioned.map(({ event, start, dur }) => {
+              const chunk = chunkById.get(String(event.chunk_id ?? ''))
+              const spoken = clipSpoken(event, chunk)
+              const isOpen = selected === `base:${event.id}`
+              const grp = String((event as Record<string, unknown>).group ?? '')
+              const agrp = String((event as Record<string, unknown>).audio_group ?? '')
+              const finalPrompt = assembled[event.id]
+              return (
+                <section key={event.id} className={`sl-section ${isOpen ? 'on' : ''}`}>
+                  <button
+                    type="button"
+                    className="sl-section-head"
+                    onClick={() => setSelected((cur) => (cur === `base:${event.id}` ? '' : `base:${event.id}`))}
+                  >
+                    <span className="id">{event.id}</span>
+                    <span className="sl-title">{spoken ? `“${spoken}”` : 'Silent clip'}</span>
+                    <span className="sl-meta">{fmtTime(start)}-{fmtTime(start + dur)} · {dur.toFixed(1)}s{grp ? ` · ${grp}` : ''}{agrp ? ` · ♪ ${agrp}` : ''}</span>
+                  </button>
+                  {/* The PROMPT — what the clip generator is told to shoot. The
+                      spoken line above is performed INSIDE the clip; there is
+                      no separate audio track. */}
+                  <div className="sl-script">
+                    <span>Prompt</span>
+                    <p>{event.visual_direction || '—'}</p>
+                  </div>
+                  {(event.references ?? []).length ? (
+                    <p className="sl-summary-line">refs: {(event.references ?? []).join(', ')} — images ride along; prompt-only objects join as text</p>
+                  ) : null}
+                  {finalPrompt ? (
+                    <details className="sl-json">
+                      <summary>Assembled prompt the model receives (from the generation step)</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap' }}>{finalPrompt}</pre>
+                    </details>
+                  ) : (
+                    <p className="sl-empty" style={{ margin: '6px 0 0' }}>
+                      Final assembled prompt (style anchor + reference handling + voice pin) is composed and reviewed at the generation step.
+                    </p>
+                  )}
+                  <details className="sl-json">
+                    <summary>JSON for {event.id}</summary>
+                    <pre>{pretty(event)}</pre>
+                  </details>
+                </section>
+              )
+            })}
+          </div>
+          ) : (
           <div className="sl-review">
             {chunkSections.map(({ chunk, visuals, reactions: chunkReactions, start, end }) => {
               const isOpen = selectedChunkId === chunk.id || selected === `chunk:${chunk.id}`
@@ -743,6 +842,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
               )
             })}
           </div>
+          )}
 
           <details className="sl-full-json">
             <summary>
