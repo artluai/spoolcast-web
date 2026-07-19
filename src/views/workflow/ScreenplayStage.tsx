@@ -1061,7 +1061,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                               <th style={{ width: 28 }}>#</th>
                               <th style={{ width: '42%' }}>On screen</th>
                               <th>Spoken line — empty = silent</th>
-                              <th style={{ width: 86 }} title="Visual consistency group — clips sharing it share one MASTER reference so they match">Group</th>
+                              <th style={{ width: 86 }} title="Visual consistency group — clips sharing it share one MASTER reference so they match">Visual group</th>
+                              <th style={{ width: 86 }} title="Audio consistency group — one continuous sound identity: the same speaker's voice or the same music bed. Empty = silent.">Audio group</th>
                               <th style={{ width: 24 }} />
                             </tr>
                           </thead>
@@ -1072,15 +1073,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                                   <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{ci + 1}</td>
                                   <td>{editableCell(ci, 'screen')}</td>
                                   <td>{editableCell(ci, 'line')}</td>
-                                  <td>
-                                    <input
-                                      value={doc.clips![ci].group}
-                                      placeholder="—"
-                                      title="Visual consistency group (clips sharing it share one master)"
-                                      onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, group: e.target.value.toLowerCase() } : x)))}
-                                      style={{ width: '100%', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', fontFamily: 'var(--mono)', fontSize: 10.5, padding: '4px 6px' }}
-                                    />
-                                  </td>
+                                  {(['group', 'audioGroup'] as const).map((gk) => (
+                                    <td key={gk}>
+                                      <input
+                                        value={doc.clips![ci][gk]}
+                                        placeholder="—"
+                                        title={gk === 'group'
+                                          ? 'Visual consistency group (clips sharing it share one master)'
+                                          : "Audio consistency group (same speaker's voice / same music bed; empty = silent)"}
+                                        onChange={(e) => updateClips(doc.clips!.map((x, k) => (k === ci ? { ...x, [gk]: e.target.value.toLowerCase() } : x)))}
+                                        style={{ width: '100%', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', fontFamily: 'var(--mono)', fontSize: 10.5, padding: '4px 6px' }}
+                                      />
+                                    </td>
+                                  ))}
                                   <td>
                                     <button
                                       type="button"
@@ -1100,7 +1105,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                       {editCell && cellRect && aiOpen && editorPopup(Number(editCell.split(':')[0]))}
                       <button
                         type="button"
-                        onClick={() => updateClips([...doc.clips!, { screen: '', line: '', shot: '', group: '' }])}
+                        onClick={() => updateClips([...doc.clips!, { screen: '', line: '', shot: '', group: '', audioGroup: '' }])}
                         style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', borderRadius: 6, padding: '5px 11px', fontSize: 12, cursor: 'pointer', marginTop: 8 }}
                       >
                         ＋ clip

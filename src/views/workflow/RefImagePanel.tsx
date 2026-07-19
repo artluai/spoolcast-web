@@ -1191,19 +1191,36 @@ export function RefImagePanel({
           (unlink on the ×); the + panel links an existing audio object or
           creates a new one. */}
       {!isAudio && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'stretch' }}>
+          {/* Linked audio renders as a CARD, not a pill — it's a kit object
+              (like a thumbnail), and pill-shaped it read as one more button
+              next to + Linked audio. */}
           {(linkedAudio ?? []).map((a) => (
-            <span key={a.key} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={a.notes || a.name}>
-              ♪ {a.name}{a.kind ? ` · ${a.kind}` : ''}
+            <div
+              key={a.key}
+              title={a.notes || a.name}
+              style={{
+                position: 'relative', minWidth: 170, maxWidth: 240, border: '1px solid var(--line, #2a3142)',
+                borderRadius: 10, padding: '9px 26px 9px 11px', background: 'var(--bg-2, rgba(255,255,255,.02))',
+                display: 'flex', flexDirection: 'column', gap: 4,
+              }}
+            >
+              <span className="vp-map-chip" style={{ position: 'static', alignSelf: 'flex-start' }}>{a.kind || 'audio'}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-1, var(--ink))' }}>♪ {a.name}</span>
+              {a.notes ? (
+                <span style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {a.notes}
+                </span>
+              ) : null}
               <button
                 type="button"
                 title={`Unlink ${a.name} from ${refId}`}
                 onClick={() => onAudioUnlink?.(a.key)}
-                style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
+                style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 12 }}
               >×</button>
-            </span>
+            </div>
           ))}
-          <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
+          <button type="button" className="vp-undo" style={{ alignSelf: 'center' }} onClick={() => setAudioOpen((v) => !v)}>
             {audioOpen ? '▾' : '+'} Linked audio
           </button>
         </div>

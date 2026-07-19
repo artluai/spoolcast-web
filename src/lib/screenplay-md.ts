@@ -15,9 +15,10 @@
 // (render_clips_file) — keep them in sync.
 
 export type ShotMedium = 'video' | 'image'
-// group: the visual-consistency group — clips sharing it share one MASTER
-// reference so they match. '' = one-off.
-export type Clip = { screen: string; line: string; shot: ShotMedium | ''; group: string }
+// group: the VISUAL-consistency group — clips sharing it share one MASTER
+// reference so they match. audioGroup: the AUDIO-consistency group — one
+// continuous sound identity (a speaker's voice, a music bed). '' = one-off.
+export type Clip = { screen: string; line: string; shot: ShotMedium | ''; group: string; audioGroup: string }
 
 export type ScreenplayDoc = {
   title: string
@@ -71,7 +72,9 @@ export function parseScreenplay(text: string): ScreenplayDoc {
         line: cells[2] ?? '',
         // '' for pre-column tables — resolved against the project policy, not here.
         shot: shot === 'video' || shot === 'image' ? shot : '',
+        // Pre-split tables had ONE Group column at [4]; audio parses '' there.
         group: (cells[4] ?? '').toLowerCase(),
+        audioGroup: (cells[5] ?? '').toLowerCase(),
       })
     }
   }
@@ -90,11 +93,11 @@ export function serializeScreenplay(doc: ScreenplayDoc): string {
     .filter(Boolean)
     .join('\n\n')
   const rows = doc.clips
-    .map((c, i) => `| ${i + 1} | ${cell(c.screen)} | ${cell(c.line)} | ${c.shot} | ${cell(c.group)} |`)
+    .map((c, i) => `| ${i + 1} | ${cell(c.screen)} | ${cell(c.line)} | ${c.shot} | ${cell(c.group)} | ${cell(c.audioGroup)} |`)
     .join('\n')
   return (
     `# ${doc.title}\n\n${voice}## Narration\n\n${narration}\n\n` +
-    `## Clips\n\n| # | On screen | Spoken line | Shot | Group |\n|---|---|---|---|---|\n${rows}\n`
+    `## Clips\n\n| # | On screen | Spoken line | Shot | Visual group | Audio group |\n|---|---|---|---|---|---|\n${rows}\n`
   )
 }
 
@@ -102,7 +105,7 @@ export function serializeScreenplay(doc: ScreenplayDoc): string {
 // line with an empty on-screen description (the user or the AI fills those).
 export function proseToClips(doc: ScreenplayDoc): ScreenplayDoc {
   const paras = doc.narration.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean)
-  return { ...doc, clips: paras.map((p) => ({ screen: '', line: p, shot: '' as const, group: '' })) }
+  return { ...doc, clips: paras.map((p) => ({ screen: '', line: p, shot: '' as const, group: '', audioGroup: '' })) }
 }
 
 export function spokenWordCount(text: string): number {
