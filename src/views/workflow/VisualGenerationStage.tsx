@@ -1277,6 +1277,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
 
   const referenceValue = (ref: PromptReference) => String(ref.local_path || ref.image_url || '').trim()
+  // THE STEP-7 LAW everywhere images meet: equal square footage at true
+  // proportions — never a fixed crop box deciding what survives.
+  const equalAreaThumb = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget
+    const r = im.naturalWidth / im.naturalHeight || 1
+    const h = Math.min(190, Math.sqrt(20000 / r))
+    im.style.height = `${Math.round(h)}px`
+    im.style.width = `${Math.round(h * r)}px`
+  }
 
   const firstFrameReference = (row: PromptRow) => (
     row.references.find((ref) => ref.role === 'first_frame' && referenceValue(ref))
@@ -1682,7 +1691,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       title={name}
                       onClick={() => setPreviewRef({ src, name, rowId: row.id, refIndex: index, role: variant })}
                     >
-                      <img src={src} alt={name} />
+                      <img src={src} alt={name} onLoad={equalAreaThumb} />
                     </button>
                     <button
                       type="button"
@@ -1869,7 +1878,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     ) : null}
                     {row.parseError ? <p className="run-error">{row.parseError}</p> : null}
                     {row.status === 'failed' && batchStatus?.failed?.[row.id] ? <p className="run-error">{batchStatus.failed[row.id]}</p> : null}
-                    <div className="vg-assetbar">
+                    <div className="vg-assetbar" style={{ marginTop: 10 }}>
                       <span className="vg-refs">
                         {kitImageEntries.map(({ ref, name, index }) => (
                           <span
@@ -1881,7 +1890,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           >
                             {ref.role === 'first_frame' ? <i className="vg-ff-flag">1st frame</i> : null}
                             <span className="vg-ref-img" style={{ cursor: 'default' }}>
-                              <img src={contentUrl(kitOf(name)!.image_path!)} alt={name} />
+                              <img src={contentUrl(kitOf(name)!.image_path!)} alt={name} onLoad={equalAreaThumb} />
                             </span>
                             <button
                               type="button"
@@ -1896,7 +1905,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       </span>
                     </div>
                     {textAssoc.length || audioAssoc.length || audioInherited.length || pendingRefs.length ? (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, minWidth: 0 }}>
                         {textAssoc.map(({ name, index }) => (
                           <span key={`t-${index}`} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
                             {kitOf(name)?.kind || 'ref'} · {name}

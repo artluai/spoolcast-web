@@ -978,12 +978,14 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-asset-head .vp-undo, .vg-first-frame-row .vp-undo { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; box-sizing: border-box; white-space: nowrap; }
 .vg-first-frame-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .vg-first-frame input[type="file"] { display: none; }
-.vg-refs { display: flex; align-items: flex-start; justify-content: flex-start; flex-wrap: wrap; gap: 9px; min-height: 68px; color: var(--ink-3); font-size: 12px; min-width: 0; text-align: left; }
-.vg-refs img { width: 108px; height: 68px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); background: var(--bg-4); }
+/* Reference thumbs: JS sizes each to ~20k px² at its TRUE ratio (equal square
+   footage, no crops). The CSS height is only the pre-load placeholder. */
+.vg-refs { display: flex; align-items: flex-start; justify-content: flex-start; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; min-width: 0; text-align: left; }
+.vg-refs img { height: 120px; width: auto; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); }
 .vg-ref-thumb { position: relative; display: inline-flex; }
 .vg-ref-thumb.first-frame { align-items: center; gap: 8px; padding-right: 0; }
 .vg-ref-img { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; }
-.vg-ref-img img, .vg-ref-thumb.first-frame .vg-ref-img img { display: block; width: 108px; height: 68px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); background: var(--bg-4); }
+.vg-ref-img img, .vg-ref-thumb.first-frame .vg-ref-img img { display: block; height: 120px; width: auto; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); }
 .vg-ref-img:hover img { border-color: var(--accent); }
 .vg-ref-remove { position: absolute; right: -5px; top: -5px; width: 15px; height: 15px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--bg); color: var(--ink-3); font-size: 11px; line-height: 1; cursor: pointer; }
 .vg-ref-remove:hover { color: var(--red); border-color: var(--red); background: rgba(233,106,106,.14); }
