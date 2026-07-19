@@ -144,6 +144,30 @@ type RowPanelResizeColumn = {
   slots: RowPanelResizeSlot[]
 }
 
+// PORTRAIT SESSIONS put the freed horizontal space to work: script and
+// details sit BESIDE the tall video instead of under an ocean of gutter.
+const normalPortraitLayoutRows: ReviewLayoutRow[] = [
+  {
+    id: 'normal-video',
+    columns: [
+      { id: 'normal-video-col', panels: ['video'] },
+      { id: 'normal-side-col', panels: ['script', 'details'] },
+    ],
+  },
+  {
+    id: 'normal-timeline',
+    columns: [
+      { id: 'normal-timeline-col', panels: ['timeline'] },
+    ],
+  },
+  {
+    id: 'normal-review',
+    columns: [
+      { id: 'normal-gallery-col', panels: ['gallery'] },
+    ],
+  },
+]
+
 const normalReviewLayoutRows: ReviewLayoutRow[] = [
   {
     id: 'normal-video',
@@ -620,6 +644,8 @@ export function VisualReviewStage({
   const renderJobRef = useRef<string | null>(null)
   const renderTimerRef = useRef<number | null>(null)
   const [normalLayoutRows, setNormalLayoutRows] = useState(() => cloneReviewLayout(normalReviewLayoutRows))
+  const [canvasRatio, setCanvasRatio] = useState(16 / 9)
+  const canvasRatioRef = useRef(16 / 9)
   const [expandedLayoutRows, setExpandedLayoutRows] = useState(() => cloneReviewLayout(expandedReviewLayoutRows))
   const [mobileLayoutRows, setMobileLayoutRows] = useState(() => cloneReviewLayout(mobileReviewLayoutRows))
   const [rowSizes, setRowSizes] = useState<Record<string, number>>({})
@@ -734,6 +760,22 @@ export function VisualReviewStage({
       setShotList(shot)
       setManifest(scenes)
       setPromptDoc(prompts)
+      // THE CANVAS SHAPE drives the player box and the default layout. One
+      // source: the shot list's canvas, falling back to the first prompt's
+      // request aspect.
+      // The GENERATION REQUEST'S aspect is the truth — the shot list's canvas
+      // block can be stale scaffold data (observed: canvas 16:9, clips 9:16).
+      const ar = String((prompts?.items?.[0] as { kie_request_preview?: { input?: { aspect_ratio?: string } } } | undefined)?.kie_request_preview?.input?.aspect_ratio
+        || (shot as { canvas?: { aspect_ratio?: string } } | null)?.canvas?.aspect_ratio || '')
+      const m = ar.match(/^(\d+):(\d+)$/)
+      if (m) {
+        const ratio = Number(m[1]) / Number(m[2])
+        canvasRatioRef.current = ratio
+        setCanvasRatio(ratio)
+        if (ratio < 1 && !readSavedReviewLayouts().normal) {
+          setNormalLayoutRows(cloneReviewLayout(normalPortraitLayoutRows))
+        }
+      }
       setLoading(false)
     }
     void load()
@@ -1372,7 +1414,10 @@ export function VisualReviewStage({
     const minHeight = slotMinHeight(slot, fallback)
     if (!panel) return minHeight
     if (panel.classList.contains('vr-player-panel')) {
-      return Math.max(minHeight, slot.getBoundingClientRect().width * 9 / 16)
+      // The SESSION'S canvas ratio, not an assumed 16:9 — capped to the
+      // viewport so a 9:16 clip is tall, not endless.
+      const ideal = slot.getBoundingClientRect().width / canvasRatioRef.current
+      return Math.max(minHeight, Math.min(ideal, window.innerHeight * 0.78))
     }
 
     const summary = panel.querySelector<HTMLElement>(':scope > summary')
@@ -2055,6 +2100,7 @@ export function VisualReviewStage({
             <div
               ref={previewRef}
               className={`vr-preview ${playing && !controlsAwake ? 'idle' : ''} ${seeking ? 'seeking' : ''}`}
+              style={{ aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%' }}
               onMouseMove={wakeControls}
               onMouseEnter={wakeControls}
               onFocus={wakeControls}
