@@ -605,6 +605,27 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
     scroller?.addEventListener('scroll', onScroll)
     const shotList = boardRef.current?.querySelector('.vp-map-shotlist')
     shotList?.addEventListener('scroll', onScroll)
+    // Scroll EVENTS are not trustworthy on this container (observed: scrollTop
+    // changes with zero scroll events fired) — so threads went stale and drew
+    // off-section. Watch the POSITION itself: any movement hides threads and
+    // arms the idle re-measure, no event required.
+    let lastPos = -1
+    let watchId = 0
+    const checkPos = () => {
+      const pos = ((scroller as HTMLElement | null)?.scrollTop ?? 0) + ((shotList as HTMLElement | null)?.scrollTop ?? 0) + window.scrollY
+      if (pos !== lastPos) {
+        if (lastPos !== -1) onScroll()
+        lastPos = pos
+      }
+    }
+    const watchPos = () => {
+      checkPos()
+      watchId = requestAnimationFrame(watchPos)
+    }
+    watchId = requestAnimationFrame(watchPos)
+    // rAF stops in hidden/embedded contexts — the interval is the backstop
+    // that keeps threads honest wherever the page renders.
+    const watchIv = window.setInterval(checkPos, 300)
     // The kit column must keep EVERY reference on screen while the shots
     // scroll: cap its height to the real scroller viewport (not 100vh — the
     // embedded preview reports a zero viewport, and the scroller is the truth
@@ -622,6 +643,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       window.removeEventListener('resize', measureThreads)
       scroller?.removeEventListener('scroll', onScroll)
       shotList?.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(watchId)
+      window.clearInterval(watchIv)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, draft, mapSel, kit, imgRatios, srcPool, hiddenRefs.length])
