@@ -1751,39 +1751,42 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       )}
                     </div>
                     {(mediaHistory[row.id] ?? []).length ? (
-                      <div style={{ marginTop: 8 }}>
+                      <div style={{ marginTop: 10 }}>
                         <span style={{ fontSize: 10, letterSpacing: '.08em', color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>PREVIOUS VERSIONS</span>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
-                          {(mediaHistory[row.id] ?? []).map((v) => (
-                            <span key={v.path} style={{ position: 'relative', border: '1px solid var(--line-2)', borderRadius: 7, overflow: 'hidden', lineHeight: 0 }}>
-                              {v.kind === 'video' ? (
-                                <video
-                                  src={`${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`}
-                                  muted
-                                  playsInline
-                                  preload="metadata"
-                                  style={{ height: 74, width: 'auto', display: 'block', cursor: 'zoom-in' }}
-                                  title={`Archived ${v.stamp} — click to view`}
-                                  onClick={() => setMediaLightbox({ kind: 'video', src: `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}` })}
-                                />
-                              ) : (
-                                <img
-                                  src={`${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`}
-                                  alt=""
-                                  style={{ height: 74, width: 'auto', display: 'block', cursor: 'zoom-in' }}
-                                  title={`Archived ${v.stamp} — click to view`}
-                                  onClick={() => setMediaLightbox({ kind: 'image', src: `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}` })}
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="vp-undo"
-                                style={{ position: 'absolute', bottom: 3, right: 3, fontSize: 9, padding: '2px 6px' }}
-                                title="Make this the active version again (the current one is archived, not lost)"
-                                onClick={() => void restoreVersion(row.id, v.path)}
-                              >restore</button>
-                            </span>
-                          ))}
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+                          {(mediaHistory[row.id] ?? []).map((v) => {
+                            const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
+                            const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
+                            return (
+                              <div key={v.path} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                                <div
+                                  style={{
+                                    aspectRatio: row.aspect ? row.aspect.replace(':', ' / ') : '9 / 16',
+                                    height: 132, flex: 'none', border: '1px solid var(--line-2)', borderRadius: 8, overflow: 'hidden',
+                                    background: 'var(--bg-4)', cursor: 'zoom-in', position: 'relative', lineHeight: 0,
+                                  }}
+                                  title={`Archived ${when} — click to view full size`}
+                                  onClick={() => setMediaLightbox({ kind: v.kind, src })}
+                                >
+                                  {v.kind === 'video' ? (
+                                    <video src={src} muted playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                  ) : (
+                                    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, alignSelf: 'stretch' }}>
+                                  <span style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{when}</span>
+                                  <button
+                                    type="button"
+                                    className="vp-undo"
+                                    style={{ fontSize: 9, padding: '2px 7px' }}
+                                    title="Make this the active version again (the current one is archived, not lost)"
+                                    onClick={() => void restoreVersion(row.id, v.path)}
+                                  >restore</button>
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     ) : null}
