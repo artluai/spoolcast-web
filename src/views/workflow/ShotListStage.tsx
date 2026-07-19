@@ -751,7 +751,11 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                       .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))
                     if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length) return null
                     return (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 2px' }}>
+                      // Same grid as the Direction row: the thumbs share the
+                      // text's left edge, not the label gutter's; top-aligned.
+                      <div className="sl-script" style={{ marginTop: 10 }}>
+                        <span />
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         {imgs.map((n) => (
                           <img
                             key={n}
@@ -785,6 +789,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                             ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
                           </span>
                         ))}
+                        </div>
                       </div>
                     )
                   })()}
