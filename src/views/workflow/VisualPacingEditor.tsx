@@ -1728,30 +1728,55 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                     {on ? (
                       <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
                         {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
-                        {names.filter((name) => !AUDIO_KINDS.has(kit.find((k) => k.name === name)?.kind ?? '')).map((name, idx) => {
-                          const obj = kit.find((k) => k.name === name)
+                        {(() => {
+                          // IMAGE refs go to kie as reference images — order
+                          // and 1st-frame apply. Prompt-only objects are
+                          // ASSOCIATED with the scene (their description rides
+                          // in the prompt) but they are not images and never
+                          // occupy an image slot.
+                          const visual = names.filter((name) => !AUDIO_KINDS.has(kit.find((k) => k.name === name)?.kind ?? ''))
+                          const imgNames = visual.filter((name) => kit.find((k) => k.name === name)?.image_path)
+                          const txtNames = visual.filter((name) => !kit.find((k) => k.name === name)?.image_path)
                           return (
-                            <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
-                              {/* Header ON the image: order controls as one cluster
-                                  (◀ n ▶), the name on its own line. */}
-                              <div className="vp-map-att-top">
-                                <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
-                                <span className="vp-map-ordgrp">
-                                  <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
-                                  <b>{idx + 1}</b>
-                                  <button type="button" title="Later" disabled={idx === names.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
-                                </span>
-                                <span className="vp-map-attname">{name}</span>
-                              </div>
-                              {obj?.image_path ? <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={sizeToArea(12500)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} /> : <span className="vp-map-noimg">{name}</span>}
-                              <div className="vp-map-att-ov">
-                                <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references can't attach as images and ride along as prompt text instead)" onClick={() => setFirstFrame(img.id, name)}>
-                                  {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
-                                </button>
-                              </div>
-                            </figure>
+                            <>
+                              {imgNames.map((name, idx) => {
+                                const obj = kit.find((k) => k.name === name)!
+                                return (
+                                  <figure key={name} className={`vp-map-att ${ff === name ? 'ff' : ''}`}>
+                                    {/* Header ON the image: order controls as one cluster
+                                        (◀ n ▶), the name on its own line. */}
+                                    <div className="vp-map-att-top">
+                                      <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                                      <span className="vp-map-ordgrp">
+                                        <button type="button" title="Earlier" disabled={idx === 0} onClick={() => moveMapRef(img.id, name, -1)}>◀</button>
+                                        <b>{idx + 1}</b>
+                                        <button type="button" title="Later" disabled={idx === imgNames.length - 1} onClick={() => moveMapRef(img.id, name, 1)}>▶</button>
+                                      </span>
+                                      <span className="vp-map-attname">{name}</span>
+                                    </div>
+                                    <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={sizeToArea(12500)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} />
+                                    <div className="vp-map-att-ov">
+                                      <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references can't attach as images and ride along as prompt text instead)" onClick={() => setFirstFrame(img.id, name)}>
+                                        {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
+                                      </button>
+                                    </div>
+                                  </figure>
+                                )
+                              })}
+                              {txtNames.map((name) => {
+                                const obj = kit.find((k) => k.name === name)
+                                return (
+                                  <div key={name} className="vp-map-txtatt" title={`${name} — associated with this scene; its description joins the prompt (no image goes to the model)`}>
+                                    <span className="vp-map-chip">{obj?.kind || 'note'}</span>
+                                    <span className="vp-map-attname">{name}</span>
+                                    {obj?.notes ? <span className="txt-notes">{obj.notes}</span> : null}
+                                    <button type="button" className="vp-map-detach" title="Detach" onClick={() => toggleMapRef(img.id, name)}>×</button>
+                                  </div>
+                                )
+                              })}
+                            </>
                           )
-                        })}
+                        })()}
                       </div>
                     ) : null}
                     {on ? (() => {
