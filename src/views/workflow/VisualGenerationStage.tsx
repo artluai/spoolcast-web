@@ -1337,6 +1337,17 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 <div className="vg-advanced-section wide">
                   <span className="vp-menu-h">PROMPT ACTIONS</span>
                   <div className="vg-advanced-actions">
+                    <button
+                      type="button"
+                      className="vp-undo vg-action-btn"
+                      disabled={activeProcess}
+                      title="Free — recomposes every prompt from the approved shot list (picks up composer/style changes). Replaces all prompt text, discards manual prompt edits, and resets the approval."
+                      onClick={() => {
+                        if (window.confirm('Rebuild ALL prompts from the shot list? Manual prompt edits are replaced and the approval resets.')) void buildPrompts()
+                      }}
+                    >
+                      Rebuild from shot list
+                    </button>
                     <button type="button" className="vp-undo vg-action-btn" disabled={activeProcess || timingSyncing} onClick={syncAudioTiming}>
                       {timingSyncing ? 'Syncing timing…' : 'Sync timing from narration audio'}
                     </button>
