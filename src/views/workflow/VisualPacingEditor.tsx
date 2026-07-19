@@ -719,7 +719,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // column width); a prompt-only object gets an equally-weighted text card —
   // never a box sized by its name. Kind chip labels what it is.
   const kindLabel = (kind: string) =>
-    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : kind === 'source' ? 'SOURCE' : 'REFERENCE'
+    kind === 'character' ? 'CAST' : kind === 'background' ? 'ENVIRONMENT' : kind === 'prop' ? 'PROP' : kind === 'master' ? 'MASTER' : kind === 'variant' ? 'VARIANT' : kind === 'source' ? 'SOURCE'
+      : AUDIO_KINDS.has(kind) ? `♪ ${kind.toUpperCase()}` : 'REFERENCE'
   const kitCard = (k: { name: string; kind: string; notes: string; image_path: string }, w?: number, h?: number, x?: number, y?: number) => {
     const isSource = k.kind === 'source'
     const sel = images.find((i) => i.id === mapSel)
@@ -762,7 +763,7 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
-        <span className="vp-map-cardname">{isSource ? `${shownName} · click to import` : shownName}</span>
+        <span className="vp-map-cardname">{isSource ? `${shownName} · click to import` : AUDIO_KINDS.has(k.kind) ? `♪ ${shownName}` : shownName}</span>
       </button>
     )
   }
@@ -1708,11 +1709,22 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                 const names = refsOf(img)
                 const ff = firstFrameOf(img)
                 const on = mapSel === img.id
+                // Threads include audio that RIDES IN via a character link
+                // (variants inherit): if the object goes somewhere, its sound
+                // goes too — the board shows that as a thread.
+                const linkedAudioNames = kit
+                  .filter((k) => AUDIO_KINDS.has(k.kind) && (k as { linked_to?: string }).linked_to)
+                  .filter((k) => {
+                    const target = (k as { linked_to?: string }).linked_to!
+                    return names.some((n) => n === target || kit.find((x) => x.name === n)?.variant_of === target)
+                  })
+                  .map((k) => k.name)
+                  .filter((n) => !names.includes(n))
                 return (
                   <div
                     key={img.id}
                     data-mapshot={img.id}
-                    data-maprefs={names.join('|')}
+                    data-maprefs={[...names, ...linkedAudioNames].join('|')}
                     className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
                     onClick={() => {
                       setMapSel(on ? '' : img.id)
@@ -1904,9 +1916,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
               <span className="vp-map-colhead">World Kit</span>
             </div>
             {(() => {
-              // Audio objects (voices, music) are kit objects but not VISUAL
-              // ones — they never pack onto the wall.
-              const visible = kit.filter((k) => !hiddenRefs.includes(k.name) && !AUDIO_KINDS.has(k.kind))
+              // Audio objects pack onto the wall as text cards too — they
+              // attach to shots (music spans) and thread to the shots they
+              // reach, including via their character link.
+              const visible = kit.filter((k) => !hiddenRefs.includes(k.name))
               const masters = visible.filter((k) => k.kind === 'master')
               const ordered = [
                 ...masters.flatMap((m) => [m, ...visible.filter((k) => k.kind === 'variant' && k.variant_of === m.name)]),
