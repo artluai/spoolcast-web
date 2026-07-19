@@ -956,7 +956,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-prompt-editor { position: relative; min-width: 0; }
 .vg-prompt textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 190px; background: transparent; color: var(--ink-2); border: 1px solid var(--line); border-radius: 7px; padding: 12px 12px 64px; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
 .vg-prompt textarea:focus { outline: none; border-color: var(--accent); color: var(--ink); }
-.vg-prompt-editor .vg-row-actions { position: absolute; right: 12px; bottom: 12px; margin: 0; }
+/* Actions sit BELOW the prompt box, right-aligned — floating them inside the
+   textarea overlapped the prompt text. */
+.vg-prompt-editor .vg-row-actions { justify-content: flex-end; margin-top: 10px; }
+.vg-row-actions .vg-generate-main { background: var(--accent); border: none; color: #0a0c12; font-weight: 600; }
+.vg-row-actions .vg-generate-main:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.vg-row-actions .vg-generate-main:disabled { background: var(--bg-3); color: var(--ink-3); border: 1px solid var(--line-2); }
 .vg-assetbar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 5px; color: var(--ink-3); }
 .vg-assetbar .vp-undo { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; box-sizing: border-box; }
 .vg-assetbar input[type="file"] { display: none; }

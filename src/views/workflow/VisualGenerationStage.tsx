@@ -1555,18 +1555,18 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
                         </label>
                         {row.type === 'image' ? (
-                          <button type="button" className="vp-undo" disabled={activeProcess} onClick={() => generateImages([row.id], row.status === 'image_ready')}>
-                            {row.status === 'image_ready' ? 'Regenerate image' : 'Generate image'}
+                          <button type="button" className="vp-undo vg-generate-main" disabled={activeProcess} onClick={() => generateImages([row.id], row.status === 'image_ready')}>
+                            {row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
                           </button>
                         ) : (
                           <button
                             type="button"
-                            className="vp-undo"
+                            className="vp-undo vg-generate-main"
                             disabled={activeProcess || videoTooLong(row)}
                             title={videoTooLong(row) ? videoDisabledTitle(row) : `Use ${modelLabel(videoModels, videoModel)} for this row`}
                             onClick={() => generateVideos([row.id], row.status === 'video_ready')}
                           >
-                            {row.status === 'video_ready' ? 'Regenerate video' : 'Generate video'}
+                            {row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
                           </button>
                         )}
                       </div>
