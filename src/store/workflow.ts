@@ -1,6 +1,41 @@
 import { create } from 'zustand'
 import type * as React from 'react'
 
+// UNSAVED DRAFTS SURVIVE REFRESH. The header says "auto-saved"; before this,
+// stageDrafts lived only in memory and a refresh silently discarded every
+// unsaved edit (audio prompts included). Drafts now mirror to localStorage
+// per session and hydrate on load. Engine saves still happen explicitly.
+const draftsStorageKey = () => {
+  const m = /\/p\/([^/]+)/.exec(window.location.pathname)
+  return `spoolcast-drafts:${m?.[1] ?? 'none'}`
+}
+
+const readPersistedDrafts = (): { stageDrafts: Record<string, string>; dirtySteps: Record<string, boolean> } => {
+  try {
+    const raw = window.localStorage.getItem(draftsStorageKey())
+    if (!raw) return { stageDrafts: {}, dirtySteps: {} }
+    const parsed = JSON.parse(raw)
+    return {
+      stageDrafts: parsed?.stageDrafts && typeof parsed.stageDrafts === 'object' ? parsed.stageDrafts : {},
+      dirtySteps: parsed?.dirtySteps && typeof parsed.dirtySteps === 'object' ? parsed.dirtySteps : {},
+    }
+  } catch {
+    return { stageDrafts: {}, dirtySteps: {} }
+  }
+}
+
+let persistTimer = 0
+const persistDrafts = (stageDrafts: Record<string, string>, dirtySteps: Record<string, boolean>) => {
+  window.clearTimeout(persistTimer)
+  persistTimer = window.setTimeout(() => {
+    try {
+      window.localStorage.setItem(draftsStorageKey(), JSON.stringify({ stageDrafts, dirtySteps }))
+    } catch {
+      /* storage full/blocked — in-memory drafts still work this session */
+    }
+  }, 400)
+}
+
 // text = the ACTIVE core message (what saves to session.json). ownText = the
 // user's own draft, stashed while an AI candidate is active or skip is on, so
 // browsing candidates never destroys what they wrote — switching back to
@@ -96,23 +131,27 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     editing: '',
     medium: '',
   },
-  dirtySteps: {},
-  stageDrafts: {},
+  dirtySteps: readPersistedDrafts().dirtySteps,
+  stageDrafts: readPersistedDrafts().stageDrafts,
   stageProcesses: {},
   setStageDraft: (stageId, v) =>
-    set((state) => ({
-      stageDrafts: { ...state.stageDrafts, [stageId]: v },
-      dirtySteps: { ...state.dirtySteps, [stageId]: true },
-    })),
+    set((state) => {
+      const stageDrafts = { ...state.stageDrafts, [stageId]: v }
+      const dirtySteps = { ...state.dirtySteps, [stageId]: true }
+      persistDrafts(stageDrafts, dirtySteps)
+      return { stageDrafts, dirtySteps }
+    }),
   seedStageDraft: (stageId, v) =>
     set((state) => ({
       stageDrafts: { ...state.stageDrafts, [stageId]: v },
     })),
   setStageFileDraft: (stageId, key, v) =>
-    set((state) => ({
-      stageDrafts: { ...state.stageDrafts, [key]: v },
-      dirtySteps: { ...state.dirtySteps, [stageId]: true },
-    })),
+    set((state) => {
+      const stageDrafts = { ...state.stageDrafts, [key]: v }
+      const dirtySteps = { ...state.dirtySteps, [stageId]: true }
+      persistDrafts(stageDrafts, dirtySteps)
+      return { stageDrafts, dirtySteps }
+    }),
   seedStageFileDraft: (key, v) =>
     set((state) => ({
       stageDrafts: { ...state.stageDrafts, [key]: v },
@@ -153,8 +192,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     }),
   stepUndo: null,
   setStepUndo: (u) => set(() => ({ stepUndo: u })),
-  resetSession: () =>
-    set(() => ({
+  resetSession: () => {
+    try { window.localStorage.removeItem(draftsStorageKey()) } catch { /* fine */ }
+    return set(() => ({
       ideaBrief: '',
       goal: { text: '', mode: '' },
       s1: { narrator: '', style: '', output: '', length: 120, projectId: 'untitled-01', editing: '', medium: '' },
@@ -165,7 +205,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       finalRender: 'idle' as const,
       finalRenderError: null,
       stepUndo: null,
-    })),
+    }))
+  },
   clearStageDrafts: (stageId) =>
     set((state) => {
       const stageDrafts = Object.fromEntries(
@@ -173,6 +214,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
           ([k]) => k !== stageId && !k.startsWith(`${stageId}:`),
         ),
       )
-      return { stageDrafts, dirtySteps: { ...state.dirtySteps, [stageId]: false } }
+      const dirtySteps = { ...state.dirtySteps, [stageId]: false }
+      persistDrafts(stageDrafts, dirtySteps)
+      return { stageDrafts, dirtySteps }
     }),
 }))
