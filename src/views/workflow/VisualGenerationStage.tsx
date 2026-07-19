@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
-import { API_BASE, activeSession, actionUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
+import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
 
 const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
@@ -426,6 +426,19 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [history, setHistory] = useState<GenerationPromptsDoc[]>([])
   const [redoHistory, setRedoHistory] = useState<GenerationPromptsDoc[]>([])
   const [previewRef, setPreviewRef] = useState<{ src: string; name: string; rowId: string; refIndex: number; role: 'first_frame' | 'reference' } | null>(null)
+  // The World Kit — so every association shows for what it IS: image refs
+  // attach as reference images (1st frame flagged), prompt-only objects join
+  // the prompt as text, audio rides as sound (attached or via object link).
+  type KitLite = { name: string; kind: string; notes?: string; image_path?: string; linked_to?: string; variant_of?: string }
+  const [kitObjs, setKitObjs] = useState<KitLite[]>([])
+  useEffect(() => {
+    let live = true
+    fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => { if (live && Array.isArray(out?.data?.kit)) setKitObjs(out.data.kit as KitLite[]) })
+      .catch(() => { /* engine offline — thumbs still render from the doc */ })
+    return () => { live = false }
+  }, [])
   const pollingRef = useRef('')
   const savePromptChainRef = useRef<Promise<void>>(Promise.resolve())
   const undoRef = useRef<() => void>(() => {})
@@ -1413,12 +1426,29 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               const referenceEntries = row.references
                 .map((ref, index) => ({ ref, index }))
                 .filter(({ ref }) => ref.role !== 'first_frame' && referenceValue(ref))
+              const AUD = new Set(['voice', 'music', 'ambience', 'sfx', 'audio'])
+              const kitOf = (n: string) => kitObjs.find((k) => k.name === n)
+              // Associations with no image slot: prompt-only objects and audio.
+              const namedRefs = row.references.map((ref) => String(ref.name || '')).filter(Boolean)
+              // Kit-attached image refs resolve their picture from the KIT
+              // (the doc row carries only the name until upload time).
+              const kitImageEntries = row.references
+                .map((ref, index) => ({ ref, index, name: String(ref.name || '') }))
+                .filter(({ ref, name }) => !referenceValue(ref) && kitOf(name)?.image_path)
+              const textAssoc = row.references
+                .map((ref, index) => ({ ref, index, name: String(ref.name || '') }))
+                .filter(({ ref, name }) => !referenceValue(ref) && name && !AUD.has(kitOf(name)?.kind ?? '') && !kitOf(name)?.image_path)
+              const audioAssoc = namedRefs.filter((n) => AUD.has(kitOf(n)?.kind ?? ''))
+              const audioInherited = kitObjs
+                .filter((k) => AUD.has(k.kind) && k.linked_to && !audioAssoc.includes(k.name))
+                .filter((k) => namedRefs.some((n) => n === k.linked_to || kitOf(n)?.variant_of === k.linked_to))
               const renderAssetThumb = ({ ref, index }: { ref: PromptReference; index: number }, variant: 'first_frame' | 'reference') => {
                 const value = referenceValue(ref)
                 const src = referenceSrc(value)
                 const name = ref.name || value
                 return (
-                  <span className={`vg-ref-thumb ${variant === 'first_frame' ? 'first-frame' : ''}`} key={`${row.id}-${value}-${index}`}>
+                  <span className={`vg-ref-thumb ${variant === 'first_frame' ? 'first-frame' : ''}`} key={`${row.id}-${value}-${index}`} title={variant === 'first_frame' ? `${name} — attached as the 1ST FRAME (the video opens on this exact image)` : `${name} — attached as a reference image (uploads to the model)`}>
+                    {variant === 'first_frame' ? <i className="vg-ff-flag">1st frame</i> : null}
                     <button
                       type="button"
                       className="vg-ref-img"
@@ -1534,9 +1564,43 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     {row.status === 'failed' && batchStatus?.failed?.[row.id] ? <p className="run-error">{batchStatus.failed[row.id]}</p> : null}
                     <div className="vg-assetbar">
                       <span className="vg-refs">
-                        {referenceEntries.length ? referenceEntries.map((entry) => renderAssetThumb(entry, 'reference')) : <span>no uploaded reference image</span>}
+                        {kitImageEntries.map(({ ref, name, index }) => (
+                          <span
+                            className={`vg-ref-thumb ${ref.role === 'first_frame' ? 'first-frame' : ''}`}
+                            key={`kit-${index}`}
+                            title={ref.role === 'first_frame'
+                              ? `${name} — attached as the 1ST FRAME (the video opens on this exact image)`
+                              : `${name} — attached as a reference image from the World Kit (uploads to the model)`}
+                          >
+                            {ref.role === 'first_frame' ? <i className="vg-ff-flag">1st frame</i> : null}
+                            <span className="vg-ref-img" style={{ cursor: 'default' }}>
+                              <img src={contentUrl(kitOf(name)!.image_path!)} alt={name} />
+                            </span>
+                          </span>
+                        ))}
+                        {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
+                        {!kitImageEntries.length && !referenceEntries.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
+                    {textAssoc.length || audioAssoc.length || audioInherited.length ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                        {textAssoc.map(({ name, index }) => (
+                          <span key={`t-${index}`} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
+                            {kitOf(name)?.kind || 'ref'} · {name}
+                          </span>
+                        ))}
+                        {audioAssoc.map((n) => (
+                          <span key={`a-${n}`} className="vp-undo" style={{ cursor: 'default' }} title={kitOf(n)?.notes || `${n} — sound direction + reference audio for this clip`}>
+                            ♪ {n} · this clip
+                          </span>
+                        ))}
+                        {audioInherited.map((k) => (
+                          <span key={`i-${k.name}`} className="vp-undo" style={{ cursor: 'default' }} title={k.notes || k.name}>
+                            ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </section>

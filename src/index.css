@@ -976,6 +976,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-ref-remove { position: absolute; right: -5px; top: -5px; width: 15px; height: 15px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--bg); color: var(--ink-3); font-size: 11px; line-height: 1; cursor: pointer; }
 .vg-ref-remove:hover { color: var(--red); border-color: var(--red); background: rgba(233,106,106,.14); }
 .vg-ref-convert { min-height: 28px; padding: 5px 8px; }
+.vg-ff-flag { position: absolute; top: 4px; left: 4px; z-index: 2; font-style: normal; font-family: var(--mono); font-size: 9px; letter-spacing: .06em; padding: 2px 6px; border-radius: 5px; background: var(--accent); color: #0b0d14; }
+.vg-ref-thumb { position: relative; }
 .vg-ref-modal { width: min(820px, calc(100vw - 42px)); padding: 16px; }
 .vg-ref-modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .vg-ref-modal-head b { min-width: 0; flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
