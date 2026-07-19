@@ -758,7 +758,16 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                             src={contentUrl(find(n)!.image_path!)}
                             alt={n}
                             title={`${n} — reference image (uploads to the model)`}
-                            style={{ height: 56, width: 'auto', borderRadius: 7, border: '1px solid var(--line-2)', display: 'block' }}
+                            style={{ height: 132, width: 'auto', borderRadius: 9, border: '1px solid var(--line-2)', display: 'block' }}
+                            onLoad={(e) => {
+                              // Visuals first: every thumb gets the same square
+                              // footage at its true ratio, not the same height.
+                              const im = e.currentTarget
+                              const r = im.naturalWidth / im.naturalHeight || 1
+                              const h = Math.min(200, Math.sqrt(19000 / r))
+                              im.style.height = `${Math.round(h)}px`
+                              im.style.width = `${Math.round(h * r)}px`
+                            }}
                           />
                         ))}
                         {texts.map((n) => (
