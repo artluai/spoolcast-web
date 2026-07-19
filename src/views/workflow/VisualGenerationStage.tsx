@@ -426,6 +426,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [history, setHistory] = useState<GenerationPromptsDoc[]>([])
   const [redoHistory, setRedoHistory] = useState<GenerationPromptsDoc[]>([])
   const [previewRef, setPreviewRef] = useState<{ src: string; name: string; rowId: string; refIndex: number; role: 'first_frame' | 'reference' } | null>(null)
+  // Full-screen view of a row's generated media.
+  const [mediaLightbox, setMediaLightbox] = useState<{ kind: 'image' | 'video'; src: string } | null>(null)
   // The World Kit — so every association shows for what it IS: image refs
   // attach as reference images (1st frame flagged), prompt-only objects join
   // the prompt as text, audio rides as sound (attached or via object link).
@@ -1508,11 +1510,19 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 </div>
                 <div className="vg-body">
                   <div className="vg-media-col">
-                    <div className="vg-preview">
+                    <div className="vg-preview" style={{ aspectRatio: row.aspect ? row.aspect.replace(':', ' / ') : undefined }}>
+                      {previewMedia ? (
+                        <button
+                          type="button"
+                          className="vg-enlarge"
+                          title="View full size"
+                          onClick={() => setMediaLightbox({ kind: previewMedia.kind, src: previewMedia.src })}
+                        >⤢</button>
+                      ) : null}
                       {previewMedia?.kind === 'video' ? (
                         <video src={previewMedia.src} muted playsInline autoPlay controls />
                       ) : previewMedia?.kind === 'image' ? (
-                        <img src={previewMedia.src} alt="" />
+                        <img src={previewMedia.src} alt="" onClick={() => setMediaLightbox({ kind: 'image', src: previewMedia.src })} style={{ cursor: 'zoom-in' }} />
                       ) : (
                         <span>{row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
@@ -1617,6 +1627,17 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               </section>
               )
             })}
+          </div>
+        ) : null}
+
+        {mediaLightbox ? (
+          <div className="vg-lightbox" onClick={() => setMediaLightbox(null)}>
+            <button type="button" className="vg-lightbox-close" title="Close" onClick={() => setMediaLightbox(null)}>✕</button>
+            {mediaLightbox.kind === 'video' ? (
+              <video src={mediaLightbox.src} controls autoPlay playsInline onClick={(e) => e.stopPropagation()} />
+            ) : (
+              <img src={mediaLightbox.src} alt="" onClick={(e) => e.stopPropagation()} />
+            )}
           </div>
         ) : null}
 

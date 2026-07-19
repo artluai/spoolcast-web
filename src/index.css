@@ -950,8 +950,15 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-row-type button { padding: 6px 10px; }
 .vg-body { display: grid; grid-template-columns: minmax(180px, 300px) minmax(0, 1fr); gap: 18px; padding: 0 12px; }
 .vg-media-col { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.vg-preview { aspect-ratio: 16 / 9; background: var(--bg-4); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; display: grid; place-items: center; color: var(--ink-3); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+/* The canvas takes the ROW'S aspect (inline style) — a 9:16 clip in a 16:9
+   box was a cropped letterslot. Portrait clips cap by height and center. */
+.vg-preview { aspect-ratio: 16 / 9; max-height: 460px; margin: 0 auto; max-width: 100%; position: relative; background: var(--bg-4); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; display: grid; place-items: center; color: var(--ink-3); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .vg-preview img, .vg-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vg-preview .vg-enlarge { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0; transition: opacity .12s; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,18,.8); color: var(--ink-2); border-radius: 6px; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; font-size: 13px; }
+.vg-preview:hover .vg-enlarge { opacity: 1; }
+.vg-lightbox { position: fixed; inset: 0; z-index: 120; background: rgba(5,7,12,.88); display: grid; place-items: center; padding: 28px; }
+.vg-lightbox img, .vg-lightbox video { max-width: min(96vw, 1400px); max-height: 92vh; width: auto; height: auto; border-radius: 10px; display: block; }
+.vg-lightbox .vg-lightbox-close { position: fixed; top: 18px; right: 22px; border: 1px solid rgba(255,255,255,.25); background: rgba(10,12,18,.8); color: var(--ink); border-radius: 8px; width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; font-size: 15px; }
 .vg-prompt { min-width: 0; }
 .vg-prompt-editor { position: relative; min-width: 0; }
 .vg-prompt textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 190px; background: transparent; color: var(--ink-2); border: 1px solid var(--line); border-radius: 7px; padding: 12px 12px 64px; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
