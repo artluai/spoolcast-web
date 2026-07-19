@@ -384,12 +384,17 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
         const refEl = board.querySelector<HTMLElement>(`[data-mapref="${CSS.escape(name)}"]`)
         if (!refEl) continue
         const b = refEl.getBoundingClientRect()
+        // BOTH ends obey the visible window — a kit card scrolled behind the
+        // sticky header must not pull its thread up across it. The curve's
+        // control points share the endpoints' y, so clamping the endpoints
+        // bounds the whole path.
+        if (b.bottom < visTop + 4 || b.top > visBottom - 4) continue
         const x1 = a.right - box.left
         let yAnchor = a.top + Math.min(28, a.height / 2)
         yAnchor = Math.max(visTop + 12, Math.min(visBottom - 12, yAnchor))
         const y1 = yAnchor - box.top
         const x2 = b.left - box.left
-        const y2 = b.top - box.top + Math.min(40, b.height / 2)
+        const y2 = Math.max(visTop + 12, Math.min(visBottom - 12, b.top + Math.min(40, b.height / 2))) - box.top
         out.push({ shot: shotEl.dataset.mapshot!, ref: name, d: `M ${x1} ${y1} C ${x1 + 55} ${y1}, ${x2 - 55} ${y2}, ${x2} ${y2}` })
       }
     })

@@ -1461,11 +1461,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-att img { height: 148px; width: auto; display: block; }
 .vp-map-att-top { position: absolute; left: 0; right: 0; top: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 30px 18px 7px; background: linear-gradient(rgba(8,10,15,.92), transparent); }
 .vp-map-att-top .vp-map-detach { position: absolute; top: 6px; right: 6px; }
-/* Options live behind hover — the wall reads as images, not buttons. The
-   picked 1st frame stays visible (it's state, not an option). */
-.vp-map-att .vp-map-detach, .vp-map-att .vp-map-ordgrp, .vp-map-att .vp-map-att-ov { opacity: 0; pointer-events: none; transition: opacity .12s; }
-.vp-map-att:hover .vp-map-detach, .vp-map-att:hover .vp-map-ordgrp, .vp-map-att:hover .vp-map-att-ov,
-.vp-map-att:focus-within .vp-map-detach, .vp-map-att:focus-within .vp-map-ordgrp, .vp-map-att:focus-within .vp-map-att-ov { opacity: 1; pointer-events: auto; }
+/* EVERYTHING on the image lives behind hover — name included: at rest the
+   attachment is just the picture. The picked 1st frame stays visible (it's
+   state, not an option). */
+.vp-map-att .vp-map-att-top, .vp-map-att .vp-map-att-ov { opacity: 0; pointer-events: none; transition: opacity .12s; }
+.vp-map-att:hover .vp-map-att-top, .vp-map-att:hover .vp-map-att-ov,
+.vp-map-att:focus-within .vp-map-att-top, .vp-map-att:focus-within .vp-map-att-ov { opacity: 1; pointer-events: auto; }
 .vp-map-att.ff .vp-map-att-ov { opacity: 1; pointer-events: auto; }
 /* Text attachments: associated with the scene, NOT reference images. */
 .vp-map-txtatt { position: relative; align-self: flex-start; border: 1px dashed var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 9px 26px 9px 11px; max-width: 200px; }
