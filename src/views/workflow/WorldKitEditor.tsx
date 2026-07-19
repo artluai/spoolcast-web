@@ -623,6 +623,45 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                           )}
                     </>
                   )
+                  // THE OTHER SIDE OF THE LINK: audio objects pointing at this
+                  // item render inside RefImagePanel's linked-audio row (chips
+                  // + the one + panel) — computed here because the editor owns
+                  // the kit doc. Draft edits only.
+                  const audioLinks = (() => {
+                    const isAudioKind = /^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '')
+                    if (row[refIdx].trim() === '' || isAudioKind) return null
+                    const asi = doc!.sections.findIndex(
+                      (sec) => sec.kind === 'table' && /audio/i.test(sec.heading) && sec.columns.some((c) => /linked/i.test(c)),
+                    )
+                    if (asi < 0) return null
+                    const aSec = doc!.sections[asi]
+                    if (aSec.kind !== 'table') return null
+                    const aRef = Math.max(0, aSec.columns.findIndex((c) => /ref/i.test(c)))
+                    const aKindI = aSec.columns.findIndex((c) => /kind/i.test(c))
+                    const aNotes = aSec.columns.findIndex((c) => /notes/i.test(c))
+                    const aLink = aSec.columns.findIndex((c) => /linked/i.test(c))
+                    if (aLink < 0) return null
+                    const me = row[refIdx].trim()
+                    const setAudioLink = (ri2: number, v: string) => {
+                      snapshot()
+                      const d = JSON.parse(JSON.stringify(doc)) as WKDoc
+                      const sec2 = d.sections[asi]
+                      if (sec2.kind === 'table') sec2.rows[ri2][aLink] = v
+                      apply(d)
+                    }
+                    const toItem = (r2: string[], ri2: number) => ({
+                      key: ri2,
+                      name: (r2[aRef] || '').trim(),
+                      kind: aKindI >= 0 ? (r2[aKindI] || '').trim() : '',
+                      notes: aNotes >= 0 ? (r2[aNotes] || '').trim() : '',
+                    })
+                    return {
+                      linked: aSec.rows.map(toItem).filter((a, ri2) => a.name && (aSec.rows[ri2][aLink] || '').trim() === me),
+                      options: aSec.rows.map(toItem).filter((a, ri2) => a.name && (aSec.rows[ri2][aLink] || '').trim() !== me),
+                      link: (key: number) => setAudioLink(key, me),
+                      unlink: (key: number) => setAudioLink(key, ''),
+                    }
+                  })()
                   return (
                     <div style={{ position: 'relative', border: '1px solid var(--line, #2a3142)', borderRadius: 10, padding: 14, marginTop: 10 }}>
                       {/* Exit lives top-right too — Done stays at the foot. */}
@@ -684,65 +723,12 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                               [a.name, a.kind, 'episode-only', a.linkedTo, a.source, a.notes.replace(/\|/g, '/')],
                             )
                           }}
+                          linkedAudio={audioLinks?.linked}
+                          audioOptions={audioLinks?.options}
+                          onAudioLink={audioLinks?.link}
+                          onAudioUnlink={audioLinks?.unlink}
                         />
                       ) : null}
-                      {row[refIdx].trim() !== '' && !/^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '') && (() => {
-                        // THE OTHER SIDE OF THE LINK: audio objects pointing at
-                        // this item show here too — unlink or re-link without
-                        // hunting through the Audio section. Draft edits only.
-                        const asi = doc!.sections.findIndex(
-                          (sec) => sec.kind === 'table' && /audio/i.test(sec.heading) && sec.columns.some((c) => /linked/i.test(c)),
-                        )
-                        if (asi < 0) return null
-                        const aSec = doc!.sections[asi]
-                        if (aSec.kind !== 'table') return null
-                        const aRef = Math.max(0, aSec.columns.findIndex((c) => /ref/i.test(c)))
-                        const aKindI = aSec.columns.findIndex((c) => /kind/i.test(c))
-                        const aLink = aSec.columns.findIndex((c) => /linked/i.test(c))
-                        if (aLink < 0) return null
-                        const me = row[refIdx].trim()
-                        const setAudioLink = (ri2: number, v: string) => {
-                          snapshot()
-                          const d = JSON.parse(JSON.stringify(doc)) as WKDoc
-                          const sec2 = d.sections[asi]
-                          if (sec2.kind === 'table') sec2.rows[ri2][aLink] = v
-                          apply(d)
-                        }
-                        const mine = aSec.rows.map((r2, ri2) => ({ r2, ri2 })).filter(({ r2 }) => (r2[aLink] || '').trim() === me)
-                        const free = aSec.rows.map((r2, ri2) => ({ r2, ri2 })).filter(({ r2 }) => (r2[aLink] || '').trim() !== me && (r2[aRef] || '').trim())
-                        if (!mine.length && !free.length) return null
-                        return (
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-                            {mine.map(({ r2, ri2 }) => (
-                              <span key={ri2} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }}>
-                                ♪ {r2[aRef]}{aKindI >= 0 ? ` · ${r2[aKindI]}` : ''}
-                                <button
-                                  type="button"
-                                  title={`Unlink ${r2[aRef]} from ${me}`}
-                                  onClick={() => setAudioLink(ri2, '')}
-                                  style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
-                                >×</button>
-                              </span>
-                            ))}
-                            {free.length > 0 && (
-                              <select
-                                className="sc-select"
-                                value=""
-                                title="Link an existing audio object to this item"
-                                onChange={(e) => {
-                                  const ri2 = Number(e.target.value)
-                                  if (Number.isFinite(ri2) && e.target.value !== '') setAudioLink(ri2, me)
-                                }}
-                              >
-                                <option value="">♪ link audio…</option>
-                                {free.map(({ r2, ri2 }) => (
-                                  <option key={ri2} value={ri2}>{r2[aRef]}{aKindI >= 0 ? ` (${r2[aKindI]})` : ''}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        )
-                      })()}
                       {row[refIdx].trim() === '' ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{fieldRows}</div>
                       ) : null}

@@ -77,6 +77,10 @@ export function RefImagePanel({
   onToast,
   onVariantCreated,
   onAudioAdd,
+  linkedAudio,
+  audioOptions,
+  onAudioLink,
+  onAudioUnlink,
   linkedTo = '',
   onLinkedToChange,
   onApprove,
@@ -106,6 +110,13 @@ export function RefImagePanel({
   // host editor mirror them into its unsaved draft so saving doesn't erase them.
   onVariantCreated?: (name: string, instruction: string) => void
   onAudioAdd?: (audio: { name: string; kind: string; linkedTo: string; source: string; notes: string }) => void
+  // Non-audio items: audio objects already pointing at this item (chips with
+  // unlink) and the ones that could (LINK EXISTING inside the + panel). The
+  // host editor owns the kit doc, so link/unlink go back to it by row key.
+  linkedAudio?: { key: number; name: string; kind: string; notes?: string }[]
+  audioOptions?: { key: number; name: string; kind: string; notes?: string }[]
+  onAudioLink?: (key: number) => void
+  onAudioUnlink?: (key: number) => void
   // Audio objects: the kit item this sound belongs to (Linked to column).
   linkedTo?: string
   onLinkedToChange?: (name: string) => void
@@ -713,9 +724,9 @@ export function RefImagePanel({
 
   return (
     <div style={{ borderTop: fields ? undefined : '1px dashed var(--line, #2a3142)', marginTop: fields ? 0 : 10, paddingTop: fields ? 0 : 12 }}>
-      {/* IMAGE LEFT · FIELDS RIGHT */}
+      {/* IMAGE LEFT · FIELDS RIGHT — audio has no image, so no image column */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <div style={{ width: 210, flex: 'none' }}>
+        {!(isAudio && !active) && <div style={{ width: 210, flex: 'none' }}>
           {active ? (
             <>
               <img
@@ -775,7 +786,7 @@ export function RefImagePanel({
               </div>
             </div>
           )}
-        </div>
+        </div>}
         {fields && (
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
@@ -847,7 +858,8 @@ export function RefImagePanel({
                   </button>
                   <button
                     type="button"
-                    className="vp-undo"
+                    className="vp-save"
+                    style={{ fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 500, padding: '5px 11px' }}
                     disabled={describing || !linkedTo}
                     title={linkedTo
                       ? `AI derives the sound from ${linkedTo} — its image if it has one, its description otherwise`
@@ -1175,10 +1187,22 @@ export function RefImagePanel({
           </div>
         )}
       </div>
-      {/* LINKED AUDIO — a voice/music object that belongs to this item (a
-          character's voice rides into every clip that references them). */}
+      {/* LINKED AUDIO — ONE row, one panel. Chips show what's already linked
+          (unlink on the ×); the + panel links an existing audio object or
+          creates a new one. */}
       {!isAudio && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' }}>
+          {(linkedAudio ?? []).map((a) => (
+            <span key={a.key} className="vp-undo" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'default' }} title={a.notes || a.name}>
+              ♪ {a.name}{a.kind ? ` · ${a.kind}` : ''}
+              <button
+                type="button"
+                title={`Unlink ${a.name} from ${refId}`}
+                onClick={() => onAudioUnlink?.(a.key)}
+                style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 0, fontSize: 11 }}
+              >×</button>
+            </span>
+          ))}
           <button type="button" className="vp-undo" onClick={() => setAudioOpen((v) => !v)}>
             {audioOpen ? '▾' : '+'} Linked audio
           </button>
@@ -1186,6 +1210,23 @@ export function RefImagePanel({
       )}
       {audioOpen ? (
         <div style={{ border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(audioOptions ?? []).length > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>LINK EXISTING</span>
+              {(audioOptions ?? []).map((a) => (
+                <button
+                  key={a.key}
+                  type="button"
+                  className="vp-undo"
+                  title={a.notes || `Link ${a.name} to ${refId}`}
+                  onClick={() => { onAudioLink?.(a.key); setAudioOpen(false) }}
+                >
+                  ♪ {a.name}{a.kind ? ` (${a.kind})` : ''}
+                </button>
+              ))}
+              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>— or make a new one:</span>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>NAME
               <input
