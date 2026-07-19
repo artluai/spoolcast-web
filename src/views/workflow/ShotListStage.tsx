@@ -7,6 +7,7 @@ import { activeSession, actionUrl, apiUrl, contentUrl, downloadUrl, fileUrl, job
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
+import { useWorkflowStore as useWfStore } from '../../store/workflow'
 
 // COMPILE SHOT LIST (step 08): the machine-precise lens over the pacing plan.
 // The engine compiles shot-list/shot-list.json (code-law structure, AI polish,
@@ -168,6 +169,49 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const [rawKit, setKit] = useState<KitLite[]>([])
   const wkDraft = useWorldKitDraft()
   const kit = useMemo(() => mergeKitWithDraft(rawKit, wkDraft), [rawKit, wkDraft])
+  // THE PLAN OWNS THE REFS; the compiled shot list snapshots them. Board
+  // edits (attach audio, remap) land in the plan draft/file first — show the
+  // freshest refs as PENDING until synced, and sync for free (no re-compile).
+  const pacingDraft = useWfStore((st) => st.stageDrafts['visual_pacing'] ?? '')
+  const [planFileMd, setPlanFileMd] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const planRefsById = useMemo(() => {
+    const md = (pacingDraft || planFileMd || '').trim()
+    const map: Record<string, string[]> = {}
+    if (!md) return map
+    for (const line of md.split('\n')) {
+      const m = /^\|\s*(I\d+)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
+      if (!m) continue
+      map[m[1]] = m[2].split(',').map((x) => x.trim().replace(/^\^/, '')).filter((x) => x && x !== '—' && x !== '-')
+    }
+    return map
+  }, [pacingDraft, planFileMd])
+  const syncRefsFromPlan = async () => {
+    setSyncing(true)
+    try {
+      if (pacingDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: 'visual_pacing', path: 'working/visual-pacing-plan.md', content: pacingDraft }),
+        }).catch(() => null)
+      }
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'sync_shot_refs' }),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) throw new Error(out?.error || 'sync failed')
+      const fresh = await fetch(fileUrl(FILE_PATH)).then((x) => (x.ok ? x.json() : null))
+      if (typeof fresh?.data?.content === 'string') setStageDraft(stageId, fresh.data.content)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not sync refs from the plan.')
+    } finally {
+      setSyncing(false)
+    }
+  }
   useEffect(() => {
     let live = true
     Promise.all([
@@ -175,8 +219,10 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
       fetch(fileUrl('working/generation-prompts.json')).then((r) => (r.ok ? r.json() : null)),
       fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)),
-    ]).then(([sess, reg, prompts, kitOut]) => {
+      fetch(fileUrl('working/visual-pacing-plan.md')).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([sess, reg, prompts, kitOut, planOut]) => {
       if (live && Array.isArray(kitOut?.data?.kit)) setKit(kitOut.data.kit as KitLite[])
+      if (live && typeof planOut?.data?.content === 'string') setPlanFileMd(planOut.data.content)
       if (!live) return
       try {
         const cfg = JSON.parse(sess?.data?.content ?? 'null')
@@ -749,10 +795,12 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     const imgs = refs.filter((n) => find(n)?.image_path)
                     const texts = refs.filter((n) => { const k = find(n); return k ? !k.image_path && !AUD.has(k.kind) : true })
                     const attachedAudio = refs.filter((n) => AUD.has(find(n)?.kind ?? ''))
+                    const planned = planRefsById[String(event.pacing_image_id ?? '')] ?? null
+                    const pending = planned ? planned.filter((n) => !refs.includes(n)) : []
                     const inherited = kit
                       .filter((k) => AUD.has(k.kind) && k.linked_to && !attachedAudio.includes(k.name))
                       .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))
-                    if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length) return null
+                    if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length && !pending.length) return null
                     return (
                       // Same grid as the Direction row: the thumbs share the
                       // text's left edge, not the label gutter's; top-aligned.
@@ -792,6 +840,16 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                             ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
                           </span>
                         ))}
+                        {pending.map((n) => (
+                          <span key={`p-${n}`} className="vp-undo" style={{ cursor: 'default', borderColor: 'var(--amber)', color: 'var(--amber)' }} title={`${n} is attached in the pacing plan but not in the compiled shot list yet — Sync refs (free) applies it.`}>
+                            {AUD.has(find(n)?.kind ?? '') ? '♪ ' : ''}{n} · in plan, not synced
+                          </span>
+                        ))}
+                        {pending.length ? (
+                          <button type="button" className="vp-undo" disabled={syncing} onClick={() => void syncRefsFromPlan()} title="Free — copies each shot's refs from the pacing plan into the compiled shot list (code only, prose untouched)">
+                            {syncing ? 'Syncing…' : '⟳ Sync refs from plan'}
+                          </button>
+                        ) : null}
                         </div>
                       </div>
                     )
