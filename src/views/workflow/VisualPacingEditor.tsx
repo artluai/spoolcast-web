@@ -407,6 +407,8 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   const [kitDims, setKitDims] = useState({ w: 1000, h: 700 })
   // User-hidden references (persisted per session): excluded from the wall
   // and the packing budget until "Show all".
+  // Which shot's "♪ add audio" menu is open (img.id) — one at a time.
+  const [audioMenuFor, setAudioMenuFor] = useState<string | null>(null)
   const [hiddenRefs, setHiddenRefs] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(`sc-map-hidden-${activeSession()}`) || '[]') } catch { return [] }
   })
@@ -1522,6 +1524,60 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
 
+        {/* AUDIO LAYERS, video-editor style: one row per audio object that
+            reaches any shot — attached to the shot itself (music spans) or
+            linked to a character the shot references (voices; variants
+            inherit). Sessions with no separate audio (voice generated with
+            the picture, nothing attached) show no rows at all. */}
+        {(() => {
+          const audioObjs = kit.filter((k) => AUDIO_KINDS.has(k.kind))
+          if (!audioObjs.length || !images.length) return null
+          const layers = audioObjs.map((a) => {
+            const covered = images.map((img) => {
+              const names = refsOf(img)
+              if (names.includes(a.name)) return 'shot'
+              const linked = (a as { linked_to?: string }).linked_to
+              if (linked && names.some((n) => n === linked || kit.find((k) => k.name === n)?.variant_of === linked)) return 'voice'
+              return ''
+            })
+            const spans: { start: number; end: number; via: string }[] = []
+            images.forEach((img, i) => {
+              if (!covered[i]) return
+              const prev = spans[spans.length - 1]
+              if (prev && i > 0 && covered[i - 1] && Math.abs(prev.end - img.startS) < 0.01) {
+                prev.end = img.startS + img.holdS
+              } else {
+                spans.push({ start: img.startS, end: img.startS + img.holdS, via: covered[i] })
+              }
+            })
+            return { a, spans }
+          }).filter((l) => l.spans.length)
+          if (!layers.length) return null
+          return layers.map(({ a, spans }) => (
+            <div className="vp-tl-row" key={`al-${a.name}`}>
+              <span className="vp-tl-label" title={(a as KitObject).notes || a.name}>♪ {a.name}</span>
+              <div className="vp-tl-track" style={{ position: 'relative', height: 22 }}>
+                {spans.map((sp, i) => (
+                  <div
+                    key={i}
+                    title={`${a.name} (${a.kind}) · ${fmtClock(sp.start)}–${fmtClock(sp.end)}${sp.via === 'voice' ? ' · via character link' : ' · attached to shots'}`}
+                    style={{
+                      position: 'absolute', left: `${pct(sp.start)}%`, width: `${pct(sp.end - sp.start)}%`,
+                      top: 3, bottom: 3, borderRadius: 5, overflow: 'hidden',
+                      background: sp.via === 'voice' ? 'rgba(122,162,255,.16)' : 'rgba(122,255,196,.13)',
+                      border: `1px solid ${sp.via === 'voice' ? 'rgba(122,162,255,.45)' : 'rgba(122,255,196,.4)'}`,
+                      display: 'flex', alignItems: 'center', padding: '0 6px',
+                      fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    ♪ {a.name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        })()}
+
         {/* "Audio chunks": the narration owns these units — so the lane only
             means something when the narration is a separate track. Video-first
             generates picture and sound together: there is no second timeline to
@@ -1750,36 +1806,53 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
                               >×</button>
                             </span>
                           ))}
-                          <select
-                            className="sc-select"
-                            value=""
+                          <button
+                            type="button"
+                            className="vp-undo"
+                            style={audioMenuFor === img.id ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
                             title="Attach audio to THIS shot (music/ambience spans), or link a voice to a character (rides everywhere they appear)"
-                            onChange={(e) => {
-                              const v = e.target.value
-                              if (!v) return
-                              if (v.startsWith('shot:')) toggleMapRef(img.id, v.slice(5))
-                              else {
-                                const [audio, target] = v.slice(5).split('→')
-                                if (audio && target) void linkAudio(audio, target)
-                              }
-                            }}
+                            onClick={() => setAudioMenuFor(audioMenuFor === img.id ? null : img.id)}
                           >
-                            <option value="">♪ add audio…</option>
-                            <optgroup label="attach to this shot">
-                              {audioObjs.filter((a) => !attachedAudio.includes(a.name)).map((a) => (
-                                <option key={`s-${a.name}`} value={`shot:${a.name}`}>{a.name} ({a.kind})</option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="link voice to a character (rides everywhere)">
-                              {charRows.filter((r) => !r.voice).flatMap((r) =>
-                                voices.map((v) => (
-                                  <option key={`c-${v.name}→${r.name}`} value={`char:${v.name}→${r.name}`}>
-                                    {v.name} → {r.name}
-                                  </option>
-                                )),
+                            {audioMenuFor === img.id ? '▾' : '♪'} add audio…
+                          </button>
+                          {audioMenuFor === img.id ? (
+                            <div style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 8 }}>
+                              {audioObjs.filter((a) => !attachedAudio.includes(a.name)).length > 0 && (
+                                <>
+                                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>THIS SHOT</span>
+                                  {audioObjs.filter((a) => !attachedAudio.includes(a.name)).map((a) => (
+                                    <button
+                                      key={`s-${a.name}`}
+                                      type="button"
+                                      className="vp-undo"
+                                      title={(a as KitObject).notes || `Attach ${a.name} to this shot`}
+                                      onClick={() => { toggleMapRef(img.id, a.name); setAudioMenuFor(null) }}
+                                    >
+                                      ♪ {a.name} ({a.kind})
+                                    </button>
+                                  ))}
+                                </>
                               )}
-                            </optgroup>
-                          </select>
+                              {charRows.filter((r) => !r.voice).length > 0 && voices.length > 0 && (
+                                <>
+                                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>LINK VOICE</span>
+                                  {charRows.filter((r) => !r.voice).flatMap((r) =>
+                                    voices.map((v) => (
+                                      <button
+                                        key={`c-${v.name}-${r.name}`}
+                                        type="button"
+                                        className="vp-undo"
+                                        title={`Link ${v.name} to ${r.name} — rides into every shot referencing them`}
+                                        onClick={() => { void linkAudio(v.name, r.name); setAudioMenuFor(null) }}
+                                      >
+                                        ♪ {v.name} → {r.name}
+                                      </button>
+                                    )),
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       )
                     })() : null}
