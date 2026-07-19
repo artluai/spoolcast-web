@@ -517,6 +517,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const syncRefsThrough = async () => {
     setRefSyncing(true)
     try {
+      // Let queued doc saves land BEFORE syncing — otherwise an older
+      // in-memory doc could overwrite the synced file right after.
+      await savePromptChainRef.current.catch(() => undefined)
       if (pacingDraft.trim()) {
         await fetch(actionUrl(), {
           method: 'POST',
@@ -772,17 +775,44 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
     return parts.join(';')
   }, [rows, shotEvents, planRefsByPid])
-  const autoSyncedRef = useRef('')
+  // SYNC IS AUTOMATIC and SELF-HEALING: an upstream attach flows through
+  // without a click. Free, prompt-text-safe, never during a running batch.
+  // A diff that survives an attempt retries on a cooldown (a one-shot guard
+  // left chips stuck amber after any hiccup); a few tries per distinct diff
+  // caps hard-failure loops — the manual button stays as the last resort.
+  const autoSyncRef = useRef({ sig: '', at: 0, tries: 0 })
   useEffect(() => {
-    // SYNC IS AUTOMATIC: an upstream attach flows through without a click.
-    // Free, prompt-text-safe; one attempt per distinct diff (no retry loops),
-    // and never while a generation batch is running.
     if (!pendingSignature || refSyncing || activeProcess) return
-    if (autoSyncedRef.current === pendingSignature) return
-    autoSyncedRef.current = pendingSignature
+    const st = autoSyncRef.current
+    const now = Date.now()
+    if (st.sig === pendingSignature) {
+      if (st.tries >= 4 || now - st.at < 15_000) return
+      st.tries += 1
+    } else {
+      autoSyncRef.current = { sig: pendingSignature, at: now, tries: 1 }
+    }
+    autoSyncRef.current.at = now
     void syncRefsThrough()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSignature, refSyncing, activeProcess])
+  // Re-check on an interval too — the diff can persist without any state
+  // change to re-fire the effect.
+  const [autoTick, setAutoTick] = useState(0)
+  useEffect(() => {
+    const iv = window.setInterval(() => setAutoTick((t) => t + 1), 16_000)
+    return () => window.clearInterval(iv)
+  }, [])
+  useEffect(() => {
+    if (pendingSignature && !refSyncing && !activeProcess) {
+      const st = autoSyncRef.current
+      if (st.sig === pendingSignature && st.tries < 4 && Date.now() - st.at >= 15_000) {
+        st.tries += 1
+        st.at = Date.now()
+        void syncRefsThrough()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTick])
 
   const showProgressBar = activeProcess || progress.done > 0
 
