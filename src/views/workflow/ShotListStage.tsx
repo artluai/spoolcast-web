@@ -3,7 +3,7 @@ import { FeedbackButton } from './FeedbackButton'
 import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
-import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { activeSession, actionUrl, apiUrl, contentUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
@@ -160,13 +160,20 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   // built+approved at the generation step). READ-ONLY here: building it from
   // this step would reset its approval under a running batch.
   const [assembled, setAssembled] = useState<Record<string, string>>({})
+  // The World Kit, for CONFIRMING each clip's references visually: image refs
+  // as thumbnails, prompt-only objects as chips, audio as ♪ chips — including
+  // audio riding in via an object link (variants inherit).
+  type KitLite = { name: string; kind: string; notes?: string; image_path?: string; linked_to?: string; variant_of?: string }
+  const [kit, setKit] = useState<KitLite[]>([])
   useEffect(() => {
     let live = true
     Promise.all([
       fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
       fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)),
       fetch(fileUrl('working/generation-prompts.json')).then((r) => (r.ok ? r.json() : null)),
-    ]).then(([sess, reg, prompts]) => {
+      fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([sess, reg, prompts, kitOut]) => {
+      if (live && Array.isArray(kitOut?.data?.kit)) setKit(kitOut.data.kit as KitLite[])
       if (!live) return
       try {
         const cfg = JSON.parse(sess?.data?.content ?? 'null')
@@ -724,16 +731,54 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     <span className="sl-title">{spoken ? `“${spoken}”` : 'Silent clip'}</span>
                     <span className="sl-meta">{fmtTime(start)}-{fmtTime(start + dur)} · {dur.toFixed(1)}s{grp ? ` · ${grp}` : ''}{agrp ? ` · ♪ ${agrp}` : ''}</span>
                   </button>
-                  {/* The PROMPT — what the clip generator is told to shoot. The
-                      spoken line above is performed INSIDE the clip; there is
-                      no separate audio track. */}
+                  {/* The DIRECTION — what happens in the clip (the spoken
+                      line above is performed INSIDE it). The full generation
+                      prompt is written and reviewed at the next step. */}
                   <div className="sl-script">
-                    <span>Prompt</span>
+                    <span>Direction</span>
                     <p>{event.visual_direction || '—'}</p>
                   </div>
-                  {(event.references ?? []).length ? (
-                    <p className="sl-summary-line">refs: {(event.references ?? []).join(', ')} — images ride along; prompt-only objects join as text</p>
-                  ) : null}
+                  {(() => {
+                    // CONFIRM THE REFERENCES: what actually reaches this clip.
+                    const refs = (event.references ?? []).map(String)
+                    const find = (n: string) => kit.find((k) => k.name === n)
+                    const AUD = new Set(['voice', 'music', 'ambience', 'sfx', 'audio'])
+                    const imgs = refs.filter((n) => find(n)?.image_path)
+                    const texts = refs.filter((n) => { const k = find(n); return k ? !k.image_path && !AUD.has(k.kind) : true })
+                    const attachedAudio = refs.filter((n) => AUD.has(find(n)?.kind ?? ''))
+                    const inherited = kit
+                      .filter((k) => AUD.has(k.kind) && k.linked_to && !attachedAudio.includes(k.name))
+                      .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))
+                    if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length) return null
+                    return (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 2px' }}>
+                        {imgs.map((n) => (
+                          <img
+                            key={n}
+                            src={contentUrl(find(n)!.image_path!)}
+                            alt={n}
+                            title={`${n} — reference image (uploads to the model)`}
+                            style={{ height: 56, width: 'auto', borderRadius: 7, border: '1px solid var(--line-2)', display: 'block' }}
+                          />
+                        ))}
+                        {texts.map((n) => (
+                          <span key={n} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={find(n)?.notes || `${n} — prompt-only: its description joins the prompt as text`}>
+                            {find(n)?.kind || 'ref'} · {n}
+                          </span>
+                        ))}
+                        {attachedAudio.map((n) => (
+                          <span key={n} className="vp-undo" style={{ cursor: 'default' }} title={find(n)?.notes || n}>
+                            ♪ {n} · this clip
+                          </span>
+                        ))}
+                        {inherited.map((k) => (
+                          <span key={k.name} className="vp-undo" style={{ cursor: 'default' }} title={k.notes || k.name}>
+                            ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                  })()}
                   {finalPrompt ? (
                     <details className="sl-json">
                       <summary>Assembled prompt the model receives (from the generation step)</summary>
