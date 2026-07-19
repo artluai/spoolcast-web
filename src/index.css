@@ -1459,7 +1459,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-att, .vp-map-card { align-self: flex-start; }
 .vp-map-att { position: relative; margin: 0; display: inline-block; padding: 0; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); width: fit-content; overflow: hidden; }
 .vp-map-att img { height: 148px; width: auto; display: block; }
-.vp-map-att-top { position: absolute; left: 0; right: 0; top: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 30px 18px 7px; background: linear-gradient(rgba(8,10,15,.92), transparent); }
+.vp-map-att-top { position: absolute; left: 0; right: 0; top: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 6px 32px 18px 7px; background: linear-gradient(rgba(8,10,15,.92), transparent); }
+.vp-map-att { min-width: 96px; }
 .vp-map-att-top .vp-map-detach { position: absolute; top: 6px; right: 6px; }
 /* EVERYTHING on the image lives behind hover — name included: at rest the
    attachment is just the picture. The picked 1st frame stays visible (it's
@@ -1481,8 +1482,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-att-ov { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 26px 7px 6px; background: linear-gradient(transparent, rgba(8,10,15,.92)); }
 .vp-map-ffbtn { border: 1px solid rgba(255,255,255,.18); background: rgba(10,12,18,.7); color: var(--ink-2); border-radius: 6px; font-family: var(--mono); font-size: 9px; padding: 3px 6px; cursor: pointer; white-space: nowrap; }
 .vp-map-ffbtn.on { border-color: var(--accent-2); color: var(--accent-2); }
-.vp-map-detach { border: 1px solid rgba(255,255,255,.18); background: rgba(10,12,18,.7); color: var(--ink-3); border-radius: 6px; font-size: 11px; line-height: 1; padding: 4px 7px; cursor: pointer; }
-.vp-map-detach:hover { color: var(--ink); }
+/* A real hit target — 24px square, above everything on the card; narrow
+   portrait attachments were clipping it into a sliver. */
+.vp-map-detach { border: 1px solid rgba(255,255,255,.18); background: rgba(10,12,18,.85); color: var(--ink-2); border-radius: 6px; font-size: 13px; line-height: 1; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; cursor: pointer; z-index: 3; }
+.vp-map-detach:hover { color: var(--ink); border-color: var(--red); }
 .vp-map-att.ff { border-color: var(--accent-2); }
 .vp-map-ord { position: absolute; top: -8px; left: -8px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #0b0d14; font-family: var(--mono); font-size: 11px; font-weight: 800; z-index: 1; }
 .vp-map-noimg { height: 120px; min-width: 120px; display: grid; place-items: center; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--ink-3); font-family: var(--mono); font-size: 11px; padding: 0 10px; }
