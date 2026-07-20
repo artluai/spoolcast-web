@@ -1059,9 +1059,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vr-text-control:hover, .vr-text-control.on { color: var(--accent-2); }
 /* Flex-wrap, not a fixed grid: on a narrow portrait preview the scrubber
    wraps to its own line instead of running off the right edge. */
-.vr-player-controls { position: absolute; left: 18px; right: 18px; bottom: 16px; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; opacity: 1; transform: translateY(0); transition: opacity .18s, transform .18s; }
+.vr-player-controls { position: absolute; left: 18px; right: 18px; bottom: 16px; z-index: 2; display: flex; flex-wrap: wrap; gap: 14px 12px; align-items: center; opacity: 1; transform: translateY(0); transition: opacity .18s, transform .18s; }
 .vr-preview.idle .vr-player-controls { opacity: 0; transform: translateY(8px); pointer-events: none; }
-.vr-player-controls .save-continue { width: auto; min-width: 76px; height: 34px; min-height: 34px; padding: 0 15px; border-radius: 7px; box-shadow: 0 6px 22px rgba(0,0,0,.28); display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+/* Icon-only play/pause: compact square-ish button. */
+.vr-player-controls .save-continue { width: auto; min-width: 44px; height: 30px; min-height: 30px; padding: 0 12px; font-size: 12px; border-radius: 7px; box-shadow: 0 6px 22px rgba(0,0,0,.28); display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
 .vr-cc { height: 34px; min-height: 34px; min-width: 42px; padding: 0 12px; box-sizing: border-box; border: 1px solid rgba(122,162,255,.34); border-radius: 7px; background: rgba(10,12,18,.52); color: var(--ink); font-family: var(--mono); font-size: 11px; cursor: pointer; box-shadow: 0 6px 22px rgba(0,0,0,.22); display: inline-flex; align-items: center; justify-content: center; }
 .vr-cc:hover, .vr-cc.on { border-color: var(--accent); background: var(--accent); color: #071021; }
 .vr-player-controls input[type="range"] { flex: 1 1 120px; min-width: 80px; width: auto; height: 4px; accent-color: var(--accent); cursor: pointer; }

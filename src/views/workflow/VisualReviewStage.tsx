@@ -1524,7 +1524,8 @@ export function VisualReviewStage({
     const summaryHeight = summary && getComputedStyle(summary).position !== 'absolute' ? summary.offsetHeight : 0
     if (!panel.hasAttribute('open')) return Math.max(minHeight, summaryHeight)
     if (!body) return Math.max(minHeight, summaryHeight)
-    return Math.max(minHeight, summaryHeight + bodyContentHeight(body))
+    // +6: breathing room so sub-pixel rounding can never shave the last line.
+    return Math.max(minHeight, summaryHeight + bodyContentHeight(body) + 6)
   }
 
   const columnSlots = (column: HTMLElement) => (
@@ -2347,8 +2348,8 @@ export function VisualReviewStage({
               ) : null}
               {seeking ? <span className="vr-seeking">Seeking…</span> : null}
               <div className="vr-player-controls">
-                <button type="button" className="save-continue" onClick={togglePlay}>
-                  {playing ? 'Pause' : 'Play'}
+                <button type="button" className="save-continue" title={playing ? 'Pause' : 'Play'} onClick={togglePlay}>
+                  {playing ? '❚❚' : '▶'}
                 </button>
                 <span className="vr-time">{fmtTime(time)} / {fmtTime(totalSec)}</span>
                 <input
@@ -2403,7 +2404,7 @@ export function VisualReviewStage({
           <p className="vp-active-refs">
             slot {(activeSegment?.duration || 0).toFixed(1)}s
             {activeSegment?.generatedDuration ? ` · generated ${activeSegment.generatedDuration.toFixed(1)}s` : ''}
-            {activeSegment?.firstWord || activeSegment?.lastWord ? ` · ${activeSegment.firstWord} to ${activeSegment.lastWord}` : ''}
+            {activeSegment?.firstWord || activeSegment?.lastWord ? ` · speaks “${activeSegment.firstWord} … ${activeSegment.lastWord}”` : ''}
           </p>
         </ReviewPanel>
       )
