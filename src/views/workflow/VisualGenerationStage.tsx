@@ -116,21 +116,21 @@ type PreviewMedia = {
 }
 
 const imageModels = [
-  { id: 'nano-banana-2', label: 'Nano Banana 2', note: 'image · fast draft quality' },
-  { id: 'nano-banana-pro', label: 'Nano Banana Pro', note: 'image · higher quality' },
-  { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', note: 'image · strong prompt following' },
+  { id: 'nano-banana-2', label: 'Nano Banana 2', note: 'fast draft quality' },
+  { id: 'nano-banana-pro', label: 'Nano Banana Pro', note: 'higher quality' },
+  { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', note: 'strong prompt following' },
 ]
 
 // Prompt/duration limits per kie.ai docs — each model enforces its own cap
 // at submit, so the counter must show the limit of the model the ROW uses.
 const videoModels = [
-  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 15s', maxSeconds: 15, maxChars: 20000 },
-  { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 15s', maxSeconds: 15, maxChars: 20000 },
-  { id: 'kling-3.0', label: 'Kling 3.0', note: 'video · std/pro/4K · max 15s · prompt ≤2,500', maxSeconds: 15, maxChars: 2500 },
-  { id: 'kling-3.0-turbo', label: 'Kling 3.0 Turbo', note: 'video · faster kling · max 15s · one image only', maxSeconds: 15, maxChars: 2500 },
-  { id: 'veo-3.1', label: 'Veo 3.1', note: 'video · always with audio · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
-  { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', note: 'video · faster veo · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
-  { id: 'happyhorse-1.1', label: 'HappyHorse 1.1', note: 'video · up to 9 refs · max 15s', maxSeconds: 15, maxChars: 5000 },
+  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'faster, lower cost · max 15s', maxSeconds: 15, maxChars: 20000 },
+  { id: 'seedance-2', label: 'Seedance 2', note: 'higher quality · max 15s', maxSeconds: 15, maxChars: 20000 },
+  { id: 'kling-3.0', label: 'Kling 3.0', note: 'std/pro/4K · max 15s · prompt ≤2,500', maxSeconds: 15, maxChars: 2500 },
+  { id: 'kling-3.0-turbo', label: 'Kling 3.0 Turbo', note: 'faster kling · max 15s · one image only', maxSeconds: 15, maxChars: 2500 },
+  { id: 'veo-3.1', label: 'Veo 3.1', note: 'always with audio · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
+  { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', note: 'faster veo · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
+  { id: 'happyhorse-1.1', label: 'HappyHorse 1.1', note: 'up to 9 refs · max 15s', maxSeconds: 15, maxChars: 5000 },
 ]
 
 function modelLabel(models: { id: string; label: string }[], id: string) {
@@ -694,6 +694,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [rowAiFor, setRowAiFor] = useState<string | null>(null)
   const [rowAiNote, setRowAiNote] = useState('')
   const [rowAiBusy, setRowAiBusy] = useState<string | null>(null)
+  // Which row's model-override menu is open (same vp-menu design as ADVANCED).
+  const [rowModelMenu, setRowModelMenu] = useState<string | null>(null)
   const rowAiUpdate = async (id: string) => {
     const instruction = rowAiNote.trim()
     if (!instruction) return
@@ -1876,18 +1878,35 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                   </label>
                   <b>{row.title}</b>
                   <span className="vg-meta">{row.duration} · {row.aspect} · {row.resolution} ·{' '}
-                    <select
-                      className="sc-select"
-                      value={row.mediaModel}
-                      title="Model for THIS clip — overrides the session default"
-                      style={{ fontSize: 11, padding: '2px 6px', minHeight: 0 }}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => void setRowModel(row.id, row.type === 'video' ? 'video' : 'image', e.target.value)}
-                    >
-                      {(row.type === 'video' ? videoModels : imageModels).map((m) => (
-                        <option key={m.id} value={m.id}>{m.label}</option>
-                      ))}
-                    </select>
+                    <span className="vg-select-wrap" style={{ display: 'inline-block' }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="vp-menu-btn vg-select-btn"
+                        title="Model for THIS clip — overrides the session default"
+                        onClick={() => setRowModelMenu(rowModelMenu === row.id ? null : row.id)}
+                      >
+                        {modelLabel(row.type === 'video' ? videoModels : imageModels, row.mediaModel)} ▾
+                      </button>
+                      {rowModelMenu === row.id ? (
+                        <>
+                          <span className="vp-menu-backdrop" onClick={() => setRowModelMenu(null)} />
+                          <span className="vp-menu">
+                            <span className="vp-menu-h">{row.type === 'video' ? 'VIDEO MODEL' : 'IMAGE MODEL'}</span>
+                            {(row.type === 'video' ? videoModels : imageModels).map((m) => (
+                              <button
+                                type="button"
+                                key={m.id}
+                                className={row.mediaModel === m.id ? 'on' : ''}
+                                onClick={() => { setRowModelMenu(null); void setRowModel(row.id, row.type === 'video' ? 'video' : 'image', m.id) }}
+                              >
+                                <span>{m.label}</span>
+                                <small>{m.id === (row.type === 'video' ? defaultVideoModel : defaultImageModel) ? 'default' : m.note}</small>
+                              </button>
+                            ))}
+                          </span>
+                        </>
+                      ) : null}
+                    </span>
                   </span>
                   <span className="vg-typepick vg-row-type">
                     <button type="button" className={row.type === 'image' ? 'on' : ''} onClick={() => changeRowType(row.id, 'image')}>Image</button>

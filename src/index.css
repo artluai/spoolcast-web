@@ -907,10 +907,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-select-wrap { position: relative; display: block; min-width: 0; }
 .vg-select-btn { width: 100%; min-height: 34px; text-align: left; }
 .vg-select-wrap .vp-menu { position: absolute; top: calc(100% + 5px); left: 0; min-width: 280px; max-width: min(420px, calc(100vw - 48px)); z-index: 1001; }
-.vg-select-wrap .vp-menu button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+/* Name always ONE line; the description sits under it — smaller, tight gap,
+   at most two lines. A side-by-side grid squeezed long names into wraps. */
+.vg-select-wrap .vp-menu button > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vg-select-wrap .vp-menu button.on { color: var(--ink); background: var(--accent-glow); }
 .vg-select-wrap .vp-menu button:disabled { opacity: .38; cursor: default; }
-.vg-select-wrap .vp-menu button small { color: var(--ink-3); font-family: var(--mono); font-size: 10px; line-height: 1.35; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
+.vg-select-wrap .vp-menu button small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; line-height: 1.3; text-transform: uppercase; letter-spacing: .08em; }
 .vg-advanced-actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: 8px; }
 .vg-advanced-actions .vg-action-btn { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; white-space: nowrap; }
 .vg-advanced-actions .vp-undo.on { color: var(--ink); border-color: var(--accent); background: var(--accent-glow); }
