@@ -634,10 +634,11 @@ export function VisualReviewStage({
   // Chunks whose narration audio is missing/broken (video-first sessions):
   // their clip videos are unmuted so the clips' own sound plays instead.
   const [videoSoundChunks, setVideoSoundChunks] = useState<Set<string>>(new Set())
-  // Expanded mode only: exact pixel height for the preview box, computed by the
-  // SAME starting-size pass that sets the row heights — a percentage chain
-  // through <details> is unreliable (its internal content wrapper breaks it).
-  const [previewFitHeight, setPreviewFitHeight] = useState<number | null>(null)
+  // Gallery "Fit": pack every tile into the panel's current box (with a small
+  // minimum so a thumb stays recognizable). Off = the normal flowing grid.
+  const [galleryFit, setGalleryFit] = useState(false)
+  const [galleryFitCols, setGalleryFitCols] = useState<number | null>(null)
+  const galleryStripRef = useRef<HTMLDivElement | null>(null)
   // REAL compile/export: the engine's render_with_audit job. State lives in the
   // workflow store (the step footer gates Save/Autopilot on it and it must
   // survive step navigation); progress/error details are transient and local.
@@ -932,6 +933,43 @@ export function VisualReviewStage({
     timelineTimeRef.current = nextTime
     setTime(nextTime)
   }
+
+  // Fit: the largest tile size where EVERY tile fits the panel's current box,
+  // floored at a barely-readable minimum (then the grid scrolls anyway).
+  const computeGalleryFit = useCallback(() => {
+    const strip = galleryStripRef.current
+    if (!strip) return
+    const count = Math.max(1, segments.length)
+    const width = strip.clientWidth
+    const slot = strip.closest<HTMLElement>('.vr-panel-slot')
+    const height = Math.max(120, (slot?.clientHeight ?? strip.clientHeight) - 76)
+    const gap = 10
+    const labelBlock = 42
+    const minTile = 56
+    const ratio = canvasRatioRef.current || 16 / 9
+    let pick: number | null = null
+    for (let cols = 1; cols <= count; cols++) {
+      const tileW = (width - (cols - 1) * gap) / cols
+      if (tileW < minTile) break
+      const rowsNeeded = Math.ceil(count / cols)
+      const tileH = tileW / ratio + labelBlock
+      if (rowsNeeded * tileH + (rowsNeeded - 1) * gap <= height) { pick = cols; break }
+    }
+    setGalleryFitCols(pick ?? Math.max(1, Math.min(count, Math.floor((width + gap) / (minTile + gap)))))
+  }, [segments.length])
+
+  const toggleGalleryFit = () => {
+    setGalleryFit((current) => {
+      const next = !current
+      if (next) window.requestAnimationFrame(computeGalleryFit)
+      else setGalleryFitCols(null)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    if (galleryFit) computeGalleryFit()
+  }, [computeGalleryFit, galleryFit, isExpandedCard])
 
   const setVideoRef = (segmentId: string, node: HTMLVideoElement | null) => {
     if (node) videoRefs.current.set(segmentId, node)
@@ -1537,6 +1575,9 @@ export function VisualReviewStage({
           let target: number | null
           if (!slot.open) target = slot.minHeight
           else if (manual) target = Math.min(slot.contentHeight, Math.max(slot.minHeight, current[slot.id] ?? slot.contentHeight))
+          // The gallery in the NORMAL view grows to its content (the card just
+          // gets taller) — no scroll, no clipping. Expanded keeps the cap.
+          else if (slot.panelId === 'gallery' && !isExpandedCard) target = Math.max(slot.minHeight, slot.contentHeight)
           else if (cappableSection(slot.panelId)) target = Math.max(slot.minHeight, Math.min(slot.contentHeight, cap))
           else target = null
           if (target == null) {
@@ -1550,6 +1591,9 @@ export function VisualReviewStage({
       })
     }
 
+    // The height the pass just decided for the video's row — used below so the
+    // column split works from assigned numbers, not a pre-layout rect.
+    let assignedVideoRowHeight: number | null = null
     if (isExpandedCard && !isMobileReview) {
       const rows = Array.from(workspace.querySelectorAll<HTMLElement>(':scope > .vr-layout-row'))
       if (rows.length) {
@@ -1575,42 +1619,45 @@ export function VisualReviewStage({
           for (const row of otherRows) assign(row, Math.max(resizeMinHeight(row), each))
           return changed ? next : current
         })
-        // The preview's pixel height comes from the SAME numbers this pass just
-        // assigned to its row (~74px of panel chrome above the video).
         const videoRow = rows.find((row) => row.querySelector('.vr-player-panel'))
         if (videoRow) {
-          const rowHeight = manualRowSizeIdsRef.current.has(videoRow.dataset.layoutId || '')
+          const id = videoRow.dataset.layoutId || ''
+          assignedVideoRowHeight = manualRowSizeIdsRef.current.has(id)
             ? videoRow.getBoundingClientRect().height
             : Math.max(resizeMinHeight(videoRow), each)
-          setPreviewFitHeight(Math.max(140, Math.round(rowHeight - 74)))
-        }
-        // PORTRAIT: the video column only needs the video's own width — hand
-        // the rest to the side column instead of leaving gutters. Part of the
-        // same single sizing pass; manual drags and saved splits win.
-        const ratio = canvasRatioRef.current
-        const cols = videoRow ? Array.from(videoRow.querySelectorAll<HTMLElement>(':scope > .vr-layout-col')) : []
-        if (ratio && ratio < 1 && videoRow && cols.length === 2) {
-          const videoCol = cols.find((col) => col.querySelector('.vr-player-panel'))
-          const sideCol = cols.find((col) => col !== videoCol)
-          const videoId = videoCol?.dataset.layoutId
-          const sideId = sideCol?.dataset.layoutId
-          if (videoId && sideId && !manualColumnSizeIdsRef.current.has(videoId) && !manualColumnSizeIdsRef.current.has(sideId)) {
-            const rowHeight = Math.max(resizeMinHeight(videoRow), each)
-            // ~74px of chrome above the preview (panel summary + paddings);
-            // +30 breathing room around the video's width.
-            const wantWidth = Math.max(window.innerWidth * 0.2, (rowHeight - 74) * ratio + 30)
-            const totalWidth = Math.max(1, workspace.clientWidth)
-            const videoWeight = Math.min(wantWidth, totalWidth * 0.6)
-            setColumnSizes((current) => {
-              const sideWeight = Math.max(1, totalWidth - videoWeight)
-              if (Math.abs((current[videoId] ?? 0) - videoWeight) < 2 && Math.abs((current[sideId] ?? 0) - sideWeight) < 2) return current
-              return { ...current, [videoId]: videoWeight, [sideId]: sideWeight }
-            })
-          }
         }
       }
-    } else {
-      setPreviewFitHeight(null)
+    }
+    // PORTRAIT (both views): the video column only needs the video's own
+    // width — hand the rest to the side column instead of leaving gutters.
+    // Same single sizing pass; manual drags and saved splits win.
+    {
+      const ratio = canvasRatioRef.current
+      const videoRow = Array.from(workspace.querySelectorAll<HTMLElement>(':scope > .vr-layout-row'))
+        .find((row) => row.querySelector('.vr-player-panel'))
+      const cols = videoRow ? Array.from(videoRow.querySelectorAll<HTMLElement>(':scope > .vr-layout-col')) : []
+      if (ratio && ratio < 1 && videoRow && cols.length === 2) {
+        const videoCol = cols.find((col) => col.querySelector('.vr-player-panel'))
+        const sideCol = cols.find((col) => col !== videoCol)
+        const videoId = videoCol?.dataset.layoutId
+        const sideId = sideCol?.dataset.layoutId
+        if (videoId && sideId && !manualColumnSizeIdsRef.current.has(videoId) && !manualColumnSizeIdsRef.current.has(sideId)) {
+          // Expanded rows are pass-sized; the normal view's preview is capped
+          // at 78vh. Either way ~74px of chrome sits above the video, +30
+          // breathing room around its width.
+          const previewHeight = isExpandedCard && !isMobileReview
+            ? Math.max(140, (assignedVideoRowHeight ?? videoRow.getBoundingClientRect().height) - 74)
+            : window.innerHeight * 0.78
+          const wantWidth = Math.max(window.innerWidth * 0.2, previewHeight * ratio + 30)
+          const totalWidth = Math.max(1, workspace.clientWidth)
+          const videoWeight = Math.min(wantWidth, totalWidth * 0.6)
+          setColumnSizes((current) => {
+            const sideWeight = Math.max(1, totalWidth - videoWeight)
+            if (Math.abs((current[videoId] ?? 0) - videoWeight) < 2 && Math.abs((current[sideId] ?? 0) - sideWeight) < 2) return current
+            return { ...current, [videoId]: videoWeight, [sideId]: sideWeight }
+          })
+        }
+      }
     }
     // Resize helpers intentionally read the live DOM after layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1801,15 +1848,6 @@ export function VisualReviewStage({
 
   // Expanded mode fills a fixed-height card, so its rows trade height (zero-sum):
   // dragging the boundary grows one row's basis and pulls clipped sections with it.
-  // Keep the preview's pixel budget tracking a row-height drag when the dragged
-  // boundary moves the player's row (sign says which side of the boundary it's on).
-  const previewFollowsRow = (rowId: string, sign: 1 | -1) => {
-    const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
-    if (!row?.querySelector('.vr-player-panel')) return null
-    const startHeight = row.getBoundingClientRect().height
-    return (delta: number) => setPreviewFitHeight(Math.max(140, Math.round(startHeight + sign * delta - 74)))
-  }
-
   const startReviewRowResize = (
     event: ReactPointerEvent<HTMLButtonElement>,
     firstId: string,
@@ -1817,10 +1855,8 @@ export function VisualReviewStage({
   ) => {
     manualRowSizeIdsRef.current.add(firstId)
     const plan = rowPanelResizePlan(firstId)
-    const follow = previewFollowsRow(firstId, 1) ?? previewFollowsRow(secondId, -1)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
-      follow?.(delta)
     })
   }
 
@@ -1831,10 +1867,8 @@ export function VisualReviewStage({
     manualRowSizeIdsRef.current.add(rowId)
     const plan = rowPanelResizePlan(rowId)
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
-    const follow = previewFollowsRow(rowId, 1)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, row ? resizeMinHeight(row) : 32, (delta) => {
       applyRowPanelResize(plan, delta)
-      follow?.(delta)
     })
   }
 
@@ -2178,11 +2212,11 @@ export function VisualReviewStage({
             <div
               ref={previewRef}
               className={`vr-preview ${playing && !controlsAwake ? 'idle' : ''} ${seeking ? 'seeking' : ''}`}
-              style={isExpandedCard && !isMobileReview && previewFitHeight
-                // Expanded rows have a JS-assigned height — the sizing pass
-                // hands the preview its exact pixel budget, so the video is
-                // never clipped no matter the row split.
-                ? { aspectRatio: `${canvasRatio}`, height: previewFitHeight, maxHeight: '100%', width: 'auto', margin: '0 auto', maxWidth: '100%' }
+              style={isExpandedCard && !isMobileReview
+                // Expanded: CSS gives the preview its slot's height via
+                // container-query units — it tracks every row drag with no
+                // clipping. Only the ratio and centering live inline.
+                ? { aspectRatio: `${canvasRatio}`, width: 'auto', margin: '0 auto', maxWidth: '100%' }
                 : { aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%' }}
               onMouseMove={wakeControls}
               onMouseEnter={wakeControls}
@@ -2316,7 +2350,21 @@ export function VisualReviewStage({
           title="Gallery"
           meta={`${segments.length} visuals`}
         >
-          <div className="vr-strip">
+          <span className="vp-zoom-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              className={`vp-undo ${galleryFit ? 'on' : ''}`}
+              title="Fit every thumbnail into the panel (small floor so they stay readable)"
+              onClick={toggleGalleryFit}
+            >
+              Fit
+            </button>
+          </span>
+          <div
+            className="vr-strip"
+            ref={galleryStripRef}
+            style={galleryFit && galleryFitCols ? { gridTemplateColumns: `repeat(${galleryFitCols}, 1fr)` } : undefined}
+          >
             {segments.map((segment) => (
               <button
                 type="button"
@@ -2469,7 +2517,9 @@ export function VisualReviewStage({
                           <div
                             data-layout-id={`${column.id}-${panelId}`}
                             data-panel-id={panelId}
-                            className="vr-panel-slot"
+                            // is-sized: this slot has an explicit height, so CSS
+                            // can budget its body (scroll instead of clipping).
+                            className={`vr-panel-slot${panelSizes[`${column.id}-${panelId}`] ? ' is-sized' : ''}`}
                             style={layoutSizeStyle(`${column.id}-${panelId}`, panelSizes)}
                           >
                             {renderReviewPanel(panelId, row.id, column.id)}

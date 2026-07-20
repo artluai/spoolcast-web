@@ -1186,6 +1186,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vr-timeline-panel[open] > .vr-panel-body { padding-top: 0; }
 .vr-panel-body .vp-active-what { max-height: none; overflow: auto; padding-right: 8px; }
 .vr-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; max-height: none; overflow: auto; padding-top: 12px; }
+.vp-zoom-actions .vp-undo.on { color: var(--ink); border-color: var(--accent); background: var(--accent-glow); }
 .vr-strip button { min-width: 0; text-align: left; background: transparent; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-2); padding: 0; overflow: hidden; cursor: pointer; }
 .vr-strip button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .vr-strip img, .vr-strip video, .vr-strip span { width: 100%; aspect-ratio: 16 / 9; display: grid; place-items: center; background: var(--bg-4); object-fit: cover; color: var(--accent-2); font-family: var(--mono); }
@@ -1204,8 +1205,17 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .detail-card.step-check.full .vr-timeline-panel .vr-panel-body { padding-top: 0; }
 .detail-card.step-check.full .vr-player-panel .vr-panel-body,
 .detail-card.step-check.full .vr-timeline-panel .vr-panel-body { overflow: hidden; }
+/* Expanded slots are size containers: their bodies get an exact height budget
+   in container-query units, so clipped content SCROLLS instead of vanishing
+   and the video always fits — no percentage chain through <details> needed.
+   (Closed panels are excluded; size containment would collapse them.) */
+.vr-panel-slot.is-sized:has(> .vr-panel[open]),
+.detail-card.step-check.full .vr-panel-slot:has(> .vr-panel[open]) { container-type: size; }
+.vr-panel-slot.is-sized:has(> .vr-panel[open]) > .vr-panel > .vr-panel-body,
+.detail-card.step-check.full .vr-panel-slot:has(> .vr-panel[open]) > .vr-panel > .vr-panel-body { max-height: calc(100cqh - 42px); overflow: auto; }
 .detail-card.step-check.full .vr-player { min-width: 0; min-height: 0; margin: 0; }
 .detail-card.step-check.full .vr-preview { width: 100%; height: auto; max-height: 100%; aspect-ratio: 16 / 9; }
+.detail-card.step-check.full .vr-panel-slot:has(> .vr-player-panel[open]) .vr-preview { height: calc(100cqh - 48px); }
 .detail-card.step-check.full .vr-preview:hover .vr-player-controls,
 .detail-card.step-check.full .vr-preview:focus-within .vr-player-controls { opacity: 1; transform: none; pointer-events: auto; }
 .detail-card.step-check.full .vr-player-controls { bottom: 18px; }
