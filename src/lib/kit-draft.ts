@@ -133,3 +133,37 @@ export function patchDraftShotRefs(imageId: string, name: string, opts?: { detac
   }
   if (changed) store.setStageDraft('visual_pacing', lines.join('\n'))
 }
+
+/**
+ * Mirror a variant REGISTRATION (from step 9) into the unsaved kit draft —
+ * the engine already wrote the file row; a live draft must carry it too or
+ * saving step 5 later would erase the variant.
+ */
+export function appendDraftVariantRow(name: string, baseName: string, instruction: string): void {
+  const store = useWorkflowStore.getState()
+  const md = (store.stageDrafts['world_kit'] ?? '').trim()
+  if (!md) return
+  try {
+    const doc = parseWorldKit(md)
+    let table = doc.sections.find((sec) => sec.kind === 'table' && /master variants/i.test(sec.heading))
+    if (!table) {
+      table = { kind: 'table', heading: 'Master variants', columns: ['Ref', 'Kind', 'Scope', 'Group', 'Variant of', 'Notes'], rows: [] } as (typeof doc.sections)[number]
+      doc.sections.push(table)
+    }
+    if (table.kind !== 'table') return
+    const iRef = col(table.columns, /^ref$/i)
+    if (table.rows.some((r) => (r[iRef] || '').trim() === name)) return
+    const row = table.columns.map((c) => {
+      if (/^ref$/i.test(c)) return name
+      if (/^kind$/i.test(c)) return 'variant'
+      if (/^scope$/i.test(c)) return 'episode-only'
+      if (/variant/i.test(c)) return baseName
+      if (/notes|description/i.test(c)) return instruction.replace(/\|/g, '/')
+      return ''
+    })
+    table.rows.push(row)
+    store.setStageDraft('world_kit', serializeWorldKit(doc))
+  } catch {
+    /* unparseable draft — the file row still exists; resolves on save */
+  }
+}

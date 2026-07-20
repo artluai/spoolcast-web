@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
 import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
-import { mergeKitWithDraft, patchDraftShotRefs, useWorldKitDraft } from '../../lib/kit-draft'
+import { appendDraftVariantRow, mergeKitWithDraft, patchDraftShotRefs, useWorldKitDraft } from '../../lib/kit-draft'
+import { VariantModule, type VariantBase } from './VariantModule'
+import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL_ID } from '../../lib/image-models'
+import { ModelPicker } from './ModelPicker'
 
 const API = API_BASE
 const PROMPTS_PATH = 'working/generation-prompts.json'
@@ -444,6 +447,67 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
   const [refSyncing, setRefSyncing] = useState(false)
   const [kitPickFor, setKitPickFor] = useState<string | null>(null)
+  // EDIT THE OBJECT ITSELF from step 9 — one source of truth, so a variant
+  // or a new take made here lands in the World Kit and shows on every step.
+  const [refEdit, setRefEdit] = useState<{ rowId: string; name: string; mode: 'variant' | 'update' } | null>(null)
+  const [refEditPos, setRefEditPos] = useState<{ x: number; y: number } | undefined>(undefined)
+  const [updInstr, setUpdInstr] = useState('')
+  const [updModel, setUpdModel] = useState(DEFAULT_IMAGE_MODEL_ID)
+  const [updBusy, setUpdBusy] = useState(false)
+  const loadKit = async () => {
+    const out = await fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (out?.ok && Array.isArray(out.data?.kit)) setKitObjs(out.data.kit as KitLite[])
+  }
+  // A generated new take lands as the object's ACTIVE image (new file path).
+  // Poll the kit until the path flips, then every thumbnail is the new take.
+  const watchKitImage = (name: string, oldPath: string) => {
+    let ticks = 0
+    const iv = window.setInterval(async () => {
+      ticks += 1
+      const out = await fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      const fresh = (out?.data?.kit as KitLite[] | undefined)?.find((k) => k.name === name)
+      if (fresh?.image_path && fresh.image_path !== oldPath) {
+        window.clearInterval(iv)
+        setKitObjs(out.data.kit as KitLite[])
+        setSaveNote(`"${name}" updated — the new take is now the active image everywhere.`)
+      } else if (ticks > 60) {
+        window.clearInterval(iv)
+      }
+    }, 5000)
+  }
+  const runUpdateExisting = async () => {
+    if (!refEdit) return
+    const base = kitObjs.find((k) => k.name === refEdit.name)
+    if (!base) return
+    const instruction = updInstr.trim()
+    if (!instruction) return
+    setUpdBusy(true)
+    try {
+      const prompt = `${(base.notes || '').trim()}\n\nChange for this new take: ${instruction}`.trim()
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(), tenant: 'local', action: 'generate_worldkit_ref',
+          ref: refEdit.name, prompt, model: updModel,
+          ...(base.image_path ? { ref_images: [base.image_path] } : {}),
+          allow_cost: true,
+        }),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || (out?.ok === false && !/already running/.test(out?.details || ''))) {
+        throw new Error(out?.error || out?.message || 'Could not start the update generation.')
+      }
+      setSaveNote(`"${refEdit.name}" is regenerating — the new take becomes the active image on every step when it lands.`)
+      watchKitImage(refEdit.name, base.image_path)
+      setRefEdit(null)
+      setUpdInstr('')
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'Update failed.')
+    } finally {
+      setUpdBusy(false)
+    }
+  }
   // Previous generated versions per clip — regeneration archives what it
   // replaces; nothing is ever silently overwritten.
   const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video' }[]>>({})
@@ -1704,6 +1768,19 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     >
                       ×
                     </button>
+                    {ref.name && kitOf(String(ref.name)) ? (
+                      <button
+                        type="button"
+                        className="vg-ref-remove"
+                        style={{ right: 30 }}
+                        title={`Edit ${ref.name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, event.clientX - 340)), y: Math.max(70, event.clientY - 40) })
+                          setRefEdit(refEdit && refEdit.name === ref.name && refEdit.rowId === row.id ? null : { rowId: row.id, name: String(ref.name), mode: 'update' })
+                        }}
+                      >✎</button>
+                    ) : null}
                   </span>
                 )
               }
@@ -1858,6 +1935,32 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         )}
                       </div>
                     </div>
+                    {refEdit && refEdit.rowId === row.id && refEdit.mode === 'update' ? (
+                      <div style={{ border: '1px dashed var(--line-2)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>EDIT {refEdit.name.toUpperCase()}</span>
+                          <button type="button" className="vp-undo" style={{ borderColor: 'var(--accent)', color: 'var(--accent-2)' }}>▾ Update existing</button>
+                          <button type="button" className="vp-undo" title="A NEW kit object derived from this one — one deliberate change, its own history" onClick={() => setRefEdit({ ...refEdit, mode: 'variant' })}>▸ New variant</button>
+                          <button type="button" className="vp-undo" style={{ marginLeft: 'auto' }} onClick={() => setRefEdit(null)}>✕</button>
+                        </div>
+                        <p style={{ fontSize: 11.5, color: 'var(--ink-3)', margin: 0 }}>
+                          Another take of {refEdit.name} — replaces its active image EVERYWHERE (kit, board, shots, prompts) when it lands; the old take stays in its history.
+                        </p>
+                        <textarea
+                          rows={2}
+                          value={updInstr}
+                          onChange={(e) => setUpdInstr(e.target.value)}
+                          placeholder="e.g. show only ONE shoe, not the pair — the model reads a pair as one object"
+                          style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 13 }}
+                        />
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <ModelPicker model={updModel} onChange={setUpdModel} disabled={updBusy} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
+                          <button type="button" className="vp-save" disabled={updBusy || !updInstr.trim()} onClick={() => void runUpdateExisting()}>
+                            {updBusy ? 'Starting…' : '✦ Generate new take'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     {kitPickFor === row.id ? (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', border: '1px dashed var(--line-2)', borderRadius: 10, padding: 10, marginTop: 8 }}>
                         {(() => {
@@ -1901,6 +2004,17 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                               title={`Detach ${name} from this shot — everywhere (plan, shot list, prompts)`}
                               onClick={(e) => { e.stopPropagation(); void editShotRef(row.id, name, { detach: true }).catch((err) => setBuildError(err instanceof Error ? err.message : 'detach failed')) }}
                             >×</button>
+                            <button
+                              type="button"
+                              className="vg-ref-remove"
+                              style={{ right: 30 }}
+                              title={`Edit ${name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, e.clientX - 340)), y: Math.max(70, e.clientY - 40) })
+                                setRefEdit(refEdit?.name === name && refEdit.rowId === row.id ? null : { rowId: row.id, name, mode: 'update' })
+                              }}
+                            >✎</button>
                           </span>
                         ))}
                         {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
@@ -1943,6 +2057,36 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
             })}
           </div>
         ) : null}
+
+        {refEdit?.mode === 'variant' ? (() => {
+          const base = kitObjs.find((k) => k.name === refEdit.name)
+          if (!base) return null
+          return (
+            <VariantModule
+              base={base as VariantBase}
+              kit={kitObjs.filter((k) => k.image_path) as VariantBase[]}
+              initialPos={refEditPos}
+              onClose={() => setRefEdit(null)}
+              onCreated={(newName, instruction) => {
+                appendDraftVariantRow(newName, refEdit.name, instruction)
+                // THE POINT of making the variant here: this clip should use
+                // it — swap it in for the base on this shot; the base object
+                // itself is untouched for every other shot.
+                void (async () => {
+                  try {
+                    await editShotRef(refEdit.rowId, newName)
+                    await editShotRef(refEdit.rowId, refEdit.name, { detach: true })
+                    setSaveNote(`"${newName}" created from ${refEdit.name} and swapped onto ${refEdit.rowId} — its image lands when generation finishes.`)
+                  } catch (err) {
+                    setBuildError(err instanceof Error ? err.message : 'Variant created but the swap failed — attach it from the kit.')
+                  }
+                  await loadKit()
+                })()
+                setRefEdit(null)
+              }}
+            />
+          )
+        })() : null}
 
         {mediaLightbox ? (
           <div className="vg-lightbox" onClick={() => setMediaLightbox(null)}>
