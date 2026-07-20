@@ -427,6 +427,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [loading, setLoading] = useState(true)
   const [buildError, setBuildError] = useState('')
   const [defaultType, setDefaultType] = useState<OutputType>('image')
+  // Video-first: the clips carry their own sound, so there is no narration
+  // track to sync timing from — that action is meaningless here.
+  const [videoFirst, setVideoFirst] = useState(false)
   const [view, setView] = useState<'prompts' | 'gallery'>('prompts')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -849,7 +852,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         const cfg = JSON.parse(sess.data.content)
         const hit = reg?.data?.templates?.find((t: { id?: string; format?: string }) => t.id === String(cfg?.template || ''))
         const policy = String(cfg?.shot_medium || '')
-        if (hit?.format === 'video-first' || policy === 'video') setDefaultType('video')
+        if (hit?.format === 'video-first' || policy === 'video') { setDefaultType('video'); setVideoFirst(true) }
         else if (policy === 'mix') setDefaultType('auto')
         else if (policy === 'image') setDefaultType('image')
       })
@@ -1728,7 +1731,13 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     >
                       Rebuild from shot list
                     </button>
-                    <button type="button" className="vp-undo vg-action-btn" disabled={activeProcess || timingSyncing} onClick={syncAudioTiming}>
+                    <button
+                      type="button"
+                      className="vp-undo vg-action-btn"
+                      disabled={activeProcess || timingSyncing || videoFirst}
+                      title={videoFirst ? 'Video-first — the clips carry their own sound; there is no narration track to sync from.' : undefined}
+                      onClick={syncAudioTiming}
+                    >
                       {timingSyncing ? 'Syncing timing…' : 'Sync timing from narration audio'}
                     </button>
                     <span className={`vg-split-action ${regenNoteOpen ? 'open' : ''}`}>
@@ -1805,6 +1814,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
             <div className="vg-selectionbar">
               <button type="button" className="vp-undo" onClick={toggleAllSelection}>
                 {selected.size === rows.length ? 'Deselect all' : 'Select all'}
+              </button>
+              <button
+                type="button"
+                className="vp-undo"
+                disabled={!rows.some((row) => row.status !== 'image_ready' && row.status !== 'video_ready')}
+                title="Select only the clips with no generated file yet"
+                onClick={() => setSelected(new Set(rows.filter((row) => row.status !== 'image_ready' && row.status !== 'video_ready').map((row) => row.id)))}
+              >
+                Select remaining
               </button>
               <span className="vg-note">{selected.size} selected</span>
               {saveNote ? <span className="vg-save-note">{saveNote}</span> : null}
@@ -2292,11 +2310,14 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
           <div className="vg-gallery">
             {rows.map((row) => {
               const previewMedia = rowPreviewMedia(row)
+              // True proportion: the tile adopts the row's own aspect ratio.
+              const tileAspect = { aspectRatio: (row.aspect || '16:9').replace(':', ' / ') }
               return (
                 <button type="button" className={`vg-tile ${selected.has(row.id) ? 'on' : ''}`} key={row.id} onClick={() => { toggle(row.id); setView('prompts') }}>
                   {previewMedia?.kind === 'video' ? (
                     <video
                       src={previewMedia.src}
+                      style={tileAspect}
                       muted
                       playsInline
                       preload="metadata"
@@ -2318,9 +2339,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       }}
                     />
                   ) : previewMedia?.kind === 'image' ? (
-                    <img src={previewMedia.src} alt="" />
+                    <img src={previewMedia.src} alt="" style={tileAspect} />
                   ) : (
-                    <span>{row.id}</span>
+                    <span style={tileAspect}>{row.id}</span>
                   )}
                   <b>{row.title}</b>
                   <small>{row.status.replace('_', ' ')}</small>

@@ -631,6 +631,13 @@ export function VisualReviewStage({
   // networkUrl -> seekable Blob object URL, once fetched. Preview <video> elements
   // render from here so they can seek; the audio element is pointed at blobs imperatively.
   const [mediaBlobs, setMediaBlobs] = useState<Record<string, string>>({})
+  // Chunks whose narration audio is missing/broken (video-first sessions):
+  // their clip videos are unmuted so the clips' own sound plays instead.
+  const [videoSoundChunks, setVideoSoundChunks] = useState<Set<string>>(new Set())
+  // Expanded mode only: exact pixel height for the preview box, computed by the
+  // SAME starting-size pass that sets the row heights — a percentage chain
+  // through <details> is unreliable (its internal content wrapper breaks it).
+  const [previewFitHeight, setPreviewFitHeight] = useState<number | null>(null)
   // REAL compile/export: the engine's render_with_audit job. State lives in the
   // workflow store (the step footer gates Save/Autopilot on it and it must
   // survive step navigation); progress/error details are transient and local.
@@ -679,6 +686,7 @@ export function VisualReviewStage({
   const mediaPromiseRef = useRef<Map<string, Promise<string>>>(new Map())
   const manualRowSizeIdsRef = useRef<Set<string>>(new Set())
   const manualPanelSizeIdsRef = useRef<Set<string>>(new Set())
+  const manualColumnSizeIdsRef = useRef<Set<string>>(new Set())
   const layoutClampFrameRef = useRef<number | null>(null)
   // Stable handle to the single starting-size pass so Save/Reset (declared above
   // the pass) can invoke the exact same logic initial load uses — no divergence.
@@ -730,10 +738,12 @@ export function VisualReviewStage({
 
     for (const id of rowIds) manualRowSizeIdsRef.current.delete(id)
     for (const id of panelSlotIds) manualPanelSizeIdsRef.current.delete(id)
+    for (const id of columnIds) manualColumnSizeIdsRef.current.delete(id)
     if (savedLayout) {
       // Default for legacy saves (no manual ids stored): every saved size was pinned.
       for (const id of savedLayout.manualRowIds ?? Object.keys(savedLayout.rowSizes)) manualRowSizeIdsRef.current.add(id)
       for (const id of savedLayout.manualPanelIds ?? Object.keys(savedLayout.panelSizes)) manualPanelSizeIdsRef.current.add(id)
+      for (const id of Object.keys(savedLayout.columnSizes)) manualColumnSizeIdsRef.current.add(id)
     }
 
     if (layoutClampFrameRef.current) window.cancelAnimationFrame(layoutClampFrameRef.current)
@@ -937,8 +947,23 @@ export function VisualReviewStage({
   const requestAudioPlay = (audio: HTMLAudioElement) => {
     const token = ++audioPlayRequestRef.current
     void audio.play().catch(() => {
-      // Autoplay blocked (no gesture yet) or the load was superseded — stop cleanly.
       if (audioPlayRequestRef.current !== token || !audio.paused) return
+      // A BROKEN/MISSING narration file (video-first sessions have none) must
+      // not stop the timeline: mark the chunk so its clips play their own
+      // sound, and let the wall clock carry time forward.
+      if (audio.error) {
+        const chunkId = lastAudioChunkRef.current
+        if (chunkId) {
+          setVideoSoundChunks((current) => {
+            if (current.has(chunkId)) return current
+            const next = new Set(current)
+            next.add(chunkId)
+            return next
+          })
+        }
+        return
+      }
+      // Autoplay blocked (no gesture yet) — stop cleanly.
       setPlaying(false)
       setControlsAwake(true)
     })
@@ -1093,11 +1118,12 @@ export function VisualReviewStage({
           audio.load()
         }
         if (!resume) { audioPlayRequestRef.current += 1; audio.pause() }
-        await waitForMedia(audio, ['loadedmetadata', 'canplay'], () => audio.readyState >= 1)
+        // A broken narration file never becomes ready — don't sit on the timeout.
+        await waitForMedia(audio, ['loadedmetadata', 'canplay', 'error'], () => audio.readyState >= 1 || Boolean(audio.error))
         if (seekTokenRef.current !== token) return null
         const localTime = chunkLocalTime(chunk, bounded)
         try { audio.currentTime = localTime } catch { /* ignore */ }
-        await waitForMedia(audio, ['seeked', 'canplay'], () => !audio.seeking && audio.readyState >= 2, 900)
+        await waitForMedia(audio, ['seeked', 'canplay', 'error'], () => (!audio.seeking && audio.readyState >= 2) || Boolean(audio.error), 900)
         if (seekTokenRef.current !== token) return null
       }
     }
@@ -1549,7 +1575,42 @@ export function VisualReviewStage({
           for (const row of otherRows) assign(row, Math.max(resizeMinHeight(row), each))
           return changed ? next : current
         })
+        // The preview's pixel height comes from the SAME numbers this pass just
+        // assigned to its row (~74px of panel chrome above the video).
+        const videoRow = rows.find((row) => row.querySelector('.vr-player-panel'))
+        if (videoRow) {
+          const rowHeight = manualRowSizeIdsRef.current.has(videoRow.dataset.layoutId || '')
+            ? videoRow.getBoundingClientRect().height
+            : Math.max(resizeMinHeight(videoRow), each)
+          setPreviewFitHeight(Math.max(140, Math.round(rowHeight - 74)))
+        }
+        // PORTRAIT: the video column only needs the video's own width — hand
+        // the rest to the side column instead of leaving gutters. Part of the
+        // same single sizing pass; manual drags and saved splits win.
+        const ratio = canvasRatioRef.current
+        const cols = videoRow ? Array.from(videoRow.querySelectorAll<HTMLElement>(':scope > .vr-layout-col')) : []
+        if (ratio && ratio < 1 && videoRow && cols.length === 2) {
+          const videoCol = cols.find((col) => col.querySelector('.vr-player-panel'))
+          const sideCol = cols.find((col) => col !== videoCol)
+          const videoId = videoCol?.dataset.layoutId
+          const sideId = sideCol?.dataset.layoutId
+          if (videoId && sideId && !manualColumnSizeIdsRef.current.has(videoId) && !manualColumnSizeIdsRef.current.has(sideId)) {
+            const rowHeight = Math.max(resizeMinHeight(videoRow), each)
+            // ~74px of chrome above the preview (panel summary + paddings);
+            // +30 breathing room around the video's width.
+            const wantWidth = Math.max(window.innerWidth * 0.2, (rowHeight - 74) * ratio + 30)
+            const totalWidth = Math.max(1, workspace.clientWidth)
+            const videoWeight = Math.min(wantWidth, totalWidth * 0.6)
+            setColumnSizes((current) => {
+              const sideWeight = Math.max(1, totalWidth - videoWeight)
+              if (Math.abs((current[videoId] ?? 0) - videoWeight) < 2 && Math.abs((current[sideId] ?? 0) - sideWeight) < 2) return current
+              return { ...current, [videoId]: videoWeight, [sideId]: sideWeight }
+            })
+          }
+        }
       }
+    } else {
+      setPreviewFitHeight(null)
     }
     // Resize helpers intentionally read the live DOM after layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1651,6 +1712,10 @@ export function VisualReviewStage({
     firstId: string,
     secondId: string,
   ) => {
+    // A hand-dragged column split is the user's — the default-sizing pass
+    // must never overwrite it.
+    manualColumnSizeIdsRef.current.add(firstId)
+    manualColumnSizeIdsRef.current.add(secondId)
     startPairResize(event, 'x', firstId, secondId, columnSizes, setColumnSizes)
   }
 
@@ -1736,6 +1801,15 @@ export function VisualReviewStage({
 
   // Expanded mode fills a fixed-height card, so its rows trade height (zero-sum):
   // dragging the boundary grows one row's basis and pulls clipped sections with it.
+  // Keep the preview's pixel budget tracking a row-height drag when the dragged
+  // boundary moves the player's row (sign says which side of the boundary it's on).
+  const previewFollowsRow = (rowId: string, sign: 1 | -1) => {
+    const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
+    if (!row?.querySelector('.vr-player-panel')) return null
+    const startHeight = row.getBoundingClientRect().height
+    return (delta: number) => setPreviewFitHeight(Math.max(140, Math.round(startHeight + sign * delta - 74)))
+  }
+
   const startReviewRowResize = (
     event: ReactPointerEvent<HTMLButtonElement>,
     firstId: string,
@@ -1743,8 +1817,10 @@ export function VisualReviewStage({
   ) => {
     manualRowSizeIdsRef.current.add(firstId)
     const plan = rowPanelResizePlan(firstId)
+    const follow = previewFollowsRow(firstId, 1) ?? previewFollowsRow(secondId, -1)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
+      follow?.(delta)
     })
   }
 
@@ -1755,8 +1831,10 @@ export function VisualReviewStage({
     manualRowSizeIdsRef.current.add(rowId)
     const plan = rowPanelResizePlan(rowId)
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
+    const follow = previewFollowsRow(rowId, 1)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, row ? resizeMinHeight(row) : 32, (delta) => {
       applyRowPanelResize(plan, delta)
+      follow?.(delta)
     })
   }
 
@@ -2100,7 +2178,12 @@ export function VisualReviewStage({
             <div
               ref={previewRef}
               className={`vr-preview ${playing && !controlsAwake ? 'idle' : ''} ${seeking ? 'seeking' : ''}`}
-              style={{ aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%' }}
+              style={isExpandedCard && !isMobileReview && previewFitHeight
+                // Expanded rows have a JS-assigned height — the sizing pass
+                // hands the preview its exact pixel budget, so the video is
+                // never clipped no matter the row split.
+                ? { aspectRatio: `${canvasRatio}`, height: previewFitHeight, maxHeight: '100%', width: 'auto', margin: '0 auto', maxWidth: '100%' }
+                : { aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%' }}
               onMouseMove={wakeControls}
               onMouseEnter={wakeControls}
               onFocus={wakeControls}
@@ -2112,7 +2195,7 @@ export function VisualReviewStage({
                     className={`vr-media ${segment.id === activeSegment?.id ? 'on' : ''}`}
                     key={segment.id}
                     src={mediaBlobs[segment.mediaSrc] ?? segment.mediaSrc}
-                    muted
+                    muted={!videoSoundChunks.has(segment.chunkId)}
                     playsInline
                     preload="auto"
                     controls={false}
@@ -2244,12 +2327,14 @@ export function VisualReviewStage({
                   setPlaybackTime(segment.start, false)
                 }}
               >
+                {/* True proportion — tiles adopt the canvas ratio (the same
+                    source the player box uses), not a fixed 16:9 crop. */}
                 {segment.mediaType === 'video' ? (
-                  <video src={segment.mediaSrc} muted playsInline preload="metadata" />
+                  <video src={segment.mediaSrc} style={{ aspectRatio: `${canvasRatio}` }} muted playsInline preload="metadata" />
                 ) : segment.mediaType === 'image' ? (
-                  <img src={segment.mediaSrc} alt="" />
+                  <img src={segment.mediaSrc} alt="" style={{ aspectRatio: `${canvasRatio}` }} />
                 ) : (
-                  <span>{segment.id}</span>
+                  <span style={{ aspectRatio: `${canvasRatio}` }}>{segment.id}</span>
                 )}
                 <b>{segment.id}</b>
                 <small>{segment.selectedType} · {segment.duration.toFixed(1)}s</small>
@@ -2333,7 +2418,20 @@ export function VisualReviewStage({
     <div className="vr panel-flat" onClick={(event) => {
       if (event.target === event.currentTarget) setSelectedId('')
     }}>
-      <audio ref={audioRef} preload="metadata" />
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        onError={() => {
+          const chunkId = lastAudioChunkRef.current
+          if (!chunkId) return
+          setVideoSoundChunks((current) => {
+            if (current.has(chunkId)) return current
+            const next = new Set(current)
+            next.add(chunkId)
+            return next
+          })
+        }}
+      />
 
       {loading ? <p className="vp-hint">Loading generated visual timeline...</p> : null}
       {error ? <p className="vp-hint">{error}</p> : null}
