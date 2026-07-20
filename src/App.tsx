@@ -253,13 +253,26 @@ function SpoolcastApp() {
       setContract(FALLBACK_CONTRACT)
       return
     }
+    // LAST GOOD CONTRACT FIRST: the state boots on the bundled explainer
+    // fallback, so an engine hiccup on hard refresh left an ad session
+    // showing the audio-first flow map. The last contract the engine served
+    // for THIS session renders immediately; the fetch then reconfirms.
+    try {
+      const cached = window.localStorage.getItem(`spoolcast-contract:${routeSession}`)
+      if (cached) {
+        const parsed = JSON.parse(cached) as WorkflowContract
+        if (Array.isArray(parsed?.stages) && parsed.stages.length) setContract(parsed)
+      }
+    } catch { /* corrupt cache — the fetch below still wins */ }
     let cancelled = false
     getJson<{ ok?: boolean; data?: { id?: string; contract?: { stages?: unknown[] } } }>(contractUrl())
       .then((out) => {
         if (cancelled) return
         const stages = out?.data?.contract?.stages
         if (out?.ok && Array.isArray(stages) && stages.length) {
-          setContract({ id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] })
+          const next = { id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] }
+          setContract(next)
+          try { window.localStorage.setItem(`spoolcast-contract:${routeSession}`, JSON.stringify(next)) } catch { /* fine */ }
         }
       })
     return () => {
