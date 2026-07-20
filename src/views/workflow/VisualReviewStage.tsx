@@ -1578,7 +1578,12 @@ export function VisualReviewStage({
           // The gallery in the NORMAL view grows to its content (the card just
           // gets taller) — no scroll, no clipping. Expanded keeps the cap.
           else if (slot.panelId === 'gallery' && !isExpandedCard) target = Math.max(slot.minHeight, slot.contentHeight)
-          else if (cappableSection(slot.panelId)) target = Math.max(slot.minHeight, Math.min(slot.contentHeight, cap))
+          else if (cappableSection(slot.panelId)) {
+            target = Math.max(slot.minHeight, Math.min(slot.contentHeight, cap))
+            // Snap to content when the cap would leave a sliver — a default
+            // that hides half a line of text reads as broken, not capped.
+            if (slot.contentHeight - target < 32) target = slot.contentHeight
+          }
           else target = null
           if (target == null) {
             if (slot.id in next) { delete next[slot.id]; changed = true }
@@ -2329,7 +2334,7 @@ export function VisualReviewStage({
         <ReviewPanel
           {...panelDragProps('details', rowId, columnId)}
           className={panelClassName('details', 'vr-details-panel')}
-          title="Visual details"
+          title="Prompt"
           meta={`selected ${activeSegment?.selectedType || 'image'} · showing ${activeSegment?.mediaType || 'missing'}`}
         >
           <p className="vp-active-what">{activeSegment?.prompt || 'No prompt stored for this segment.'}</p>
