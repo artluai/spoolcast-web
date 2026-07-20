@@ -469,6 +469,14 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       if (fresh?.image_path && fresh.image_path !== oldPath) {
         window.clearInterval(iv)
         setKitObjs(out.data.kit as KitLite[])
+        // Refresh the doc's stored reference paths (free, prompt-text-safe)
+        // so thumbs and uploads point at the new take, not the snapshot.
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'sync_prompt_refs' }),
+        }).catch(() => null)
+        await load()
         setSaveNote(`"${name}" updated — the new take is now the active image everywhere.`)
       } else if (ticks > 60) {
         window.clearInterval(iv)
