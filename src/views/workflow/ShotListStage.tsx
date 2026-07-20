@@ -329,7 +329,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       const planned = planRefsById[String(e.pacing_image_id ?? '')]
       if (!planned) continue
       const cur = (e.references ?? []).map(String)
-      const missing = planned.filter((n) => !cur.includes(n))
+      const missing = planned.filter((n) => !cur.includes(n) && kit.some((k) => k.name === n))
       if (missing.length) parts.push(`${e.id}:${missing.join(',')}`)
     }
     const sig = parts.join(';')
@@ -815,7 +815,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     const texts = refs.filter((n) => { const k = find(n); return k ? !k.image_path && !AUD.has(k.kind) : true })
                     const attachedAudio = refs.filter((n) => AUD.has(find(n)?.kind ?? ''))
                     const planned = planRefsById[String(event.pacing_image_id ?? '')] ?? null
-                    const pending = planned ? planned.filter((n) => !refs.includes(n)) : []
+                    const pending = planned ? planned.filter((n) => !refs.includes(n) && find(n)) : []
                     const inherited = kit
                       .filter((k) => AUD.has(k.kind) && k.linked_to && !attachedAudio.includes(k.name))
                       .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))

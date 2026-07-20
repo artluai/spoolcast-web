@@ -842,7 +842,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       const freshest = (ev && planRefsByPid[ev.pid]) || ev?.refs || null
       if (!freshest) continue
       const names = row.references.map((ref) => String(ref.name || '')).filter(Boolean)
-      const missing = freshest.filter((n) => !names.includes(n))
+      // Dangling names (no kit object) are junk, not pending work — the sync
+      // drops them server-side; counting them here would loop forever.
+      const missing = freshest.filter((n) => !names.includes(n) && kitObjs.some((k) => k.name === n))
       if (missing.length) parts.push(`${row.id}:${missing.join(',')}`)
     }
     return parts.join(';')
@@ -1749,7 +1751,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               // not in THIS doc is pending a free sync.
               const ev = shotEvents[row.id]
               const freshest = (ev && planRefsByPid[ev.pid]) || ev?.refs || null
-              const pendingRefs = freshest ? freshest.filter((n) => !namedRefs.includes(n)) : []
+              const pendingRefs = freshest ? freshest.filter((n) => !namedRefs.includes(n) && kitOf(n)) : []
               const renderAssetThumb = ({ ref, index }: { ref: PromptReference; index: number }, variant: 'first_frame' | 'reference') => {
                 const value = referenceValue(ref)
                 const src = referenceSrc(value)
