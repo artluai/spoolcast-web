@@ -265,16 +265,26 @@ function SpoolcastApp() {
       }
     } catch { /* corrupt cache — the fetch below still wins */ }
     let cancelled = false
-    getJson<{ ok?: boolean; data?: { id?: string; contract?: { stages?: unknown[] } } }>(contractUrl())
-      .then((out) => {
-        if (cancelled) return
-        const stages = out?.data?.contract?.stages
-        if (out?.ok && Array.isArray(stages) && stages.length) {
-          const next = { id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] }
-          setContract(next)
-          try { window.localStorage.setItem(`spoolcast-contract:${routeSession}`, JSON.stringify(next)) } catch { /* fine */ }
-        }
-      })
+    // RETRY: a hard refresh can race an engine that is still starting — one
+    // failed fetch must not strand the session on whatever rendered first.
+    const attempt = (triesLeft: number) => {
+      getJson<{ ok?: boolean; data?: { id?: string; contract?: { stages?: unknown[] } } }>(contractUrl())
+        .then((out) => {
+          if (cancelled) return
+          const stages = out?.data?.contract?.stages
+          if (out?.ok && Array.isArray(stages) && stages.length) {
+            const next = { id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] }
+            setContract(next)
+            try { window.localStorage.setItem(`spoolcast-contract:${routeSession}`, JSON.stringify(next)) } catch { /* fine */ }
+          } else if (triesLeft > 0) {
+            window.setTimeout(() => attempt(triesLeft - 1), 2500)
+          }
+        })
+        .catch(() => {
+          if (!cancelled && triesLeft > 0) window.setTimeout(() => attempt(triesLeft - 1), 2500)
+        })
+    }
+    attempt(4)
     return () => {
       cancelled = true
     }

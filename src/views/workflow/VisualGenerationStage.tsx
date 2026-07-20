@@ -521,6 +521,21 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // Previous generated versions per clip — regeneration archives what it
   // replaces; nothing is ever silently overwritten.
   const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video' }[]>>({})
+  // THE PROMPT EACH CLIP WAS ACTUALLY MADE FROM — frozen at submit time by
+  // the engine, never edited by anyone. The textarea above is the WORKING
+  // prompt for the NEXT generation; this is the record of the current one.
+  const [usedPrompts, setUsedPrompts] = useState<Record<string, { prompt: string; model?: string; generated_at?: string }>>({})
+  const loadUsedPrompts = async (ids: string[]) => {
+    const entries = await Promise.all(ids.map(async (id) => {
+      const out = await fetch(fileUrl(`source/generated-assets/videos/${id}.json`)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      try {
+        const j = JSON.parse(out?.data?.content ?? 'null')
+        if (j?.prompt) return [id, { prompt: String(j.prompt), model: j.model, generated_at: j.generated_at }] as const
+      } catch { /* no sidecar for this clip (pre-provenance generation) */ }
+      return null
+    }))
+    setUsedPrompts(Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => !!e)))
+  }
   const loadMediaHistory = async () => {
     const out = await fetch(`${API}/media-history?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     if (out?.ok && out.data?.history) setMediaHistory(out.data.history)
@@ -655,6 +670,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
   useEffect(() => { if (!activeProcess) void loadMediaHistory() }, [activeProcess])
+
   // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
   // flush together the moment the job ends (the batch parallelizes inside).
   const [genQueue, setGenQueue] = useState<{ id: string; type: 'image' | 'video' }[]>([])
@@ -866,6 +882,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // A diff that survives an attempt retries on a cooldown (a one-shot guard
   // left chips stuck amber after any hiccup); a few tries per distinct diff
   // caps hard-failure loops — the manual button stays as the last resort.
+  useEffect(() => {
+    const ids = rows.filter((r) => r.type === 'video').map((r) => r.id)
+    if (ids.length && !activeProcess) void loadUsedPrompts(ids)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length, activeProcess])
   const autoSyncRef = useRef({ sig: '', at: 0, tries: 0 })
   useEffect(() => {
     if (!pendingSignature || refSyncing || activeProcess) return
@@ -2043,6 +2064,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           </button>
                         ) : null}
                       </div>
+                    ) : null}
+                    {usedPrompts[row.id] ? (
+                      <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
+                        <summary>Prompt used for this video{usedPrompts[row.id].generated_at ? ` · ${usedPrompts[row.id].generated_at!.slice(5, 16).replace('T', ' ')}` : ''}</summary>
+                        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-2)', margin: '8px 0 0', fontFamily: 'var(--mono)' }}>{usedPrompts[row.id].prompt}</pre>
+                      </details>
                     ) : null}
                     {(mediaHistory[row.id] ?? []).length ? (
                       <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
