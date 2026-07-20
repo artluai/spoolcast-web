@@ -1065,8 +1065,11 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vr-preview.idle .vr-player-controls { opacity: 0; transform: translateY(8px); pointer-events: none; }
 .vr-cc { height: 34px; min-height: 34px; min-width: 42px; padding: 0 12px; box-sizing: border-box; border: 1px solid rgba(122,162,255,.34); border-radius: 7px; background: rgba(10,12,18,.52); color: var(--ink); font-family: var(--mono); font-size: 11px; cursor: pointer; box-shadow: 0 6px 22px rgba(0,0,0,.22); display: inline-flex; align-items: center; justify-content: center; }
 .vr-cc:hover, .vr-cc.on { border-color: var(--accent); background: var(--accent); color: #071021; }
-/* Full-width thin white bar on its own line, like the native player. */
-.vr-player-controls input[type="range"] { flex: 1 1 100%; min-width: 0; width: auto; height: 3px; accent-color: #fff; cursor: pointer; }
+/* Full-width thin white bar on its own line, like the native player —
+   custom-drawn so the thumb stays SMALL (the default one dwarfed the ▶). */
+.vr-player-controls input[type="range"] { flex: 1 1 100%; min-width: 0; width: auto; height: 3px; appearance: none; -webkit-appearance: none; background: rgba(255,255,255,.28); border-radius: 2px; cursor: pointer; }
+.vr-player-controls input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.vr-player-controls input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 0; }
 .vr-preview:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; background: #000; }
 .vr-preview:fullscreen .vr-media.on { object-fit: contain; }
 .vr-preview:fullscreen.idle::after,

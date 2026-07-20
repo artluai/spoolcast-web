@@ -1006,6 +1006,14 @@ export function VisualReviewStage({
     applyDefaultSizesRef.current()
   }, [galleryFit, galleryFitCols])
 
+  // Prompts differ in length per clip — when the selection changes while
+  // PAUSED, refit the sections to the new content. During playback heights
+  // deliberately stay put (no jitter); the pass runs once playback stops.
+  useEffect(() => {
+    if (playing) return
+    applyDefaultSizesRef.current()
+  }, [activeSegment?.id, playing])
+
   const setVideoRef = (segmentId: string, node: HTMLVideoElement | null) => {
     if (node) videoRefs.current.set(segmentId, node)
     else videoRefs.current.delete(segmentId)
