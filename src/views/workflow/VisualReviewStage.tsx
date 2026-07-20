@@ -1476,7 +1476,8 @@ export function VisualReviewStage({
     onPointerCancel: () => { if (scrubActiveRef.current) endScrub() },
   }
 
-  const layoutResizerSize = 10
+  // Keep in sync with .vr-layout-resizer-row height in index.css.
+  const layoutResizerSize = 8
 
   const collapsedHeaderHeight = (target: HTMLElement, fallback = 32) => {
     const panel = target.classList.contains('vr-panel-slot')
@@ -1711,10 +1712,10 @@ export function VisualReviewStage({
         const sideId = sideCol?.dataset.layoutId
         if (videoId && sideId && !manualColumnSizeIdsRef.current.has(videoId) && !manualColumnSizeIdsRef.current.has(sideId)) {
           // Expanded rows are pass-sized; the normal view's preview is capped
-          // at 78vh. Either way ~74px of chrome sits above the video, +30
+          // at 78vh. Either way ~70px of chrome sits above the video, +30
           // breathing room around its width.
           const previewHeight = isExpandedCard && !isMobileReview
-            ? Math.max(140, (assignedVideoRowHeight ?? videoRow.getBoundingClientRect().height) - 74)
+            ? Math.max(140, (assignedVideoRowHeight ?? videoRow.getBoundingClientRect().height) - 70)
             : window.innerHeight * 0.78
           const wantWidth = Math.max(window.innerWidth * 0.2, previewHeight * ratio + 30)
           const totalWidth = Math.max(1, workspace.clientWidth)
@@ -1969,7 +1970,22 @@ export function VisualReviewStage({
     secondId: string,
   ) => {
     manualPanelSizeIdsRef.current.add(firstId)
-    startPairResize(event, 'y', firstId, secondId, panelSizes, setPanelSizes)
+    // Shrinking the upper section frees space — the section BELOW absorbs it
+    // immediately, up to what its content actually needs. Otherwise a clipped
+    // lower section stays clipped over a growing void.
+    const second = document.querySelector<HTMLElement>(`[data-layout-id="${secondId}"]`)
+    const secondStart = second ? second.getBoundingClientRect().height : 0
+    const secondContent = second ? resizeContentHeight(second, resizeMinHeight(second)) : 0
+    startPairResize(event, 'y', firstId, secondId, panelSizes, setPanelSizes, (delta) => {
+      if (!second || secondContent <= secondStart) return
+      const target = Math.min(secondContent, Math.max(secondStart, secondStart - delta))
+      manualPanelSizeIdsRef.current.add(secondId)
+      setPanelSizes((current) => (
+        Math.abs((current[secondId] ?? secondStart) - target) > 0.5
+          ? { ...current, [secondId]: target }
+          : current
+      ))
+    })
   }
 
   // Toggling open/closed only changes intent; the unified pass (next frame) sizes
