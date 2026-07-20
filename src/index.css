@@ -1225,7 +1225,13 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .detail-card.step-check.full .vr-panel-slot:has(> .vr-panel[open]) > .vr-panel > .vr-panel-body { max-height: calc(100cqh - 32px); overflow: auto; }
 .detail-card.step-check.full .vr-player { min-width: 0; min-height: 0; margin: 0; }
 .detail-card.step-check.full .vr-preview { width: 100%; height: auto; max-height: 100%; aspect-ratio: 16 / 9; }
-.detail-card.step-check.full .vr-panel-slot:has(> .vr-player-panel[open]) .vr-preview { height: calc(100cqh - 38px); }
+.detail-card.step-check.full .vr-panel-slot:has(> .vr-player-panel[open]) .vr-preview,
+.vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-player-panel[open]) .vr-preview { height: calc(100cqh - 38px); max-height: none; }
+/* A row with a dragged height clips at its edge; the video slot becomes a
+   size container so the preview tracks the row in ANY view. */
+.vr-layout-row.is-row-sized { overflow: hidden; }
+.vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-panel[open]) { container-type: size; }
+.vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-panel[open]) > .vr-panel > .vr-panel-body { max-height: calc(100cqh - 32px); overflow: auto; }
 .detail-card.step-check.full .vr-preview:hover .vr-player-controls,
 .detail-card.step-check.full .vr-preview:focus-within .vr-player-controls { opacity: 1; transform: none; pointer-events: auto; }
 .detail-card.step-check.full .vr-player-controls { bottom: 18px; }

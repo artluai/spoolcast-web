@@ -1987,6 +1987,25 @@ export function VisualReviewStage({
     }, expandedRowMaxHeight(rowId))
   }
 
+  // Normal view: the VIDEO row gets a real height drag — the row stores its
+  // height, the video follows it (container units), and sections only give
+  // way once pinched. Other rows keep the additive model (the card grows).
+  const startNormalRowResize = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    rowId: string,
+  ) => {
+    const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
+    if (!row?.querySelector('.vr-player-panel')) {
+      startRowAdditiveResize(event, rowId)
+      return
+    }
+    manualRowSizeIdsRef.current.add(rowId)
+    const plan = rowPanelResizePlan(rowId)
+    startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, resizeMinHeight(row), (delta) => {
+      applyRowPanelResize(plan, delta)
+    })
+  }
+
   // Normal/mobile height is free (the card just grows), so a row-height drag is
   // additive: the drag delta flows straight into the row's clipped cappable
   // sections — across ALL columns, including single-section ones — up to content.
@@ -2623,7 +2642,9 @@ export function VisualReviewStage({
             <Fragment key={row.id}>
               <div
                 data-layout-id={row.id}
-                className={`vr-layout-row vr-layout-row-${row.id} ${dropTarget?.kind === 'new-row' && dropTarget.rowId === row.id ? `is-drop-target drop-${dropTarget.position}` : ''}`}
+                // is-row-sized: this row has an explicit dragged height — the
+                // video inside sizes to it (container units) instead of 78vh.
+                className={`vr-layout-row vr-layout-row-${row.id}${rowSizes[row.id] ? ' is-row-sized' : ''} ${dropTarget?.kind === 'new-row' && dropTarget.rowId === row.id ? `is-drop-target drop-${dropTarget.position}` : ''}`}
                 style={layoutSizeStyle(row.id, rowSizes)}
               >
                 {row.columns.map((column, columnIndex) => (
@@ -2689,7 +2710,7 @@ export function VisualReviewStage({
                   className={`vr-layout-resizer vr-layout-resizer-row ${dropTarget?.kind === 'new-row' && dropTarget.rowId === row.id ? 'is-drop-target' : ''}`}
                   onPointerDown={(event) => (isExpandedCard && !isMobileReview)
                     ? startReviewRowResize(event, row.id, layoutRows[rowIndex + 1].id)
-                    : startRowAdditiveResize(event, row.id)}
+                    : startNormalRowResize(event, row.id)}
                   onDragOver={(event) => dragNewRowOver(event, row.id, 'after')}
                   onDrop={(event) => dropPanelOnTarget(event, { kind: 'new-row', rowId: row.id, position: 'after' })}
                   title="Drag to resize adjacent rows"
@@ -2701,7 +2722,7 @@ export function VisualReviewStage({
                   className="vr-layout-resizer vr-layout-resizer-row vr-layout-resizer-end"
                   onPointerDown={(event) => (isExpandedCard && !isMobileReview)
                     ? startReviewLastRowResize(event, row.id)
-                    : startRowAdditiveResize(event, row.id)}
+                    : startNormalRowResize(event, row.id)}
                   onDragOver={(event) => dragNewRowOver(event, row.id, 'after')}
                   onDrop={(event) => dropPanelOnTarget(event, { kind: 'new-row', rowId: row.id, position: 'after' })}
                   title="Drag to resize this row"
