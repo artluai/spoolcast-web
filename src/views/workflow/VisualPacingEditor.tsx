@@ -302,6 +302,10 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // re-measured on resize and settle timers; equality guard stops loops.
   const [mapSel, setMapSel] = useState('')
   const [mapAI, setMapAI] = useState(false)
+  // An AI mapping that would DETACH existing references must be confirmed —
+  // removals are shown in a popup before anything is applied. (Hook lives
+  // ABOVE the no-draft early return: hooks run in call order.)
+  const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
   // null = no user preference yet: hidden by default on the mapping board
   // (the board is the star there), shown by default on script/table.
   const [tlOpen, setTlOpen] = useState<boolean | null>(null)
@@ -807,9 +811,6 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }
   // ✦ Let AI decide: the engine proposes a full shot→refs mapping (paid call,
   // suggest_ref_map). It is APPLIED as one undoable edit — Undo is the veto.
-  // An AI mapping that would DETACH existing references must be confirmed —
-  // removals are shown in a popup before anything is applied.
-  const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
   const applyMapping = (mapping: Record<string, string[]>) => {
     const next = clone()
     for (const c of next.chunks)
