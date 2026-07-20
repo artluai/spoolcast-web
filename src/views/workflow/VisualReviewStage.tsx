@@ -2404,7 +2404,6 @@ export function VisualReviewStage({
           <p className="vp-active-refs">
             slot {(activeSegment?.duration || 0).toFixed(1)}s
             {activeSegment?.generatedDuration ? ` · generated ${activeSegment.generatedDuration.toFixed(1)}s` : ''}
-            {activeSegment?.firstWord || activeSegment?.lastWord ? ` · speaks “${activeSegment.firstWord} … ${activeSegment.lastWord}”` : ''}
           </p>
         </ReviewPanel>
       )
