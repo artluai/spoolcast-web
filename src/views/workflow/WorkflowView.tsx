@@ -64,7 +64,6 @@ export function WorkflowView({
   activeStep: rawActiveStep,
   apiStatus,
   apiLoading,
-  isBlocked,
   setupMode,
   showName,
   castData,
@@ -87,7 +86,6 @@ export function WorkflowView({
   activeStep: Step
   apiStatus: WorkflowApiStatus | null
   apiLoading: boolean
-  isBlocked: boolean
   setupMode: SetupMode
   showName: string
   castData: (typeof castByShow)['spoolcast dev log']
@@ -988,8 +986,10 @@ export function WorkflowView({
             <button disabled={selectableIndex <= 0} onClick={() => setSelected(orderedSteps[selectableIndex - 1].id)}>
               ‹ Previous
             </button>
+            {/* Next is pure NAVIGATION — the sidebar lets you open any step,
+                so a blocked current step must not freeze this button. */}
             <button
-              disabled={selectableIndex >= orderedSteps.length - 1 || isBlocked}
+              disabled={selectableIndex >= orderedSteps.length - 1}
               onClick={() => setSelected(orderedSteps[selectableIndex + 1].id)}
             >
               Next ›

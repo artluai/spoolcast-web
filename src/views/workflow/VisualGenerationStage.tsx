@@ -121,10 +121,16 @@ const imageModels = [
   { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', note: 'image · strong prompt following' },
 ]
 
-// Prompt limits per kie.ai docs (both seedance models): 3–20,000 characters.
+// Prompt/duration limits per kie.ai docs — each model enforces its own cap
+// at submit, so the counter must show the limit of the model the ROW uses.
 const videoModels = [
   { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 15s', maxSeconds: 15, maxChars: 20000 },
   { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 15s', maxSeconds: 15, maxChars: 20000 },
+  { id: 'kling-3.0', label: 'Kling 3.0', note: 'video · std/pro/4K · max 15s · prompt ≤2,500', maxSeconds: 15, maxChars: 2500 },
+  { id: 'kling-3.0-turbo', label: 'Kling 3.0 Turbo', note: 'video · faster kling · max 15s · one image only', maxSeconds: 15, maxChars: 2500 },
+  { id: 'veo-3.1', label: 'Veo 3.1', note: 'video · always with audio · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
+  { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', note: 'video · faster veo · 4/6/8s only', maxSeconds: 8, maxChars: 5000 },
+  { id: 'happyhorse-1.1', label: 'HappyHorse 1.1', note: 'video · up to 9 refs · max 15s', maxSeconds: 15, maxChars: 5000 },
 ]
 
 function modelLabel(models: { id: string; label: string }[], id: string) {
@@ -133,6 +139,10 @@ function modelLabel(models: { id: string; label: string }[], id: string) {
 
 function selectedVideoModelLimit(modelId: string) {
   return videoModels.find((model) => model.id === modelId)?.maxSeconds ?? 8
+}
+
+function videoModelMaxChars(modelId: string) {
+  return videoModels.find((model) => model.id === modelId)?.maxChars ?? 20000
 }
 
 function rowDurationSeconds(row: PromptRow) {
@@ -1950,10 +1960,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           </span>
                         ) : null}
                         <span
-                          style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: row.draftText.length > 20000 || row.draftText.trim().length < 3 ? 'var(--red, #e5534b)' : 'var(--ink-3)' }}
-                          title="Prompt length vs the model's limit (kie: 3–20,000 characters)"
+                          style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: row.draftText.length > videoModelMaxChars(row.mediaModel) || row.draftText.trim().length < 3 ? 'var(--red, #e5534b)' : 'var(--ink-3)' }}
+                          title="Prompt length vs this row's model limit (kie docs)"
                         >
-                          {row.draftText.length.toLocaleString()} / 20,000
+                          {row.draftText.length.toLocaleString()} / {videoModelMaxChars(row.mediaModel).toLocaleString()}
                         </span>
                         <button
                           type="button"
@@ -1962,29 +1972,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title="Opens a note — tell the AI how this prompt should change (uses model credits)"
                           onClick={() => { setRowAiFor(rowAiFor === row.id ? null : row.id); setRowAiNote('') }}
                         >
-                          {rowAiBusy === row.id ? 'Updating…' : '✦ Update prompt with AI'}
+                          ✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}
                         </button>
-                        {row.type === 'image' ? (
-                          <button
-                            type="button"
-                            className="vp-undo vg-generate-main"
-                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating'}
-                            title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
-                            onClick={() => queueRowGeneration(row.id, 'image')}
-                          >
-                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="vp-undo vg-generate-main"
-                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating' || videoTooLong(row)}
-                            title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, videoModel)} for this row`}
-                            onClick={() => queueRowGeneration(row.id, 'video')}
-                          >
-                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
-                          </button>
-                        )}
                         </span>
                       </div>
                       {rowAiFor === row.id ? (
@@ -1995,9 +1984,13 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             placeholder="Tell the AI what to change — e.g. focus on one shoe, slower motion, tighter framing..."
                             rows={3}
                           />
-                          <button type="button" className="vp-undo" disabled={rowAiBusy === row.id || !rowAiNote.trim()} onClick={() => void rowAiUpdate(row.id)}>
-                            {rowAiBusy === row.id ? 'Updating…' : '✦ Update prompt with AI'}
-                          </button>
+                          {/* Step-5 pattern: while the improve panel is open,
+                              improving IS the action — one vp-save, bottom right. */}
+                          <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
+                            <button type="button" className="vp-save" disabled={rowAiBusy === row.id || !rowAiNote.trim()} onClick={() => void rowAiUpdate(row.id)}>
+                              {rowAiBusy === row.id ? (<><span className="spin" /> Improving…</>) : '✦ Improve prompt'}
+                            </button>
+                          </div>
                         </div>
                       ) : null}
                     </div>
@@ -2145,6 +2138,31 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         ) : null}
                       </div>
                     ) : null}
+                    {/* THE row action, bottom right — above the collapsed
+                        history sections, same spot as every other module. */}
+                    <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                      {row.type === 'image' ? (
+                        <button
+                          type="button"
+                          className="vp-undo vg-generate-main"
+                          disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating'}
+                          title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
+                          onClick={() => queueRowGeneration(row.id, 'image')}
+                        >
+                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="vp-undo vg-generate-main"
+                          disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating' || videoTooLong(row)}
+                          title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, row.mediaModel)} for this row`}
+                          onClick={() => queueRowGeneration(row.id, 'video')}
+                        >
+                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
+                        </button>
+                      )}
+                    </div>
                     {usedPrompts[row.id] ? (
                       <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
                         <summary>Prompt used for this video{usedPrompts[row.id].generated_at ? ` · ${usedPrompts[row.id].generated_at!.slice(5, 16).replace('T', ' ')}` : ''}</summary>

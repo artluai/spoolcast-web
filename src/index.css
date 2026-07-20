@@ -1497,7 +1497,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-att:focus-within .vp-map-att-top, .vp-map-att:focus-within .vp-map-att-ov { opacity: 1; pointer-events: auto; }
 .vp-map-att.ff .vp-map-att-ov { opacity: 1; pointer-events: auto; }
 /* Text attachments: associated with the scene, NOT reference images. */
-.vp-map-txtatt { position: relative; align-self: flex-start; border: 1px dashed var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 9px 26px 9px 11px; max-width: 200px; }
+.vp-map-txtatt { position: relative; align-self: flex-start; border: 1px dashed var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 9px 11px; max-width: 200px; }
+/* Extra right room ONLY where the hover ✕ actually sits (the board); the
+   step 8/9 read-only cards stay symmetric. */
+.vp-map-txtatt:has(.vp-map-detach) { padding-right: 26px; }
 .vp-map-txtatt .vp-map-attname { display: block; margin-top: 4px; }
 .vp-map-txtatt .txt-notes { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 10.5px; color: var(--ink-3); line-height: 1.35; margin-top: 3px; }
 .vp-map-txtatt .vp-map-detach { position: absolute; top: 6px; right: 6px; opacity: 0; pointer-events: none; transition: opacity .12s; }

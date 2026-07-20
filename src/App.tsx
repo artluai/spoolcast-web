@@ -447,7 +447,6 @@ function SpoolcastApp() {
   const castData =
     castByShow[showName as keyof typeof castByShow] ?? castByShow['standalone']
   const activeStep = steps.find((step) => step.id === selected) ?? steps[0]
-  const isBlocked = apiStatus?.data?.status === 'blocked'
 
   useEffect(() => {
     document.body.classList.toggle('profile-open', profileOpen)
@@ -716,7 +715,6 @@ function SpoolcastApp() {
                 activeStep={activeStep}
                 apiStatus={apiStatus}
                 apiLoading={apiLoading}
-                isBlocked={isBlocked}
                 setupMode={setupMode}
                 showName={showName}
                 castData={castData}
