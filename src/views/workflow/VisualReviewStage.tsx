@@ -945,31 +945,46 @@ export function VisualReviewStage({
   }
 
   // Fit to container: the largest tile size where EVERY tile fits a bounded
-  // box — BOTH dimensions. The height bound is the panel's real budget (its
-  // slot in expanded, one-third of the screen in the normal view where the
-  // slot otherwise grows with content), floored at a barely-readable minimum.
+  // box — BOTH dimensions, MEASURED, never estimated: the per-tile label
+  // chrome comes from a real tile in the DOM, and the sizing pass then snaps
+  // the slot to the packed grid, so tiles SHRINK to fit instead of the box
+  // clipping them. Floored at a barely-readable minimum (then it scrolls).
   const computeGalleryFit = useCallback(() => {
     const strip = galleryStripRef.current
-    if (!strip) return
+    const slot = strip?.closest<HTMLElement>('.vr-panel-slot')
+    if (!strip || !slot) return
     const count = Math.max(1, segments.length)
     const width = strip.clientWidth
-    const slot = strip.closest<HTMLElement>('.vr-panel-slot')
-    const bound = Math.min(slot?.clientHeight ?? strip.clientHeight, window.innerHeight / 3)
-    const height = Math.max(120, bound - 76)
+    // Chrome above the grid inside the slot (summary + paddings), measured.
+    const stripTop = strip.getBoundingClientRect().top - slot.getBoundingClientRect().top
+    // In the normal view the slot grows with content, so the box is a third
+    // of the screen; in expanded the slot IS the box.
+    const bound = isExpandedCard && !isMobileReview
+      ? slot.clientHeight
+      : Math.min(slot.clientHeight, window.innerHeight / 3)
+    const height = Math.max(100, bound - stripTop - 4)
+    // Real label-block height (title + meta + borders) from an actual tile.
+    const sample = strip.querySelector<HTMLElement>('button')
+    const sampleMedia = sample?.querySelector<HTMLElement>('img, video, span')
+    const labelBlock = sample && sampleMedia
+      ? Math.max(24, sample.getBoundingClientRect().height - sampleMedia.getBoundingClientRect().height)
+      : 46
     const gap = 10
-    const labelBlock = 42
     const minTile = 56
     const ratio = canvasRatioRef.current || 16 / 9
+    // MORE columns than tiles is a valid move: empty columns shrink every
+    // tile, which is how a short-but-wide box fits a single row.
     let pick: number | null = null
-    for (let cols = 1; cols <= count; cols++) {
+    for (let cols = 1; ; cols++) {
       const tileW = (width - (cols - 1) * gap) / cols
       if (tileW < minTile) break
       const rowsNeeded = Math.ceil(count / cols)
       const tileH = tileW / ratio + labelBlock
-      if (rowsNeeded * tileH + (rowsNeeded - 1) * gap <= height) { pick = cols; break }
+      if (rowsNeeded * tileH + (rowsNeeded - 1) * gap <= height - 8) { pick = cols; break }
     }
-    setGalleryFitCols(pick ?? Math.max(1, Math.min(count, Math.floor((width + gap) / (minTile + gap)))))
-  }, [segments.length])
+    // Nothing fits even shrunken: minimum-size tiles, and the grid scrolls.
+    setGalleryFitCols(pick ?? Math.max(1, Math.floor((width + gap) / (minTile + gap))))
+  }, [isExpandedCard, isMobileReview, segments.length])
 
   const toggleGalleryFit = () => {
     setGalleryFit((current) => {
@@ -982,10 +997,14 @@ export function VisualReviewStage({
 
   useEffect(() => {
     if (galleryFit) computeGalleryFit()
-    // The gallery slot's own height depends on the packed grid — re-run the
-    // one sizing pass so the slot snaps to it (and back when Fit turns off).
-    applyDefaultSizesRef.current()
   }, [computeGalleryFit, galleryFit, isExpandedCard])
+
+  // AFTER the packed grid is in the DOM (fit-cols state landed), re-run the
+  // one sizing pass so the slot snaps to the grid's true height — and back
+  // to content height when Fit turns off. Nothing left to clip either way.
+  useEffect(() => {
+    applyDefaultSizesRef.current()
+  }, [galleryFit, galleryFitCols])
 
   const setVideoRef = (segmentId: string, node: HTMLVideoElement | null) => {
     if (node) videoRefs.current.set(segmentId, node)
