@@ -807,6 +807,17 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   }
   // ✦ Let AI decide: the engine proposes a full shot→refs mapping (paid call,
   // suggest_ref_map). It is APPLIED as one undoable edit — Undo is the veto.
+  // An AI mapping that would DETACH existing references must be confirmed —
+  // removals are shown in a popup before anything is applied.
+  const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
+  const applyMapping = (mapping: Record<string, string[]>) => {
+    const next = clone()
+    for (const c of next.chunks)
+      for (const b of c.beats)
+        for (const i of b.images)
+          if (Array.isArray(mapping[i.id])) i.refs = mapping[i.id].join(', ')
+    apply(next)
+  }
   const runMapAI = async () => {
     setMapAI(true)
     try {
@@ -818,12 +829,16 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
       const out = await r.json().catch(() => null)
       const mapping = out?.data?.mapping
       if (!r.ok || out?.ok === false || !mapping) return
-      const next = clone()
-      for (const c of next.chunks)
-        for (const b of c.beats)
-          for (const i of b.images)
-            if (Array.isArray(mapping[i.id])) i.refs = mapping[i.id].join(', ')
-      apply(next)
+      const removals: { shot: string; names: string[] }[] = []
+      for (const img of images) {
+        const proposed = mapping[img.id]
+        if (!Array.isArray(proposed)) continue
+        const cur = refsOf(img)
+        const gone = cur.filter((n) => !proposed.map((x: string) => x.replace(/^\^/, '')).includes(n))
+        if (gone.length) removals.push({ shot: img.id, names: gone })
+      }
+      if (removals.length) setMapProposal({ mapping, removals })
+      else applyMapping(mapping)
     } catch {
       /* engine offline — the board still maps by hand */
     } finally {
@@ -2022,7 +2037,28 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             />
           ) : null}
 
-          {lightbox ? (
+          {mapProposal ? (
+        <div className="modal-scrim">
+          <div className="confirm-modal" style={{ minWidth: 460 }}>
+            <span className="need">CONFIRM</span>
+            <h3>The AI mapping removes references</h3>
+            <p>Applying this mapping would detach the following from their shots. Everything else is additions or reorders.</p>
+            {mapProposal.removals.map((r) => (
+              <p key={r.shot} style={{ margin: '6px 0', fontSize: 13 }}>
+                <b style={{ fontFamily: 'var(--mono)' }}>{r.shot}</b>
+                <span style={{ color: 'var(--ink-3)' }}> − {r.names.join(', ')}</span>
+              </p>
+            ))}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" className="vp-undo" onClick={() => setMapProposal(null)}>Cancel</button>
+              <button type="button" className="vp-save" onClick={() => { applyMapping(mapProposal.mapping); setMapProposal(null) }}>
+                Apply mapping (undoable)
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {lightbox ? (
             <div className="vp-var-overlay" onClick={() => setLightbox('')}>
               <img className="vp-lightbox" src={contentUrl(lightbox)} alt="" />
             </div>
