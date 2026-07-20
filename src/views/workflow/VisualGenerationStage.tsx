@@ -1844,12 +1844,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         onBlur={() => persistDraft(row.id)}
                         spellCheck={false}
                       />
-                      <div className="vg-row-actions">
-                        {row.status === 'generating' ? (
-                          <span className="vg-row-run">
-                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
-                          </span>
-                        ) : null}
+                      <div className="vg-row-actions" style={{ justifyContent: 'space-between', margin: '4px 0 10px' }}>
+                        <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <button
                           type="button"
                           className="vp-undo"
@@ -1868,6 +1864,16 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'first_frame')} />
                           </label>
                         ) : null}
+                        </span>
+                        <span style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto' }}>
+                        {row.status === 'generating' ? (
+                          <span className="vg-row-run">
+                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
+                          </span>
+                        ) : null}
+                        <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }} title="Prompt length">
+                          {row.draftText.length.toLocaleString()} chars
+                        </span>
                         {row.type === 'image' ? (
                           <button
                             type="button"
@@ -1889,52 +1895,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
                           </button>
                         )}
+                        </span>
                       </div>
                     </div>
 
-                    {(mediaHistory[row.id] ?? []).length ? (
-                      <details className="vp-section" style={{ marginTop: 10 }}>
-                        <summary className="vp-section-sum">
-                          <span className="vp-sec-title">Previous versions</span>
-                          <span className="vp-section-count">{(mediaHistory[row.id] ?? []).length}</span>
-                        </summary>
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-                          {(mediaHistory[row.id] ?? []).map((v) => {
-                            const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
-                            const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
-                            return (
-                              <div key={v.path} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                                <div
-                                  style={{
-                                    aspectRatio: row.aspect ? row.aspect.replace(':', ' / ') : '9 / 16',
-                                    height: 132, flex: 'none', border: '1px solid var(--line-2)', borderRadius: 8, overflow: 'hidden',
-                                    background: 'var(--bg-4)', cursor: 'zoom-in', position: 'relative', lineHeight: 0,
-                                  }}
-                                  title={`Archived ${when} — click to view full size`}
-                                  onClick={() => setMediaLightbox({ kind: v.kind, src })}
-                                >
-                                  {v.kind === 'video' ? (
-                                    <video src={src} muted playsInline preload="auto" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                                  ) : (
-                                    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, alignSelf: 'stretch' }}>
-                                  <span style={{ fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{when}</span>
-                                  <button
-                                    type="button"
-                                    className="vp-undo"
-                                    style={{ fontSize: 9, padding: '2px 7px' }}
-                                    title="Make this the active version again (the current one is archived, not lost)"
-                                    onClick={() => void restoreVersion(row.id, v.path)}
-                                  >restore</button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </details>
-                    ) : null}
+
                                         {refEdit && refEdit.rowId === row.id && refEdit.mode === 'update' ? (
                       <div style={{ border: '1px dashed var(--line-2)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2015,16 +1980,19 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         ))}
                         {firstFrameEntries.map((entry) => renderAssetThumb(entry, 'first_frame'))}
                         {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
-                        {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length ? <span>no reference images attached</span> : null}
+                        {textAssoc.map(({ name, index }) => (
+                          <span key={`t-${index}`} className="vp-map-txtatt" title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
+                            <span className="vp-map-chip">{kitOf(name)?.kind || 'ref'}</span>
+                            <span className="vp-map-attname">{name}</span>
+                            {kitOf(name)?.notes ? <span className="txt-notes">{kitOf(name)!.notes}</span> : null}
+                          </span>
+                        ))}
+                        {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length && !textAssoc.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
                     {textAssoc.length || audioAssoc.length || audioInherited.length || pendingRefs.length ? (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, minWidth: 0 }}>
-                        {textAssoc.map(({ name, index }) => (
-                          <span key={`t-${index}`} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
-                            {kitOf(name)?.kind || 'ref'} · {name}
-                          </span>
-                        ))}
+
                         {audioAssoc.map((n) => (
                           <span key={`a-${n}`} className="vp-undo" style={{ cursor: 'default' }} title={kitOf(n)?.notes || `${n} — sound direction + reference audio for this clip`}>
                             ♪ {n} · this clip
@@ -2046,6 +2014,60 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           </button>
                         ) : null}
                       </div>
+                    ) : null}
+                    {(mediaHistory[row.id] ?? []).length ? (
+                      <details className="vp-section" style={{ borderTop: 'none', marginTop: 6 }}>
+                        <summary className="vp-section-sum" style={{ padding: '4px 0 0' }}>
+                          <span className="vp-sec-title">Previous versions</span>
+                          <span className="vp-section-count">{(mediaHistory[row.id] ?? []).length}</span>
+                        </summary>
+                        <div className="vg-refs" style={{ marginTop: 8 }}>
+                          {(mediaHistory[row.id] ?? []).map((v) => {
+                            const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
+                            const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
+                            return (
+                              <span key={v.path} className="vg-ref-thumb">
+                                {v.kind === 'video' ? (
+                                  <video
+                                    src={src}
+                                    muted
+                                    playsInline
+                                    preload="auto"
+                                    style={{ cursor: 'zoom-in' }}
+                                    title={`Archived ${when} — hover to play, click to view full size`}
+                                    onLoadedMetadata={(e) => {
+                                      const el = e.currentTarget
+                                      const r = el.videoWidth / el.videoHeight || 1
+                                      const h = Math.min(190, Math.sqrt(20000 / r))
+                                      el.style.height = `${Math.round(h)}px`
+                                      el.style.width = `${Math.round(h * r)}px`
+                                      el.currentTime = 0.01
+                                    }}
+                                    onMouseEnter={(e) => { void e.currentTarget.play().catch(() => undefined) }}
+                                    onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0.01 }}
+                                    onClick={() => setMediaLightbox({ kind: 'video', src })}
+                                  />
+                                ) : (
+                                  <img
+                                    src={src}
+                                    alt=""
+                                    style={{ cursor: 'zoom-in' }}
+                                    title={`Archived ${when} — click to view full size`}
+                                    onLoad={equalAreaThumb}
+                                    onClick={() => setMediaLightbox({ kind: 'image', src })}
+                                  />
+                                )}
+                                <span className="vp-map-cardacts">
+                                  <span
+                                    title={`Restore this version from ${when} (the current one is archived, not lost)`}
+                                    onClick={() => void restoreVersion(row.id, v.path)}
+                                  >↺</span>
+                                </span>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </details>
                     ) : null}
                   </div>
                 </div>
