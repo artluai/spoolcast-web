@@ -27,6 +27,9 @@ type PromptReference = {
 type GenerationPromptItem = {
   id?: string
   chunk_id?: string
+  // Per-clip model override — beats the doc-level preferred model.
+  video_model?: string
+  image_model?: string
   scene?: string
   duration_s?: number
   visual_direction?: string
@@ -118,9 +121,10 @@ const imageModels = [
   { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', note: 'image · strong prompt following' },
 ]
 
+// Prompt limits per kie.ai docs (both seedance models): 3–20,000 characters.
 const videoModels = [
-  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 15s', maxSeconds: 15 },
-  { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 15s', maxSeconds: 15 },
+  { id: 'seedance-2-fast', label: 'Seedance 2 Fast', note: 'video · faster, lower cost · max 15s', maxSeconds: 15, maxChars: 20000 },
+  { id: 'seedance-2', label: 'Seedance 2', note: 'video · higher quality · max 15s', maxSeconds: 15, maxChars: 20000 },
 ]
 
 function modelLabel(models: { id: string; label: string }[], id: string) {
@@ -343,7 +347,8 @@ function normalizeRows(
     const mediaType = type === 'video' ? 'video' : 'image'
     const payload = promptParts(item, doc)
     const prompt = itemPromptForType(item, mediaType)
-    const mediaModel = type === 'video' ? videoModel : imageModel
+    const mediaModel = (type === 'video' ? (item.video_model as string | undefined) : (item.image_model as string | undefined))
+      || (type === 'video' ? videoModel : imageModel)
     let rowStatus: RowStatus = 'not_run'
     if (failed[id]) rowStatus = 'failed'
     else if (running && (!targetIds.size || targetIds.has(id)) && !doneIds.has(id)) rowStatus = 'generating'
@@ -674,6 +679,43 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
   // flush together the moment the job ends (the batch parallelizes inside).
   const [genQueue, setGenQueue] = useState<{ id: string; type: 'image' | 'video' }[]>([])
+  // Per-row "✦ Update prompt with AI": click drops the note box; the note
+  // runs a single-row rewrite (script/voice lines protected by the rewriter).
+  const [rowAiFor, setRowAiFor] = useState<string | null>(null)
+  const [rowAiNote, setRowAiNote] = useState('')
+  const [rowAiBusy, setRowAiBusy] = useState<string | null>(null)
+  const rowAiUpdate = async (id: string) => {
+    const instruction = rowAiNote.trim()
+    if (!instruction) return
+    setRowAiBusy(id)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'rewrite_generation_prompts', allow_cost: true, ids: [id], output_type: 'current', instruction }),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) throw new Error(out?.message || out?.error || 'AI update failed.')
+      await load()
+      setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n })
+      setRowAiFor(null)
+      setRowAiNote('')
+      setSaveNote(`${id}: prompt updated with AI.`)
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'AI update failed.')
+    } finally {
+      setRowAiBusy(null)
+    }
+  }
+  const setRowModel = async (id: string, type: 'image' | 'video', modelId: string) => {
+    if (!doc) return
+    const key = type === 'video' ? 'video_model' : 'image_model'
+    const nextDoc = { ...doc, items: (doc.items ?? []).map((it) => (String(it.id || it.chunk_id || '') === id ? { ...it, [key]: modelId } : it)) }
+    snapshotDoc()
+    await queueSavePromptDoc(nextDoc)
+    setDoc(nextDoc)
+    setSaveNote(`${id}: model set to ${modelLabel(type === 'video' ? videoModels : imageModels, modelId)}.`)
+  }
   const queueRowGeneration = (id: string, type: 'image' | 'video') => {
     if (!activeProcess) {
       if (type === 'video') void generateVideos([id])
@@ -1823,7 +1865,20 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     <span className="id">{row.id}</span>
                   </label>
                   <b>{row.title}</b>
-                  <span className="vg-meta">{row.duration} · {row.aspect} · {row.resolution} · {row.mediaModel}</span>
+                  <span className="vg-meta">{row.duration} · {row.aspect} · {row.resolution} ·{' '}
+                    <select
+                      className="sc-select"
+                      value={row.mediaModel}
+                      title="Model for THIS clip — overrides the session default"
+                      style={{ fontSize: 11, padding: '2px 6px', minHeight: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => void setRowModel(row.id, row.type === 'video' ? 'video' : 'image', e.target.value)}
+                    >
+                      {(row.type === 'video' ? videoModels : imageModels).map((m) => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
+                  </span>
                   <span className="vg-typepick vg-row-type">
                     <button type="button" className={row.type === 'image' ? 'on' : ''} onClick={() => changeRowType(row.id, 'image')}>Image</button>
                     <button
@@ -1894,9 +1949,21 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
                           </span>
                         ) : null}
-                        <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }} title="Prompt length">
-                          {row.draftText.length.toLocaleString()} chars
+                        <span
+                          style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: row.draftText.length > 20000 || row.draftText.trim().length < 3 ? 'var(--red, #e5534b)' : 'var(--ink-3)' }}
+                          title="Prompt length vs the model's limit (kie: 3–20,000 characters)"
+                        >
+                          {row.draftText.length.toLocaleString()} / 20,000
                         </span>
+                        <button
+                          type="button"
+                          className="vp-undo"
+                          disabled={rowAiBusy === row.id}
+                          title="Opens a note — tell the AI how this prompt should change (uses model credits)"
+                          onClick={() => { setRowAiFor(rowAiFor === row.id ? null : row.id); setRowAiNote('') }}
+                        >
+                          {rowAiBusy === row.id ? 'Updating…' : '✦ Update prompt with AI'}
+                        </button>
                         {row.type === 'image' ? (
                           <button
                             type="button"
@@ -1920,6 +1987,19 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         )}
                         </span>
                       </div>
+                      {rowAiFor === row.id ? (
+                        <div className="vg-regen-note-panel">
+                          <textarea
+                            value={rowAiNote}
+                            onChange={(e) => setRowAiNote(e.target.value)}
+                            placeholder="Tell the AI what to change — e.g. focus on one shoe, slower motion, tighter framing..."
+                            rows={3}
+                          />
+                          <button type="button" className="vp-undo" disabled={rowAiBusy === row.id || !rowAiNote.trim()} onClick={() => void rowAiUpdate(row.id)}>
+                            {rowAiBusy === row.id ? 'Updating…' : '✦ Update prompt with AI'}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
 
 
