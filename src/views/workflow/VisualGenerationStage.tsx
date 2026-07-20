@@ -2008,22 +2008,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             </span>
                           )
                         })}
+                        {audioAssoc.map((n) => (
+                          <span key={`a-${n}`} className="vp-map-txtatt" title={kitOf(n)?.notes || `${n} — sound direction + reference audio for this clip`}>
+                            <span className="vp-map-chip">♪ {kitOf(n)?.kind || 'audio'}</span>
+                            <span className="vp-map-attname">{n} · this clip</span>
+                            {kitOf(n)?.notes ? <span className="txt-notes">{kitOf(n)!.notes}</span> : null}
+                          </span>
+                        ))}
+                        {audioInherited.map((k) => (
+                          <span key={`i-${k.name}`} className="vp-map-txtatt" title={k.notes || k.name}>
+                            <span className="vp-map-chip">♪ {k.kind}</span>
+                            <span className="vp-map-attname">{k.name} · via {k.linked_to}</span>
+                            {k.notes ? <span className="txt-notes">{k.notes}</span> : null}
+                          </span>
+                        ))}
                         {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length && !textAssoc.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
                     {textAssoc.length || audioAssoc.length || audioInherited.length || pendingRefs.length ? (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, minWidth: 0 }}>
 
-                        {audioAssoc.map((n) => (
-                          <span key={`a-${n}`} className="vp-undo" style={{ cursor: 'default' }} title={kitOf(n)?.notes || `${n} — sound direction + reference audio for this clip`}>
-                            ♪ {n} · this clip
-                          </span>
-                        ))}
-                        {audioInherited.map((k) => (
-                          <span key={`i-${k.name}`} className="vp-undo" style={{ cursor: 'default' }} title={k.notes || k.name}>
-                            ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
-                          </span>
-                        ))}
+
                         {pendingRefs.map((n) => (
                           <span key={`pd-${n}`} className="vp-undo" style={{ cursor: 'default', borderColor: 'var(--amber)', color: 'var(--amber)' }} title={`${n} is attached upstream (plan/shot list) but not in these prompts yet — Sync refs (free) carries it through without touching prompt text.`}>
                             {AUD.has(kitOf(n)?.kind ?? '') ? '♪ ' : ''}{n} · upstream, not synced

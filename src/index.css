@@ -982,6 +982,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
    footage, no crops). The CSS height is only the pre-load placeholder. */
 .vg-refs { display: flex; align-items: flex-start; justify-content: flex-start; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; min-width: 0; text-align: left; }
 .vg-refs img { height: 120px; width: auto; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); }
+/* Videos have ZERO intrinsic size until metadata arrives — without a
+   placeholder the history tiles expand to nothing. */
+.vg-refs video { height: 120px; width: auto; min-width: 68px; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); display: block; }
 .vg-ref-thumb { position: relative; display: inline-flex; }
 /* The wall's action-cluster design, hover-revealed on reference thumbs. */
 .vg-ref-thumb .vp-map-cardacts { opacity: 0; }

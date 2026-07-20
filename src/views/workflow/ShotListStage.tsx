@@ -162,6 +162,58 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   // built+approved at the generation step). READ-ONLY here: building it from
   // this step would reset its approval under a running batch.
   const [assembled, setAssembled] = useState<Record<string, string>>({})
+  const [promptsDoc, setPromptsDoc] = useState<Record<string, unknown> | null>(null)
+  // Per-clip tab: the PROMPT is the default lens; the description is the
+  // second tab (same viewtoggle design as everywhere else).
+  const [clipTab, setClipTab] = useState<Record<string, 'prompt' | 'description'>>({})
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({})
+  const [aiNoteFor, setAiNoteFor] = useState<string | null>(null)
+  const [aiNote, setAiNote] = useState('')
+  const [aiBusy, setAiBusy] = useState<string | null>(null)
+  const savePromptEdit = async (id: string, text: string) => {
+    if (!promptsDoc) return
+    const items = (promptsDoc.items as Record<string, unknown>[] | undefined) ?? []
+    const next = { ...promptsDoc, items: items.map((it) => (String(it.id ?? '') === id ? { ...it, prompt: text } : it)) }
+    setPromptsDoc(next)
+    setAssembled((cur) => ({ ...cur, [id]: text }))
+    await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: 'visual_assets', path: 'working/generation-prompts.json', content: JSON.stringify(next, null, 2) + '\n' }),
+    }).catch(() => null)
+  }
+  const aiUpdatePrompt = async (id: string, instruction: string) => {
+    if (!instruction.trim()) return
+    setAiBusy(id)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'rewrite_generation_prompts', allow_cost: true, ids: [id], output_type: 'current', instruction }),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) throw new Error(out?.message || out?.error || 'AI update failed.')
+      const fresh = await fetch(fileUrl('working/generation-prompts.json')).then((x) => (x.ok ? x.json() : null))
+      try {
+        const docJ = JSON.parse(fresh?.data?.content ?? 'null')
+        setPromptsDoc(docJ)
+        const map: Record<string, string> = {}
+        for (const it of docJ?.items ?? []) {
+          const iid = String(it?.id ?? '')
+          const text = String(it?.prompt || it?.kie_request_preview?.input?.prompt || '')
+          if (iid && text) map[iid] = text
+        }
+        setAssembled(map)
+        setPromptDrafts((cur) => { const n = { ...cur }; delete n[id]; return n })
+      } catch { /* reload on next visit */ }
+      setAiNoteFor(null)
+      setAiNote('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI update failed.')
+    } finally {
+      setAiBusy(null)
+    }
+  }
   // The World Kit, for CONFIRMING each clip's references visually: image refs
   // as thumbnails, prompt-only objects as chips, audio as ♪ chips — including
   // audio riding in via an object link (variants inherit).
@@ -238,6 +290,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       } catch { /* unknown template stays audio-first-shaped */ }
       try {
         const doc = JSON.parse(prompts?.data?.content ?? 'null')
+        if (doc) setPromptsDoc(doc)
         const map: Record<string, string> = {}
         for (const it of doc?.items ?? []) {
           const id = String(it?.id ?? '')
@@ -806,13 +859,86 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     <span className="sl-title">{spoken ? `“${spoken}”` : 'Silent clip'}</span>
                     <span className="sl-meta">{fmtTime(start)}-{fmtTime(start + dur)} · {dur.toFixed(1)}s{grp ? ` · ${grp}` : ''}{agrp ? ` · ♪ ${agrp}` : ''}</span>
                   </button>
-                  {/* The DIRECTION — what happens in the clip (the spoken
-                      line above is performed INSIDE it). The full generation
-                      prompt is written and reviewed at the next step. */}
-                  <div className="sl-script">
-                    <span>Direction</span>
-                    <p>{event.visual_direction || '—'}</p>
-                  </div>
+                  {(() => {
+                    const tab = clipTab[event.id] ?? 'prompt'
+                    const promptText = promptDrafts[event.id] ?? assembled[event.id] ?? ''
+                    const noteOpen = aiNoteFor === event.id
+                    const busy = aiBusy === event.id
+                    return (
+                      <div className="sl-script">
+                        <span>
+                          <span className="vp-viewtoggle" style={{ display: 'inline-flex' }}>
+                            <button type="button" className={tab === 'prompt' ? 'on' : ''} onClick={() => setClipTab((c) => ({ ...c, [event.id]: 'prompt' }))}>Prompt</button>
+                            <button type="button" className={tab === 'description' ? 'on' : ''} onClick={() => setClipTab((c) => ({ ...c, [event.id]: 'description' }))}>Description</button>
+                          </span>
+                        </span>
+                        <div>
+                          {tab === 'prompt' ? (
+                            assembled[event.id] !== undefined ? (
+                              <>
+                                <textarea
+                                  value={promptText}
+                                  rows={Math.min(14, Math.max(4, promptText.split('\n').length + 2))}
+                                  spellCheck={false}
+                                  onChange={(e) => setPromptDrafts((c) => ({ ...c, [event.id]: e.target.value }))}
+                                  onBlur={() => { if (promptDrafts[event.id] !== undefined && promptDrafts[event.id] !== assembled[event.id]) void savePromptEdit(event.id, promptDrafts[event.id]) }}
+                                  style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--mono)' }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                                  <span className={`vg-split-action ${noteOpen ? 'open' : ''}`}>
+                                    <button type="button" className="vg-split-toggle" disabled={busy} title="Add a note before updating the prompt" onClick={() => { setAiNoteFor(noteOpen ? null : event.id); setAiNote('') }}>▾</button>
+                                    <button type="button" className="vp-undo vg-split-main" disabled={busy || !noteOpen || !aiNote.trim()} title="Tell the AI how the prompt should change (open the note first)" onClick={() => void aiUpdatePrompt(event.id, aiNote)}>
+                                      {busy ? 'Updating…' : '✦ Update prompt with AI'}
+                                    </button>
+                                  </span>
+                                </div>
+                                {noteOpen ? (
+                                  <div className="vg-regen-note-panel">
+                                    <textarea
+                                      value={aiNote}
+                                      onChange={(e) => setAiNote(e.target.value)}
+                                      placeholder="Tell the AI what to change — e.g. focus on one shoe, slower motion, tighter framing..."
+                                      rows={3}
+                                    />
+                                    <button type="button" className="vp-undo" disabled={busy || !aiNote.trim()} onClick={() => void aiUpdatePrompt(event.id, aiNote)}>
+                                      {busy ? 'Updating…' : '✦ Update prompt with AI'}
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : (
+                              <p style={{ margin: 0, color: 'var(--ink-3)', fontSize: 13 }}>Prompts aren’t built yet — they’re composed at the generation step.</p>
+                            )
+                          ) : (
+                            <>
+                              <textarea
+                                value={event.visual_direction || ''}
+                                rows={Math.min(10, Math.max(3, String(event.visual_direction || '').length / 90))}
+                                onChange={(e) => {
+                                  if (!list) return
+                                  const next = { ...list, base_layer: (list.base_layer ?? []).map((ev2) => (ev2.id === event.id ? { ...ev2, visual_direction: e.target.value } : ev2)) }
+                                  setStageDraft(stageId, JSON.stringify(next, null, 2))
+                                  setEdited(true)
+                                }}
+                                style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 14, lineHeight: 1.55 }}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                                <button
+                                  type="button"
+                                  className="vp-undo"
+                                  disabled={busy || assembled[event.id] === undefined}
+                                  title={assembled[event.id] === undefined ? 'Prompts aren’t built yet' : 'Rewrite this clip’s prompt from the revised description (uses model credits)'}
+                                  onClick={() => void aiUpdatePrompt(event.id, `The clip description was revised to: "${String(event.visual_direction || '').trim()}". Rewrite the prompt to match it.`)}
+                                >
+                                  {busy ? 'Updating…' : '✦ Update prompt with AI'}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {(() => {
                     // CONFIRM THE REFERENCES: what actually reaches this clip.
                     const refs = (event.references ?? []).map(String)
@@ -852,18 +978,24 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                           />
                         ))}
                         {texts.map((n) => (
-                          <span key={n} className="vp-undo" style={{ cursor: 'default', borderStyle: 'dashed' }} title={find(n)?.notes || `${n} — prompt-only: its description joins the prompt as text`}>
-                            {find(n)?.kind || 'ref'} · {n}
+                          <span key={n} className="vp-map-txtatt" title={find(n)?.notes || `${n} — prompt-only: its description joins the prompt as text`}>
+                            <span className="vp-map-chip">{find(n)?.kind || 'ref'}</span>
+                            <span className="vp-map-attname">{n}</span>
+                            {find(n)?.notes ? <span className="txt-notes">{find(n)!.notes}</span> : null}
                           </span>
                         ))}
                         {attachedAudio.map((n) => (
-                          <span key={n} className="vp-undo" style={{ cursor: 'default' }} title={find(n)?.notes || n}>
-                            ♪ {n} · this clip
+                          <span key={n} className="vp-map-txtatt" title={find(n)?.notes || n}>
+                            <span className="vp-map-chip">♪ {find(n)?.kind || 'audio'}</span>
+                            <span className="vp-map-attname">{n} · this clip</span>
+                            {find(n)?.notes ? <span className="txt-notes">{find(n)!.notes}</span> : null}
                           </span>
                         ))}
                         {inherited.map((k) => (
-                          <span key={k.name} className="vp-undo" style={{ cursor: 'default' }} title={k.notes || k.name}>
-                            ♪ {k.name}{k.kind !== 'voice' ? ` (${k.kind})` : ''} · via {k.linked_to}
+                          <span key={k.name} className="vp-map-txtatt" title={k.notes || k.name}>
+                            <span className="vp-map-chip">♪ {k.kind}</span>
+                            <span className="vp-map-attname">{k.name} · via {k.linked_to}</span>
+                            {k.notes ? <span className="txt-notes">{k.notes}</span> : null}
                           </span>
                         ))}
                         {pending.map((n) => (
