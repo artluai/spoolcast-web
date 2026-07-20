@@ -142,6 +142,14 @@ type RowPanelResizeSlot = {
 
 type RowPanelResizeColumn = {
   slots: RowPanelResizeSlot[]
+  // Full stack height (every slot + lanes) when the drag started — shrinks
+  // only start once the row pinches this, not while the column has slack.
+  stackStart: number
+}
+
+type RowPanelResizePlanData = {
+  rowStart: number
+  columns: RowPanelResizeColumn[]
 }
 
 // PORTRAIT SESSIONS put the freed horizontal space to work: script and
@@ -1849,28 +1857,35 @@ export function VisualReviewStage({
   // the old plan skipped (that was bug #2: dragging a row taller left a clipped
   // gallery untouched). Only open, cappable sections can grow; video/timeline are
   // already at their natural height and carry no explicit size.
-  const rowPanelResizePlan = (rowId: string): RowPanelResizeColumn[] => {
+  const rowPanelResizePlan = (rowId: string): RowPanelResizePlanData => {
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
-    if (!row) return []
-    return Array.from(row.querySelectorAll<HTMLElement>(':scope > .vr-layout-col'))
-      .map((column) => ({
-        slots: columnSlots(column)
-          .map((slot) => {
-            const id = slot.dataset.layoutId
-            const panelId = slot.dataset.panelId as ReviewPanelId | undefined
-            const panel = slot.querySelector<HTMLElement>(':scope > .vr-panel')
-            if (!id || !panelId || !cappableSection(panelId) || !panel?.hasAttribute('open')) return null
-            const minHeight = resizeMinHeight(slot)
-            return {
-              id,
-              minHeight,
-              maxHeight: resizeContentHeight(slot, minHeight),
-              startHeight: panelSizes[id] ?? slot.getBoundingClientRect().height,
-            }
-          })
-          .filter((plan): plan is RowPanelResizeSlot => Boolean(plan)),
-      }))
+    if (!row) return { rowStart: 0, columns: [] }
+    const columns = Array.from(row.querySelectorAll<HTMLElement>(':scope > .vr-layout-col'))
+      .map((column) => {
+        const allSlots = columnSlots(column)
+        const stackStart = allSlots.reduce((sum, slot) => sum + slot.getBoundingClientRect().height, 0)
+          + Math.max(0, allSlots.length - 1) * layoutResizerSize
+        return {
+          stackStart,
+          slots: allSlots
+            .map((slot) => {
+              const id = slot.dataset.layoutId
+              const panelId = slot.dataset.panelId as ReviewPanelId | undefined
+              const panel = slot.querySelector<HTMLElement>(':scope > .vr-panel')
+              if (!id || !panelId || !cappableSection(panelId) || !panel?.hasAttribute('open')) return null
+              const minHeight = resizeMinHeight(slot)
+              return {
+                id,
+                minHeight,
+                maxHeight: resizeContentHeight(slot, minHeight),
+                startHeight: panelSizes[id] ?? slot.getBoundingClientRect().height,
+              }
+            })
+            .filter((plan): plan is RowPanelResizeSlot => Boolean(plan)),
+        }
+      })
       .filter((column) => column.slots.length > 0)
+    return { rowStart: row.getBoundingClientRect().height, columns }
   }
 
   const distributeColumnResize = (slots: RowPanelResizeSlot[], delta: number) => {
@@ -1904,15 +1919,21 @@ export function VisualReviewStage({
   }
 
   const applyRowPanelResize = (
-    plan: RowPanelResizeColumn[],
+    plan: RowPanelResizePlanData,
     delta: number,
   ) => {
-    if (!plan.length) return
+    if (!plan.columns.length) return
     setPanelSizes((currentSizes) => {
       let changed = false
       const nextSizes = { ...currentSizes }
-      for (const column of plan) {
-        const heights = distributeColumnResize(column.slots, delta)
+      for (const column of plan.columns) {
+        // Shrinking eats the column's EMPTY space first: sections only give
+        // up height by however much the new row height cuts into their stack.
+        // Growing keeps pulling clipped sections toward their content.
+        const effectiveDelta = delta >= 0
+          ? delta
+          : -Math.max(0, column.stackStart - (plan.rowStart + delta))
+        const heights = distributeColumnResize(column.slots, effectiveDelta)
         for (const slot of column.slots) {
           const nextHeight = heights.get(slot.id) ?? slot.startHeight
           if (Math.abs((nextSizes[slot.id] ?? slot.startHeight) - nextHeight) > 0.5) {
