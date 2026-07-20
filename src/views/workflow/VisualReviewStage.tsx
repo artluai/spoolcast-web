@@ -1996,8 +1996,8 @@ export function VisualReviewStage({
   ) => {
     const plan = rowPanelResizePlan(rowId)
     event.preventDefault()
-    if (!plan.length) return
-    for (const column of plan) for (const slot of column.slots) manualPanelSizeIdsRef.current.add(slot.id)
+    if (!plan.columns.length) return
+    for (const column of plan.columns) for (const slot of column.slots) manualPanelSizeIdsRef.current.add(slot.id)
     const start = event.clientY
     const move = (moveEvent: PointerEvent) => applyRowPanelResize(plan, moveEvent.clientY - start)
     const stop = () => {
