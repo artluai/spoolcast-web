@@ -2364,7 +2364,7 @@ export function VisualReviewStage({
               ) : null}
               {seeking ? <span className="vr-seeking">Seeking…</span> : null}
               <div className="vr-player-controls">
-                <button type="button" className="save-continue" title={playing ? 'Pause' : 'Play'} onClick={togglePlay}>
+                <button type="button" className="vr-play-btn" title={playing ? 'Pause' : 'Play'} onClick={togglePlay}>
                   {playing ? '❚❚' : '▶'}
                 </button>
                 <span className="vr-time">{fmtTime(time)} / {fmtTime(totalSec)}</span>
