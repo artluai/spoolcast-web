@@ -536,6 +536,7 @@ function chunkLocalTime(chunk: AudioChunk, nextTime: number) {
 function ReviewPanel({
   title,
   meta,
+  actions,
   className = '',
   defaultOpen = true,
   draggable = false,
@@ -549,6 +550,8 @@ function ReviewPanel({
 }: {
   title: string
   meta?: string
+  // Controls living in the title row; hidden while the panel is collapsed.
+  actions?: ReactNode
   className?: string
   defaultOpen?: boolean
   draggable?: boolean
@@ -602,6 +605,11 @@ function ReviewPanel({
       <summary>
         <span>{title}</span>
         {meta ? <small>{meta}</small> : null}
+        {open && actions ? (
+          <span onClick={(event) => { event.preventDefault(); event.stopPropagation() }} style={{ flex: 'none', display: 'inline-flex' }}>
+            {actions}
+          </span>
+        ) : null}
       </summary>
       <div className="vr-panel-body">{children}</div>
     </details>
@@ -639,6 +647,8 @@ export function VisualReviewStage({
   const [galleryFit, setGalleryFit] = useState(false)
   const [galleryFitCols, setGalleryFitCols] = useState<number | null>(null)
   const galleryStripRef = useRef<HTMLDivElement | null>(null)
+  // Mirror for the sizing pass (its dep list is deliberately minimal).
+  const galleryFitRef = useRef(false)
   // REAL compile/export: the engine's render_with_audit job. State lives in the
   // workflow store (the step footer gates Save/Autopilot on it and it must
   // survive step navigation); progress/error details are transient and local.
@@ -934,15 +944,18 @@ export function VisualReviewStage({
     setTime(nextTime)
   }
 
-  // Fit: the largest tile size where EVERY tile fits the panel's current box,
-  // floored at a barely-readable minimum (then the grid scrolls anyway).
+  // Fit to container: the largest tile size where EVERY tile fits a bounded
+  // box — BOTH dimensions. The height bound is the panel's real budget (its
+  // slot in expanded, one-third of the screen in the normal view where the
+  // slot otherwise grows with content), floored at a barely-readable minimum.
   const computeGalleryFit = useCallback(() => {
     const strip = galleryStripRef.current
     if (!strip) return
     const count = Math.max(1, segments.length)
     const width = strip.clientWidth
     const slot = strip.closest<HTMLElement>('.vr-panel-slot')
-    const height = Math.max(120, (slot?.clientHeight ?? strip.clientHeight) - 76)
+    const bound = Math.min(slot?.clientHeight ?? strip.clientHeight, window.innerHeight / 3)
+    const height = Math.max(120, bound - 76)
     const gap = 10
     const labelBlock = 42
     const minTile = 56
@@ -961,14 +974,17 @@ export function VisualReviewStage({
   const toggleGalleryFit = () => {
     setGalleryFit((current) => {
       const next = !current
-      if (next) window.requestAnimationFrame(computeGalleryFit)
-      else setGalleryFitCols(null)
+      galleryFitRef.current = next
+      if (!next) setGalleryFitCols(null)
       return next
     })
   }
 
   useEffect(() => {
     if (galleryFit) computeGalleryFit()
+    // The gallery slot's own height depends on the packed grid — re-run the
+    // one sizing pass so the slot snaps to it (and back when Fit turns off).
+    applyDefaultSizesRef.current()
   }, [computeGalleryFit, galleryFit, isExpandedCard])
 
   const setVideoRef = (segmentId: string, node: HTMLVideoElement | null) => {
@@ -1548,7 +1564,7 @@ export function VisualReviewStage({
   //
   // Expanded mode additionally fills the fixed card: the timeline row keeps its full
   // height and the remaining rows split the leftover height (video grows to fill).
-  type SlotMeasure = { id: string; panelId: ReviewPanelId; open: boolean; minHeight: number; contentHeight: number }
+  type SlotMeasure = { id: string; panelId: ReviewPanelId; open: boolean; minHeight: number; contentHeight: number; availableHeight: number | null }
   const applyDefaultSizes = useCallback(() => {
     const workspace = workspaceRef.current
     if (!workspace) return
@@ -1562,7 +1578,25 @@ export function VisualReviewStage({
         const panel = slot.querySelector<HTMLElement>(':scope > .vr-panel')
         const open = panel ? panel.hasAttribute('open') : true
         const minHeight = resizeMinHeight(slot)
-        return { id, panelId, open, minHeight, contentHeight: open ? resizeContentHeight(slot, minHeight) : minHeight }
+        // Sections BESIDE the video may fill down to the row's bottom edge
+        // (where the timeline starts) — minus room for the sections below
+        // them in the same column. That is their real budget, not the
+        // one-third-screen cap.
+        let availableHeight: number | null = null
+        const row = slot.closest<HTMLElement>('.vr-layout-row')
+        if (open && row && row.querySelector('.vr-player-panel') && !slot.querySelector('.vr-player-panel')) {
+          let reserved = 0
+          let sibling = slot.nextElementSibling
+          while (sibling) {
+            if (sibling instanceof HTMLElement && sibling.classList.contains('vr-panel-slot')) reserved += resizeMinHeight(sibling) + 8
+            sibling = sibling.nextElementSibling
+          }
+          availableHeight = Math.max(
+            minHeight,
+            row.getBoundingClientRect().bottom - slot.getBoundingClientRect().top - reserved - 6,
+          )
+        }
+        return { id, panelId, open, minHeight, contentHeight: open ? resizeContentHeight(slot, minHeight) : minHeight, availableHeight }
       })
       .filter((entry): entry is SlotMeasure => Boolean(entry))
 
@@ -1575,9 +1609,18 @@ export function VisualReviewStage({
           let target: number | null
           if (!slot.open) target = slot.minHeight
           else if (manual) target = Math.min(slot.contentHeight, Math.max(slot.minHeight, current[slot.id] ?? slot.contentHeight))
+          // Beside the video: fill to content, or to the row's bottom edge
+          // (the timeline) — whichever comes first.
+          else if (cappableSection(slot.panelId) && slot.availableHeight != null) {
+            target = Math.max(slot.minHeight, Math.min(slot.contentHeight, slot.availableHeight))
+          }
           // The gallery in the NORMAL view grows to its content (the card just
-          // gets taller) — no scroll, no clipping. Expanded keeps the cap.
-          else if (slot.panelId === 'gallery' && !isExpandedCard) target = Math.max(slot.minHeight, slot.contentHeight)
+          // gets taller) — no scroll, no clipping unless Fit packs it.
+          else if (slot.panelId === 'gallery' && !isExpandedCard) {
+            target = galleryFitRef.current
+              ? Math.max(slot.minHeight, Math.min(slot.contentHeight, cap))
+              : Math.max(slot.minHeight, slot.contentHeight)
+          }
           else if (cappableSection(slot.panelId)) {
             target = Math.max(slot.minHeight, Math.min(slot.contentHeight, cap))
             // Snap to content when the cap would leave a sliver — a default
@@ -2354,17 +2397,17 @@ export function VisualReviewStage({
           className={panelClassName('gallery', 'vr-gallery-panel')}
           title="Gallery"
           meta={`${segments.length} visuals`}
-        >
-          <span className="vp-zoom-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+          actions={(
             <button
               type="button"
               className={`vp-undo ${galleryFit ? 'on' : ''}`}
-              title="Fit every thumbnail into the panel (small floor so they stay readable)"
+              title="Pack every thumbnail into the panel's box — height and width (small floor so they stay readable)"
               onClick={toggleGalleryFit}
             >
-              Fit
+              Fit to container
             </button>
-          </span>
+          )}
+        >
           <div
             className="vr-strip"
             ref={galleryStripRef}
