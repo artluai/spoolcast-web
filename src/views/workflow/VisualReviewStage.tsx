@@ -1752,6 +1752,7 @@ export function VisualReviewStage({
     sizes: Record<string, number>,
     update: Dispatch<SetStateAction<Record<string, number>>>,
     onResize?: (delta: number) => void,
+    maxFirstHeight?: number,
   ) => {
     const first = document.querySelector<HTMLElement>(`[data-layout-id="${firstId}"]`)
     const second = document.querySelector<HTMLElement>(`[data-layout-id="${secondId}"]`)
@@ -1767,7 +1768,7 @@ export function VisualReviewStage({
       const delta = current - start
       if (axis === 'y') {
         const minHeight = resizeMinHeight(first)
-        const maxHeight = resizeContentHeight(first, minHeight)
+        const maxHeight = Math.min(resizeContentHeight(first, minHeight), maxFirstHeight ?? Infinity)
         const nextFirst = Math.min(maxHeight, Math.max(minHeight, firstStart + delta))
         onResize?.(nextFirst - firstStart)
         update((currentSizes) => ({
@@ -1804,6 +1805,7 @@ export function VisualReviewStage({
     update: Dispatch<SetStateAction<Record<string, number>>>,
     min = 72,
     onResize?: (delta: number) => void,
+    maxOverride?: number,
   ) => {
     const target = document.querySelector<HTMLElement>(`[data-layout-id="${id}"]`)
     if (!target) return
@@ -1813,7 +1815,7 @@ export function VisualReviewStage({
     const move = (moveEvent: PointerEvent) => {
       const current = axis === 'x' ? moveEvent.clientX : moveEvent.clientY
       const delta = current - start
-      const maxSize = axis === 'y' ? resizeContentHeight(target, min) : Infinity
+      const maxSize = Math.min(axis === 'y' ? resizeContentHeight(target, min) : Infinity, maxOverride ?? Infinity)
       const nextSize = Math.min(maxSize, Math.max(min, startSize + delta))
       onResize?.(nextSize - startSize)
       update((currentSizes) => ({
@@ -1923,6 +1925,21 @@ export function VisualReviewStage({
     })
   }
 
+  // How tall a row may get before the fixed expanded card would clip it: the
+  // workspace budget minus every OTHER row's current height and the lanes.
+  // A drag hitting this cap simply stops — nothing scrolls behind the header.
+  const expandedRowMaxHeight = (rowId: string): number | undefined => {
+    const workspace = workspaceRef.current
+    if (!workspace || !isExpandedCard || isMobileReview) return undefined
+    const rows = Array.from(workspace.querySelectorAll<HTMLElement>(':scope > .vr-layout-row'))
+    const self = rows.find((row) => row.dataset.layoutId === rowId)
+    if (!self) return undefined
+    const budget = Math.max(520, window.innerHeight - 172)
+    const others = rows.filter((row) => row !== self)
+      .reduce((sum, row) => sum + row.getBoundingClientRect().height, 0)
+    return Math.max(resizeMinHeight(self), budget - others - rows.length * layoutResizerSize)
+  }
+
   // Expanded mode fills a fixed-height card, so its rows trade height (zero-sum):
   // dragging the boundary grows one row's basis and pulls clipped sections with it.
   const startReviewRowResize = (
@@ -1934,7 +1951,7 @@ export function VisualReviewStage({
     const plan = rowPanelResizePlan(firstId)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
-    })
+    }, expandedRowMaxHeight(firstId))
   }
 
   const startReviewLastRowResize = (
@@ -1946,7 +1963,7 @@ export function VisualReviewStage({
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, row ? resizeMinHeight(row) : 32, (delta) => {
       applyRowPanelResize(plan, delta)
-    })
+    }, expandedRowMaxHeight(rowId))
   }
 
   // Normal/mobile height is free (the card just grows), so a row-height drag is
