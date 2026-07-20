@@ -983,6 +983,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-refs { display: flex; align-items: flex-start; justify-content: flex-start; flex-wrap: wrap; gap: 8px; color: var(--ink-3); font-size: 12px; min-width: 0; text-align: left; }
 .vg-refs img { height: 120px; width: auto; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); }
 .vg-ref-thumb { position: relative; display: inline-flex; }
+/* The wall's action-cluster design, hover-revealed on reference thumbs. */
+.vg-ref-thumb .vp-map-cardacts { opacity: 0; }
+.vg-ref-thumb:hover .vp-map-cardacts { opacity: 1; }
 .vg-ref-thumb.first-frame { align-items: center; gap: 8px; padding-right: 0; }
 .vg-ref-img { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .vg-ref-img img, .vg-ref-thumb.first-frame .vg-ref-img img { display: block; height: 120px; width: auto; object-fit: contain; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-4); }

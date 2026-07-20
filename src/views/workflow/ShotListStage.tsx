@@ -189,6 +189,13 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const syncRefsFromPlan = async () => {
     setSyncing(true)
     try {
+      if (wkDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: 'world_kit', path: 'working/world-kit.md', content: wkDraft }),
+        }).catch(() => null)
+      }
       if (pacingDraft.trim()) {
         await fetch(actionUrl(), {
           method: 'POST',

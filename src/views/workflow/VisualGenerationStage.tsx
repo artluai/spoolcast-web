@@ -592,6 +592,16 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       // Let queued doc saves land BEFORE syncing — otherwise an older
       // in-memory doc could overwrite the synced file right after.
       await savePromptChainRef.current.catch(() => undefined)
+      // The KIT draft must reach the file too: the engine's sync validates
+      // ref names against world-kit.md, so a draft-only object (a new audio
+      // added at step 5, unsaved) would be dropped as dangling every attempt.
+      if (wkDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: 'world_kit', path: 'working/world-kit.md', content: wkDraft }),
+        }).catch(() => null)
+      }
       if (pacingDraft.trim()) {
         await fetch(actionUrl(), {
           method: 'POST',
@@ -1767,30 +1777,18 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     >
                       <img src={src} alt={name} onLoad={equalAreaThumb} />
                     </button>
-                    <button
-                      type="button"
-                      className="vg-ref-remove"
-                      title="Remove asset"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void removeReferenceAsset(row.id, index)
-                      }}
-                    >
-                      ×
-                    </button>
-                    {ref.name && kitOf(String(ref.name)) ? (
-                      <button
-                        type="button"
-                        className="vg-ref-remove"
-                        style={{ right: 30 }}
-                        title={`Edit ${ref.name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, event.clientX - 340)), y: Math.max(70, event.clientY - 40) })
-                          setRefEdit(refEdit && refEdit.name === ref.name && refEdit.rowId === row.id ? null : { rowId: row.id, name: String(ref.name), mode: 'update' })
-                        }}
-                      >✎</button>
-                    ) : null}
+                    <span className="vp-map-cardacts" onClick={(event) => event.stopPropagation()}>
+                      {ref.name && kitOf(String(ref.name)) ? (
+                        <span
+                          title={`Edit ${ref.name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
+                          onClick={(event) => {
+                            setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, event.clientX - 340)), y: Math.max(70, event.clientY - 40) })
+                            setRefEdit(refEdit && refEdit.name === ref.name && refEdit.rowId === row.id ? null : { rowId: row.id, name: String(ref.name), mode: 'update' })
+                          }}
+                        >✎</span>
+                      ) : null}
+                      <span title="Remove asset" onClick={() => { void removeReferenceAsset(row.id, index) }}>✕</span>
+                    </span>
                   </span>
                 )
               }
@@ -1837,10 +1835,70 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         <span>{row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
                     </div>
+                  </div>
+                  <div className="vg-prompt">
+                    <div className="vg-prompt-editor">
+                      <textarea
+                        value={row.draftText}
+                        onChange={(e) => setDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                        onBlur={() => persistDraft(row.id)}
+                        spellCheck={false}
+                      />
+                      <div className="vg-row-actions">
+                        {row.status === 'generating' ? (
+                          <span className="vg-row-run">
+                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="vp-undo"
+                          title="Attach an existing World Kit image to this shot — lands in the plan and syncs everywhere"
+                          onClick={() => setKitPickFor(kitPickFor === row.id ? null : row.id)}
+                        >
+                          {kitPickFor === row.id ? '▾' : '⧉'} Attach from kit
+                        </button>
+                        <label className="vp-undo">
+                          Upload reference image
+                          <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
+                        </label>
+                        {row.type === 'video' ? (
+                          <label className="vp-undo" title="The video OPENS on this exact image (kie first-frame mode)">
+                            Upload first frame
+                            <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'first_frame')} />
+                          </label>
+                        ) : null}
+                        {row.type === 'image' ? (
+                          <button
+                            type="button"
+                            className="vp-undo vg-generate-main"
+                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating'}
+                            title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
+                            onClick={() => queueRowGeneration(row.id, 'image')}
+                          >
+                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="vp-undo vg-generate-main"
+                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating' || videoTooLong(row)}
+                            title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, videoModel)} for this row`}
+                            onClick={() => queueRowGeneration(row.id, 'video')}
+                          >
+                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
                     {(mediaHistory[row.id] ?? []).length ? (
-                      <div style={{ marginTop: 10 }}>
-                        <span style={{ fontSize: 10, letterSpacing: '.08em', color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>PREVIOUS VERSIONS</span>
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+                      <details className="vp-section" style={{ marginTop: 10 }}>
+                        <summary className="vp-section-sum">
+                          <span className="vp-sec-title">Previous versions</span>
+                          <span className="vp-section-count">{(mediaHistory[row.id] ?? []).length}</span>
+                        </summary>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
                           {(mediaHistory[row.id] ?? []).map((v) => {
                             const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
                             const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
@@ -1875,77 +1933,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             )
                           })}
                         </div>
-                      </div>
+                      </details>
                     ) : null}
-                    {row.type === 'video' ? (
-                      <div className="vg-first-frame">
-                        <div className="vg-asset-head">
-                          <span className="vg-asset-label">First frame</span>
-                          {!firstFrameEntries.length ? (
-                            <label className="vp-undo">
-                              Upload first image frame
-                              <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'first_frame')} />
-                            </label>
-                          ) : null}
-                        </div>
-                        <div className="vg-first-frame-row">
-                          <span className="vg-refs">
-                            {firstFrameEntries.length ? firstFrameEntries.map((entry) => renderAssetThumb(entry, 'first_frame')) : <span>no first frame image</span>}
-                          </span>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="vg-prompt">
-                    <div className="vg-prompt-editor">
-                      <textarea
-                        value={row.draftText}
-                        onChange={(e) => setDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        onBlur={() => persistDraft(row.id)}
-                        spellCheck={false}
-                      />
-                      <div className="vg-row-actions">
-                        {row.status === 'generating' ? (
-                          <span className="vg-row-run">
-                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
-                          </span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="vp-undo"
-                          title="Attach an existing World Kit image to this shot — lands in the plan and syncs everywhere"
-                          onClick={() => setKitPickFor(kitPickFor === row.id ? null : row.id)}
-                        >
-                          {kitPickFor === row.id ? '▾' : '⧉'} Attach from kit
-                        </button>
-                        <label className="vp-undo">
-                          Upload reference image
-                          <input type="file" accept="image/*" onChange={(event) => uploadReferenceAsset(row.id, event, 'reference')} />
-                        </label>
-                        {row.type === 'image' ? (
-                          <button
-                            type="button"
-                            className="vp-undo vg-generate-main"
-                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating'}
-                            title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
-                            onClick={() => queueRowGeneration(row.id, 'image')}
-                          >
-                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="vp-undo vg-generate-main"
-                            disabled={genQueue.some((e) => e.id === row.id) || row.status === 'generating' || videoTooLong(row)}
-                            title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, videoModel)} for this row`}
-                            onClick={() => queueRowGeneration(row.id, 'video')}
-                          >
-                            {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {refEdit && refEdit.rowId === row.id && refEdit.mode === 'update' ? (
+                                        {refEdit && refEdit.rowId === row.id && refEdit.mode === 'update' ? (
                       <div style={{ border: '1px dashed var(--line-2)', borderRadius: 10, padding: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>EDIT {refEdit.name.toUpperCase()}</span>
@@ -2008,27 +1998,24 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             <span className="vg-ref-img" style={{ cursor: 'default' }}>
                               <img src={contentUrl(kitOf(name)!.image_path!)} alt={name} onLoad={equalAreaThumb} />
                             </span>
-                            <button
-                              type="button"
-                              className="vg-ref-remove"
-                              title={`Detach ${name} from this shot — everywhere (plan, shot list, prompts)`}
-                              onClick={(e) => { e.stopPropagation(); void editShotRef(row.id, name, { detach: true }).catch((err) => setBuildError(err instanceof Error ? err.message : 'detach failed')) }}
-                            >×</button>
-                            <button
-                              type="button"
-                              className="vg-ref-remove"
-                              style={{ right: 30 }}
-                              title={`Edit ${name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, e.clientX - 340)), y: Math.max(70, e.clientY - 40) })
-                                setRefEdit(refEdit?.name === name && refEdit.rowId === row.id ? null : { rowId: row.id, name, mode: 'update' })
-                              }}
-                            >✎</button>
+                            <span className="vp-map-cardacts" onClick={(e) => e.stopPropagation()}>
+                              <span
+                                title={`Edit ${name} — a new take of this object, or a variant (one deliberate change). Lands in the World Kit, shows on every step.`}
+                                onClick={(e) => {
+                                  setRefEditPos({ x: Math.max(16, Math.min(window.innerWidth - 700, e.clientX - 340)), y: Math.max(70, e.clientY - 40) })
+                                  setRefEdit(refEdit?.name === name && refEdit.rowId === row.id ? null : { rowId: row.id, name, mode: 'update' })
+                                }}
+                              >✎</span>
+                              <span
+                                title={`Detach ${name} from this shot — everywhere (plan, shot list, prompts)`}
+                                onClick={() => { void editShotRef(row.id, name, { detach: true }).catch((err) => setBuildError(err instanceof Error ? err.message : 'detach failed')) }}
+                              >✕</span>
+                            </span>
                           </span>
                         ))}
+                        {firstFrameEntries.map((entry) => renderAssetThumb(entry, 'first_frame'))}
                         {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
-                        {!kitImageEntries.length && !referenceEntries.length ? <span>no reference images attached</span> : null}
+                        {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
                     {textAssoc.length || audioAssoc.length || audioInherited.length || pendingRefs.length ? (
