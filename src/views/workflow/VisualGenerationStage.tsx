@@ -447,6 +447,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
   const [refSyncing, setRefSyncing] = useState(false)
   const [kitPickFor, setKitPickFor] = useState<string | null>(null)
+  // Which text-reference cards are expanded to full content (`rowId:name`).
+  const [openTxtCards, setOpenTxtCards] = useState<Set<string>>(new Set())
   // EDIT THE OBJECT ITSELF from step 9 — one source of truth, so a variant
   // or a new take made here lands in the World Kit and shows on every step.
   const [refEdit, setRefEdit] = useState<{ rowId: string; name: string; mode: 'variant' | 'update' } | null>(null)
@@ -1980,13 +1982,32 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         ))}
                         {firstFrameEntries.map((entry) => renderAssetThumb(entry, 'first_frame'))}
                         {referenceEntries.map((entry) => renderAssetThumb(entry, 'reference'))}
-                        {textAssoc.map(({ name, index }) => (
-                          <span key={`t-${index}`} className="vp-map-txtatt" title={kitOf(name)?.notes || `${name} — prompt-only: its description joins the prompt as text (no image goes to the model)`}>
-                            <span className="vp-map-chip">{kitOf(name)?.kind || 'ref'}</span>
-                            <span className="vp-map-attname">{name}</span>
-                            {kitOf(name)?.notes ? <span className="txt-notes">{kitOf(name)!.notes}</span> : null}
-                          </span>
-                        ))}
+                        {textAssoc.map(({ name, index }) => {
+                          const openKey = `${row.id}:${name}`
+                          const isOpen = openTxtCards.has(openKey)
+                          return (
+                            <span
+                              key={`t-${index}`}
+                              className="vp-map-txtatt"
+                              style={{ cursor: 'pointer', ...(isOpen ? { maxWidth: 420 } : {}) }}
+                              title={isOpen ? 'Click to collapse' : 'Click to show the full description'}
+                              onClick={() => setOpenTxtCards((cur) => {
+                                const next = new Set(cur)
+                                if (next.has(openKey)) next.delete(openKey)
+                                else next.add(openKey)
+                                return next
+                              })}
+                            >
+                              <span className="vp-map-chip">{kitOf(name)?.kind || 'ref'}</span>
+                              <span className="vp-map-attname">{name}</span>
+                              {kitOf(name)?.notes ? (
+                                <span className="txt-notes" style={isOpen ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : undefined}>
+                                  {kitOf(name)!.notes}
+                                </span>
+                              ) : null}
+                            </span>
+                          )
+                        })}
                         {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length && !textAssoc.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
