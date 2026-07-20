@@ -170,6 +170,16 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const [aiNoteFor, setAiNoteFor] = useState<string | null>(null)
   const [aiNote, setAiNote] = useState('')
   const [aiBusy, setAiBusy] = useState<string | null>(null)
+  // Description as it was when the page loaded — the description-tab AI
+  // button only makes sense after an actual change.
+  const descBaselineRef = useRef<Record<string, string>>({})
+  const [openCards, setOpenCards] = useState<Set<string>>(new Set())
+  const toggleCard = (key: string) => setOpenCards((cur) => {
+    const next = new Set(cur)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
   const savePromptEdit = async (id: string, text: string) => {
     if (!promptsDoc) return
     const items = (promptsDoc.items as Record<string, unknown>[] | undefined) ?? []
@@ -847,7 +857,6 @@ export function ShotListStage({ stageId }: { stageId: string }) {
               const isOpen = selected === `base:${event.id}`
               const grp = String((event as Record<string, unknown>).group ?? '')
               const agrp = String((event as Record<string, unknown>).audio_group ?? '')
-              const finalPrompt = assembled[event.id]
               return (
                 <section key={event.id} className={`sl-section ${isOpen ? 'on' : ''}`}>
                   <button
@@ -864,14 +873,21 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     const promptText = promptDrafts[event.id] ?? assembled[event.id] ?? ''
                     const noteOpen = aiNoteFor === event.id
                     const busy = aiBusy === event.id
+                    if (descBaselineRef.current[event.id] === undefined) descBaselineRef.current[event.id] = String(event.visual_direction || '')
+                    const descChanged = String(event.visual_direction || '') !== descBaselineRef.current[event.id]
+                    const editorStyle: React.CSSProperties = {
+                      display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
+                      color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
+                      padding: '8px 10px', fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--mono)',
+                    }
                     return (
-                      <div className="sl-script">
-                        <span>
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ marginBottom: 8 }}>
                           <span className="vp-viewtoggle" style={{ display: 'inline-flex' }}>
                             <button type="button" className={tab === 'prompt' ? 'on' : ''} onClick={() => setClipTab((c) => ({ ...c, [event.id]: 'prompt' }))}>Prompt</button>
                             <button type="button" className={tab === 'description' ? 'on' : ''} onClick={() => setClipTab((c) => ({ ...c, [event.id]: 'description' }))}>Description</button>
                           </span>
-                        </span>
+                        </div>
                         <div>
                           {tab === 'prompt' ? (
                             assembled[event.id] !== undefined ? (
@@ -882,12 +898,21 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                                   spellCheck={false}
                                   onChange={(e) => setPromptDrafts((c) => ({ ...c, [event.id]: e.target.value }))}
                                   onBlur={() => { if (promptDrafts[event.id] !== undefined && promptDrafts[event.id] !== assembled[event.id]) void savePromptEdit(event.id, promptDrafts[event.id]) }}
-                                  style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--mono)' }}
+                                  style={editorStyle}
                                 />
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
                                   <span className={`vg-split-action ${noteOpen ? 'open' : ''}`}>
                                     <button type="button" className="vg-split-toggle" disabled={busy} title="Add a note before updating the prompt" onClick={() => { setAiNoteFor(noteOpen ? null : event.id); setAiNote('') }}>▾</button>
-                                    <button type="button" className="vp-undo vg-split-main" disabled={busy || !noteOpen || !aiNote.trim()} title="Tell the AI how the prompt should change (open the note first)" onClick={() => void aiUpdatePrompt(event.id, aiNote)}>
+                                    <button
+                                      type="button"
+                                      className="vp-undo vg-split-main"
+                                      disabled={busy}
+                                      title="Opens the note — tell the AI how the prompt should change"
+                                      onClick={() => {
+                                        if (!noteOpen) { setAiNoteFor(event.id); setAiNote(''); return }
+                                        if (aiNote.trim()) void aiUpdatePrompt(event.id, aiNote)
+                                      }}
+                                    >
                                       {busy ? 'Updating…' : '✦ Update prompt with AI'}
                                     </button>
                                   </span>
@@ -920,14 +945,14 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                                   setStageDraft(stageId, JSON.stringify(next, null, 2))
                                   setEdited(true)
                                 }}
-                                style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 14, lineHeight: 1.55 }}
+                                style={editorStyle}
                               />
                               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
                                 <button
                                   type="button"
-                                  className="vp-undo"
-                                  disabled={busy || assembled[event.id] === undefined}
-                                  title={assembled[event.id] === undefined ? 'Prompts aren’t built yet' : 'Rewrite this clip’s prompt from the revised description (uses model credits)'}
+                                  className="vp-undo vg-split-main"
+                                  disabled={busy || !descChanged || assembled[event.id] === undefined}
+                                  title={assembled[event.id] === undefined ? 'Prompts aren’t built yet' : !descChanged ? 'Change the description first — the AI rewrites the prompt FROM it' : 'Rewrite this clip’s prompt from the revised description (uses model credits)'}
                                   onClick={() => void aiUpdatePrompt(event.id, `The clip description was revised to: "${String(event.visual_direction || '').trim()}". Rewrite the prompt to match it.`)}
                                 >
                                   {busy ? 'Updating…' : '✦ Update prompt with AI'}
@@ -953,11 +978,24 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                       .filter((k) => AUD.has(k.kind) && k.linked_to && !attachedAudio.includes(k.name))
                       .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))
                     if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length && !pending.length) return null
+                    const cardFor = (key: string, chip: string, name: string, notes?: string) => {
+                      const isOpen = openCards.has(key)
+                      return (
+                        <span
+                          key={key}
+                          className="vp-map-txtatt"
+                          style={{ cursor: 'pointer', ...(isOpen ? { maxWidth: 420 } : {}) }}
+                          title={isOpen ? 'Click to collapse' : 'Click to show the full content'}
+                          onClick={() => toggleCard(key)}
+                        >
+                          <span className="vp-map-chip">{chip}</span>
+                          <span className="vp-map-attname">{name}</span>
+                          {notes ? <span className="txt-notes" style={isOpen ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : undefined}>{notes}</span> : null}
+                        </span>
+                      )
+                    }
                     return (
-                      // Same grid as the Direction row: the thumbs share the
-                      // text's left edge, not the label gutter's; top-aligned.
-                      <div className="sl-script" style={{ marginTop: 10 }}>
-                        <span />
+                      <div style={{ marginTop: 10 }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         {imgs.map((n) => (
                           <img
@@ -977,27 +1015,9 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                             }}
                           />
                         ))}
-                        {texts.map((n) => (
-                          <span key={n} className="vp-map-txtatt" title={find(n)?.notes || `${n} — prompt-only: its description joins the prompt as text`}>
-                            <span className="vp-map-chip">{find(n)?.kind || 'ref'}</span>
-                            <span className="vp-map-attname">{n}</span>
-                            {find(n)?.notes ? <span className="txt-notes">{find(n)!.notes}</span> : null}
-                          </span>
-                        ))}
-                        {attachedAudio.map((n) => (
-                          <span key={n} className="vp-map-txtatt" title={find(n)?.notes || n}>
-                            <span className="vp-map-chip">♪ {find(n)?.kind || 'audio'}</span>
-                            <span className="vp-map-attname">{n} · this clip</span>
-                            {find(n)?.notes ? <span className="txt-notes">{find(n)!.notes}</span> : null}
-                          </span>
-                        ))}
-                        {inherited.map((k) => (
-                          <span key={k.name} className="vp-map-txtatt" title={k.notes || k.name}>
-                            <span className="vp-map-chip">♪ {k.kind}</span>
-                            <span className="vp-map-attname">{k.name} · via {k.linked_to}</span>
-                            {k.notes ? <span className="txt-notes">{k.notes}</span> : null}
-                          </span>
-                        ))}
+                        {texts.map((n) => cardFor(`${event.id}:t:${n}`, find(n)?.kind || 'ref', n, find(n)?.notes))}
+                        {attachedAudio.map((n) => cardFor(`${event.id}:a:${n}`, `♪ ${find(n)?.kind || 'audio'}`, `${n} · this clip`, find(n)?.notes))}
+                        {inherited.map((k) => cardFor(`${event.id}:i:${k.name}`, `♪ ${k.kind}`, `${k.name} · via ${k.linked_to}`, k.notes))}
                         {pending.map((n) => (
                           <span key={`p-${n}`} className="vp-undo" style={{ cursor: 'default', borderColor: 'var(--amber)', color: 'var(--amber)' }} title={`${n} is attached in the pacing plan but not in the compiled shot list yet — Sync refs (free) applies it.`}>
                             {AUD.has(find(n)?.kind ?? '') ? '♪ ' : ''}{n} · in plan, not synced
@@ -1012,17 +1032,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                       </div>
                     )
                   })()}
-                  {finalPrompt ? (
-                    <details className="sl-json">
-                      <summary>Assembled prompt the model receives (from the generation step)</summary>
-                      <pre style={{ whiteSpace: 'pre-wrap' }}>{finalPrompt}</pre>
-                    </details>
-                  ) : (
-                    <p className="sl-empty" style={{ margin: '6px 0 0' }}>
-                      Final assembled prompt (style anchor + reference handling + voice pin) is composed and reviewed at the generation step.
-                    </p>
-                  )}
-                  <details className="sl-json">
+                  <details className="sl-json" style={{ marginLeft: 0 }}>
                     <summary>JSON for {event.id}</summary>
                     <pre>{pretty(event)}</pre>
                   </details>

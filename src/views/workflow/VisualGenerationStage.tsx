@@ -2008,20 +2008,23 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             </span>
                           )
                         })}
-                        {audioAssoc.map((n) => (
-                          <span key={`a-${n}`} className="vp-map-txtatt" title={kitOf(n)?.notes || `${n} — sound direction + reference audio for this clip`}>
-                            <span className="vp-map-chip">♪ {kitOf(n)?.kind || 'audio'}</span>
-                            <span className="vp-map-attname">{n} · this clip</span>
-                            {kitOf(n)?.notes ? <span className="txt-notes">{kitOf(n)!.notes}</span> : null}
-                          </span>
-                        ))}
-                        {audioInherited.map((k) => (
-                          <span key={`i-${k.name}`} className="vp-map-txtatt" title={k.notes || k.name}>
-                            <span className="vp-map-chip">♪ {k.kind}</span>
-                            <span className="vp-map-attname">{k.name} · via {k.linked_to}</span>
-                            {k.notes ? <span className="txt-notes">{k.notes}</span> : null}
-                          </span>
-                        ))}
+                        {[...audioAssoc.map((n) => ({ key: `${row.id}:a:${n}`, chip: `♪ ${kitOf(n)?.kind || 'audio'}`, label: `${n} · this clip`, notes: kitOf(n)?.notes })),
+                          ...audioInherited.map((k) => ({ key: `${row.id}:i:${k.name}`, chip: `♪ ${k.kind}`, label: `${k.name} · via ${k.linked_to}`, notes: k.notes }))].map((c) => {
+                          const isOpen = openTxtCards.has(c.key)
+                          return (
+                            <span
+                              key={c.key}
+                              className="vp-map-txtatt"
+                              style={{ cursor: 'pointer', ...(isOpen ? { maxWidth: 420 } : {}) }}
+                              title={isOpen ? 'Click to collapse' : 'Click to show the full content'}
+                              onClick={() => setOpenTxtCards((cur) => { const next = new Set(cur); if (next.has(c.key)) next.delete(c.key); else next.add(c.key); return next })}
+                            >
+                              <span className="vp-map-chip">{c.chip}</span>
+                              <span className="vp-map-attname">{c.label}</span>
+                              {c.notes ? <span className="txt-notes" style={isOpen ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : undefined}>{c.notes}</span> : null}
+                            </span>
+                          )
+                        })}
                         {!kitImageEntries.length && !referenceEntries.length && !firstFrameEntries.length && !textAssoc.length ? <span>no reference images attached</span> : null}
                       </span>
                     </div>
@@ -2042,11 +2045,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       </div>
                     ) : null}
                     {(mediaHistory[row.id] ?? []).length ? (
-                      <details className="vp-section" style={{ borderTop: 'none', marginTop: 6 }}>
-                        <summary className="vp-section-sum" style={{ padding: '4px 0 0' }}>
-                          <span className="vp-sec-title">Previous versions</span>
-                          <span className="vp-section-count">{(mediaHistory[row.id] ?? []).length}</span>
-                        </summary>
+                      <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
+                        <summary>Previous versions · {(mediaHistory[row.id] ?? []).length}</summary>
                         <div className="vg-refs" style={{ marginTop: 8 }}>
                           {(mediaHistory[row.id] ?? []).map((v) => {
                             const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
