@@ -1760,7 +1760,7 @@ export function VisualReviewStage({
     sizes: Record<string, number>,
     update: Dispatch<SetStateAction<Record<string, number>>>,
     onResize?: (delta: number) => void,
-    maxFirstHeight?: number,
+    tradeHeights = false,
   ) => {
     const first = document.querySelector<HTMLElement>(`[data-layout-id="${firstId}"]`)
     const second = document.querySelector<HTMLElement>(`[data-layout-id="${secondId}"]`)
@@ -1775,9 +1775,26 @@ export function VisualReviewStage({
       const current = axis === 'x' ? moveEvent.clientX : moveEvent.clientY
       const delta = current - start
       if (axis === 'y') {
-        const minHeight = resizeMinHeight(first)
-        const maxHeight = Math.min(resizeContentHeight(first, minHeight), maxFirstHeight ?? Infinity)
-        const nextFirst = Math.min(maxHeight, Math.max(minHeight, firstStart + delta))
+        const minFirst = resizeMinHeight(first)
+        const maxFirst = resizeContentHeight(first, minFirst)
+        if (tradeHeights) {
+          // ZERO-SUM: what one row gains the other gives up — the total (and
+          // the card) never changes size, and growth is possible as long as
+          // the neighbor can still shrink.
+          const minSecond = resizeMinHeight(second)
+          const maxSecond = resizeContentHeight(second, minSecond)
+          const applied = delta >= 0
+            ? Math.min(delta, maxFirst - firstStart, secondStart - minSecond)
+            : Math.max(delta, minFirst - firstStart, secondStart - maxSecond)
+          onResize?.(applied)
+          update((currentSizes) => ({
+            ...currentSizes,
+            [firstId]: firstStart + applied,
+            [secondId]: secondStart - applied,
+          }))
+          return
+        }
+        const nextFirst = Math.min(maxFirst, Math.max(minFirst, firstStart + delta))
         onResize?.(nextFirst - firstStart)
         update((currentSizes) => ({
           ...currentSizes,
@@ -1969,10 +1986,11 @@ export function VisualReviewStage({
     secondId: string,
   ) => {
     manualRowSizeIdsRef.current.add(firstId)
+    manualRowSizeIdsRef.current.add(secondId)
     const plan = rowPanelResizePlan(firstId)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
-    }, expandedRowMaxHeight(firstId))
+    }, true)
   }
 
   const startReviewLastRowResize = (

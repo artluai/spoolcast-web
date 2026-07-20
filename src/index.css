@@ -1232,6 +1232,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vr-layout-row.is-row-sized { overflow: hidden; }
 .vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-panel[open]) { container-type: size; }
 .vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-panel[open]) > .vr-panel > .vr-panel-body { max-height: calc(100cqh - 32px); overflow: auto; }
+/* The timeline's title floats as an overlay (no header row above its body),
+   so its body gets the WHOLE slot — a -32px header budget was clipping the
+   hint line and zoom controls. */
+.vr-panel-slot.is-sized:has(> .vr-timeline-panel[open]) > .vr-panel > .vr-panel-body,
+.vr-layout-row.is-row-sized .vr-panel-slot:has(> .vr-timeline-panel[open]) > .vr-panel > .vr-panel-body,
+.detail-card.step-check.full .vr-panel-slot:has(> .vr-timeline-panel[open]) > .vr-panel > .vr-panel-body { max-height: 100cqh; }
 .detail-card.step-check.full .vr-preview:hover .vr-player-controls,
 .detail-card.step-check.full .vr-preview:focus-within .vr-player-controls { opacity: 1; transform: none; pointer-events: auto; }
 .detail-card.step-check.full .vr-player-controls { bottom: 18px; }
