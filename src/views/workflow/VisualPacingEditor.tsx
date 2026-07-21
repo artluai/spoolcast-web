@@ -306,6 +306,46 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
   // removals are shown in a popup before anything is applied. (Hook lives
   // ABOVE the no-draft early return: hooks run in call order.)
   const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
+  // PERMANENT SHOT IDS: after an AI redraft the engine writes what changed
+  // (updated / added / removed, matched by the script moment each shot
+  // covers) to working/pacing-diff.json. Shown ONCE per redraft, with a
+  // one-click revert to the backup plan the drafter kept.
+  type PacingDiffEntry = { id: string; what: string }
+  const [pacingDiff, setPacingDiff] = useState<{ at: string; updated: PacingDiffEntry[]; unchanged: PacingDiffEntry[]; added: PacingDiffEntry[]; removed: PacingDiffEntry[] } | null>(null)
+  const pacingDiffSeenKey = `spoolcast-pacing-diff-seen:${activeSession()}`
+  useEffect(() => {
+    let live = true
+    const check = async () => {
+      try {
+        const r = await fetch(fileUrl('working/pacing-diff.json'))
+        if (!r.ok) return
+        const j = await r.json()
+        const doc = typeof j?.data?.content === 'string' ? JSON.parse(j.data.content) : null
+        if (!live || !doc?.at) return
+        if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
+        setPacingDiff(doc)
+      } catch { /* engine offline or no diff yet */ }
+    }
+    void check()
+    const timer = window.setInterval(check, 6000)
+    return () => { live = false; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const dismissPacingDiff = () => {
+    if (pacingDiff) window.localStorage.setItem(pacingDiffSeenKey, pacingDiff.at)
+    setPacingDiff(null)
+  }
+  const revertPacingRedraft = async () => {
+    try {
+      await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'revert_visual_pacing' }),
+      })
+    } catch { /* engine offline — the modal stays dismissable */ }
+    dismissPacingDiff()
+    window.location.reload()
+  }
   // null = no user preference yet: hidden by default on the mapping board
   // (the board is the star there), shown by default on script/table.
   const [tlOpen, setTlOpen] = useState<boolean | null>(null)
@@ -2038,6 +2078,46 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
             />
           ) : null}
 
+          {pacingDiff ? (
+        <div className="modal-scrim">
+          <div className="confirm-modal" style={{ minWidth: 460, maxWidth: 640 }}>
+            <span className="need">AI REDRAFT</span>
+            <h3>What changed in the shot plan</h3>
+            <p>
+              Shots keep their permanent ids: matched shots kept their attachments,
+              new shots start fresh, removed ids retire.
+              {pacingDiff.unchanged.length ? ` ${pacingDiff.unchanged.length} shot(s) untouched.` : ''}
+            </p>
+            <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
+              {pacingDiff.updated.map((e) => (
+                <p key={`u-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
+                  <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
+                  <span style={{ color: 'var(--amber)' }}> updated</span>
+                  <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
+                </p>
+              ))}
+              {pacingDiff.added.map((e) => (
+                <p key={`a-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
+                  <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
+                  <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
+                  <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
+                </p>
+              ))}
+              {pacingDiff.removed.map((e) => (
+                <p key={`r-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
+                  <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
+                  <span style={{ color: 'var(--red, #e5534b)' }}> removed</span>
+                  <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
+                </p>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" className="vp-undo" onClick={() => void revertPacingRedraft()}>Revert redraft</button>
+              <button type="button" className="vp-save" onClick={dismissPacingDiff}>Keep</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
           {mapProposal ? (
         <div className="modal-scrim">
           <div className="confirm-modal" style={{ minWidth: 460 }}>
