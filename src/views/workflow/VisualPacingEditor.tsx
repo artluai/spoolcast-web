@@ -23,7 +23,8 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay } from '../../lib/screenplay-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
+import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
 import { FeedbackButton } from './FeedbackButton'
@@ -59,16 +60,7 @@ const shotNoun = (n: number, medium?: string) => {
   return n === 1 ? 'shot' : 'shots'
 }
 
-export type PacingRedraftControls = {
-  run: (feedback: string) => void
-  busy: boolean
-  busyLabel: string
-  error: string | null
-  model: string
-  setModel: (m: string) => void
-}
-
-export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redraft?: PacingRedraftControls }) {
+export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiUpdate?: boolean }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const [history, setHistory] = useState<string[]>([])
@@ -317,25 +309,53 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
   // removals are shown in a popup before anything is applied. (Hook lives
   // ABOVE the no-draft early return: hooks run in call order.)
   const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
-  // PERMANENT SHOT IDS: after an AI redraft the engine writes what changed
-  // (updated / added / removed, matched by the script moment each shot
-  // covers) to working/pacing-diff.json. Shown ONCE per redraft, with a
-  // one-click revert to the backup plan the drafter kept.
+  // WHAT-CHANGED MODAL: after an AI update the engine writes the combined
+  // diff (script line changes + plan changes + which media went stale) to
+  // working/update-diff.json — or, for a plain plan redraft, just
+  // working/pacing-diff.json. Shown ONCE per run, with one-click revert.
   type PacingDiffEntry = { id: string; what: string }
-  const [pacingDiff, setPacingDiff] = useState<{ at: string; updated: PacingDiffEntry[]; unchanged: PacingDiffEntry[]; added: PacingDiffEntry[]; removed: PacingDiffEntry[] } | null>(null)
+  type ScriptChange = { clip: number; before_line: string; after_line: string; before_screen: string; after_screen: string }
+  type CombinedDiff = {
+    at: string
+    script: ScriptChange[]
+    plan: { updated: PacingDiffEntry[]; unchanged: PacingDiffEntry[]; added: PacingDiffEntry[]; removed: PacingDiffEntry[] } | null
+    regenerate: string[]
+    narrationStale: string[]
+  }
+  const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   const pacingDiffSeenKey = `spoolcast-pacing-diff-seen:${activeSession()}`
   useEffect(() => {
     let live = true
-    const check = async () => {
+    const readJson = async (rel: string) => {
       try {
-        const r = await fetch(fileUrl('working/pacing-diff.json'))
-        if (!r.ok) return
+        const r = await fetch(fileUrl(rel))
+        if (!r.ok) return null
         const j = await r.json()
-        const doc = typeof j?.data?.content === 'string' ? JSON.parse(j.data.content) : null
-        if (!live || !doc?.at) return
-        if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
-        setPacingDiff(doc)
-      } catch { /* engine offline or no diff yet */ }
+        return typeof j?.data?.content === 'string' ? JSON.parse(j.data.content) : null
+      } catch { return null }
+    }
+    const check = async () => {
+      const [upd, pac] = await Promise.all([
+        readJson('working/update-diff.json'),
+        readJson('working/pacing-diff.json'),
+      ])
+      if (!live) return
+      // Prefer the combined diff when it is the newer of the two.
+      const useUpd = upd?.at && (!pac?.at || upd.at >= pac.at)
+      const doc: CombinedDiff | null = useUpd && upd?.at
+        ? {
+            at: upd.at,
+            script: Array.isArray(upd.screenplay_changes) ? upd.screenplay_changes : [],
+            plan: upd.plan ?? null,
+            regenerate: Array.isArray(upd.regenerate_shots) ? upd.regenerate_shots : [],
+            narrationStale: Array.isArray(upd.narration_stale_chunks) ? upd.narration_stale_chunks : [],
+          }
+        : pac?.at
+          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [] }
+          : null
+      if (!doc) return
+      if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
+      setPacingDiff(doc)
     }
     void check()
     const timer = window.setInterval(check, 6000)
@@ -345,6 +365,62 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
   const dismissPacingDiff = () => {
     if (pacingDiff) window.localStorage.setItem(pacingDiffSeenKey, pacingDiff.at)
     setPacingDiff(null)
+  }
+  // THE WRITE-THROUGH CHAIN: the note is applied to the SCREENPLAY first,
+  // then the plan and shot list re-derive (permanent ids keep mappings).
+  // Runs as an engine job — transactional: on failure nothing changes.
+  const [updBusy, setUpdBusy] = useState(false)
+  const [updErr, setUpdErr] = useState<string | null>(null)
+  const [updModel, setUpdModel] = useState(DEFAULT_MODEL_ID)
+  const [updAllowAll, setUpdAllowAll] = useState(false)
+  const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
+  const runUpdate = async (feedback: string) => {
+    setUpdBusy(true)
+    setUpdErr(null)
+    try {
+      const res = await fetch(jobsUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          kind: 'update_screenplay',
+          model: updModel,
+          allow_cost: true,
+          allow_all: updAllowAll,
+          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+          ...(draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setUpdErr(out?.message || out?.error || 'Could not start the update.')
+        return
+      }
+      const jobId = String(out?.data?.id || '')
+      for (let i = 0; i < 240; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2500))
+        const jr = await fetch(jobsUrl(jobId))
+        const jout = await jr.json().catch(() => null)
+        const job = jout?.data
+        if (job?.status === 'done') {
+          // The plan file changed under the local draft — drop the stale
+          // draft and reload; the what-changed modal picks it up from there.
+          clearStageDrafts(stageId)
+          window.location.reload()
+          return
+        }
+        if (job?.status === 'failed') {
+          setUpdErr(job?.message || job?.error || 'Update failed — every file was restored.')
+          return
+        }
+      }
+      setUpdErr('The update is taking unusually long — check the engine.')
+    } catch {
+      setUpdErr('Could not reach the engine.')
+    } finally {
+      setUpdBusy(false)
+    }
   }
   const [resetNote, setResetNote] = useState<string | null>(null)
   // Whether an AI-update backup exists — Reset stays disabled until one does.
@@ -2129,30 +2205,45 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
 
           {pacingDiff ? (
         <div className="modal-scrim">
-          <div className="confirm-modal" style={{ minWidth: 460, maxWidth: 640 }}>
-            <span className="need">AI REDRAFT</span>
-            <h3>What changed in the shot plan</h3>
+          <div className="confirm-modal" style={{ minWidth: 460, maxWidth: 680 }}>
+            <span className="need">AI UPDATE</span>
+            <h3>What changed</h3>
             <p>
-              Shots keep their permanent ids: matched shots kept their attachments,
-              new shots start fresh, removed ids retire.
-              {pacingDiff.unchanged.length ? ` ${pacingDiff.unchanged.length} shot(s) untouched.` : ''}
+              The screenplay is the source of truth; the plan and shot list re-derived from it.
+              Shots keep their permanent ids and attachments.
+              {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
-            <div style={{ maxHeight: '40vh', overflow: 'auto' }}>
-              {pacingDiff.updated.map((e) => (
+            <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
+              {pacingDiff.script.map((c) => (
+                <div key={`s-${c.clip}`} style={{ margin: '8px 0', fontSize: 13 }}>
+                  <b style={{ fontFamily: 'var(--mono)' }}>clip {c.clip}</b>
+                  <span style={{ color: 'var(--amber)' }}> script changed</span>
+                  {c.before_line !== c.after_line ? (
+                    <>
+                      <p style={{ margin: '3px 0 0', color: 'var(--ink-3)', textDecoration: 'line-through' }}>“{c.before_line}”</p>
+                      <p style={{ margin: '2px 0 0', color: 'var(--ink)' }}>“{c.after_line}”</p>
+                    </>
+                  ) : null}
+                  {c.before_screen !== c.after_screen ? (
+                    <p style={{ margin: '2px 0 0', color: 'var(--ink-3)' }}>visual: {c.after_screen}</p>
+                  ) : null}
+                </div>
+              ))}
+              {(pacingDiff.plan?.updated ?? []).map((e) => (
                 <p key={`u-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
                   <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
                   <span style={{ color: 'var(--amber)' }}> updated</span>
                   <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
                 </p>
               ))}
-              {pacingDiff.added.map((e) => (
+              {(pacingDiff.plan?.added ?? []).map((e) => (
                 <p key={`a-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
                   <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
                   <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
                   <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
                 </p>
               ))}
-              {pacingDiff.removed.map((e) => (
+              {(pacingDiff.plan?.removed ?? []).map((e) => (
                 <p key={`r-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
                   <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
                   <span style={{ color: 'var(--red, #e5534b)' }}> removed</span>
@@ -2160,8 +2251,18 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
                 </p>
               ))}
             </div>
+            {pacingDiff.regenerate.length ? (
+              <p style={{ color: 'var(--amber)', fontSize: 12.5, margin: '10px 0 0' }}>
+                Already-generated clips that no longer match: {pacingDiff.regenerate.join(', ')} — regenerate them on the generation step.
+              </p>
+            ) : null}
+            {pacingDiff.narrationStale.length ? (
+              <p style={{ color: 'var(--amber)', fontSize: 12.5, margin: '10px 0 0' }}>
+                Narration audio is now stale for {pacingDiff.narrationStale.join(', ')} — regenerate those sections’ audio.
+              </p>
+            ) : null}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
-              <button type="button" className="vp-undo" onClick={() => void revertPacingRedraft()}>Revert redraft</button>
+              <button type="button" className="vp-undo" onClick={() => void revertPacingRedraft()}>Revert everything</button>
               <button type="button" className="vp-save" onClick={dismissPacingDiff}>Keep</button>
             </div>
           </div>
@@ -2363,32 +2464,43 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
         </button>
       </details>
 
-      {redraft ? (
-        // The redraft lives HERE (below Overlays), as a collapsed section in
-        // the same design — expand it and the house notebox + run button is
-        // already open. Shots keep permanent ids; the diff modal follows.
+      {aiUpdate ? (
+        // THE WRITE-THROUGH CHAIN, below Overlays as a collapsed section in
+        // the house design. Your note updates the SCREENPLAY first, then the
+        // plan and shot list re-derive — one truth, three documents.
         <details className="vp-section">
           <summary className="vp-section-sum">
             <span className="vp-sec-title">Update screenplay with AI</span>
           </summary>
           <p style={{ color: 'var(--ink-3)', fontSize: 12.5, lineHeight: 1.5, margin: '8px 0 10px' }}>
-            Redrafts the shot plan from the approved screenplay plus your notes. Shots keep their
-            permanent ids and attachments — afterwards you’ll see exactly what changed and can revert.
+            Your note is applied to the screenplay first, then the shot plan and shot list
+            re-derive from it. Shots keep their permanent ids and attachments; only the shots
+            your note is about may change. Afterwards you’ll see exactly what changed — and can
+            revert everything in one click. If it fails midway, nothing changes at all.
           </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', margin: '0 0 8px' }}>
+            <input
+              type="checkbox"
+              checked={updAllowAll}
+              onChange={(e) => setUpdAllowAll(e.target.checked)}
+              style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+            />
+            allow other shots to be changed as needed
+          </label>
           <FeedbackButton
             alwaysOpen
-            label={redraft.busy ? 'Updating…' : 'Update screenplay with AI'}
-            busy={redraft.busy}
-            busyLabel={redraft.busyLabel}
-            title="Runs the AI"
+            label={updBusy ? 'Updating…' : 'Update screenplay with AI'}
+            busy={updBusy}
+            busyLabel="Updating…"
+            title="Screenplay → plan → shot list, in that order (uses model credits)"
             rulesFocus="visual-pacing"
             historyKey="draft-notes-visual-pacing"
             ruleStep="visual_pacing"
-            runExtras={<ModelPicker model={redraft.model} onChange={redraft.setModel} disabled={redraft.busy} />}
-            onRun={redraft.run}
+            runExtras={<ModelPicker model={updModel} onChange={setUpdModel} disabled={updBusy} />}
+            onRun={(fb) => void runUpdate(fb)}
           />
-          {redraft.error ? (
-            <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {redraft.error}</span>
+          {updErr ? (
+            <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {updErr}</span>
           ) : null}
         </details>
       ) : null}

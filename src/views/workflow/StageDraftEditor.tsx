@@ -346,9 +346,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
-      {/* The pacing stage hosts its own redraft control (a collapsed section
-          below Overlays inside the editor) — no top row there. */}
-      {!needRewind && cfg.aiDraft && (stageCurrent || draft.trim()) && cfg.structured !== 'pacing' ? (
+      {/* The pacing stage hosts its own AI-update control (a collapsed section
+          below Overlays inside the editor) once a draft exists — the top row
+          only serves its FIRST draft. */}
+      {!needRewind && cfg.aiDraft && (stageCurrent || draft.trim()) && (cfg.structured !== 'pacing' || !draft.trim()) ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           <FeedbackButton
             label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
@@ -391,17 +392,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
               // STRUCTURED MODE (visual pacing): timeline/table/script views over the
               // plan markdown — parse → edit → serialize, same draft the engine reads.
               // The redraft control renders INSIDE the editor, below Overlays.
-              <VisualPacingEditor
-                stageId={stageId}
-                redraft={cfg.aiDraft && (stageCurrent || draft.trim()) ? {
-                  run: (fb: string) => runDraft(fb),
-                  busy: isBusy,
-                  busyLabel: (draftJob?.status || stageProcess?.status) === 'queued' ? 'Queued…' : 'Working…',
-                  error: draftError,
-                  model,
-                  setModel,
-                } : undefined}
-              />
+              <VisualPacingEditor stageId={stageId} aiUpdate={Boolean(cfg.aiDraft && draft.trim())} />
             ) : cfg.structured === 'worldkit' ? (
               // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
               // warnings, undo, and reset-to-default — always visible when content exists.
