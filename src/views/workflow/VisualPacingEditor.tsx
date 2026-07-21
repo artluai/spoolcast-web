@@ -347,6 +347,44 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
     setPacingDiff(null)
   }
   const [resetNote, setResetNote] = useState<string | null>(null)
+  // Whether an AI-update backup exists — Reset stays disabled until one does.
+  const [hasPrevPlan, setHasPrevPlan] = useState(false)
+  useEffect(() => {
+    let live = true
+    const check = () => {
+      fetch(fileUrl('working/visual-pacing-plan.prev.md'))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (live) setHasPrevPlan(Boolean(j?.data?.exists ?? j?.data?.content)) })
+        .catch(() => { /* engine offline */ })
+    }
+    check()
+    const timer = window.setInterval(check, 8000)
+    return () => { live = false; window.clearInterval(timer) }
+  }, [])
+  // SAVE: flush the board's two drafts (plan + any kit edits made here) to
+  // the engine files — the same writes the downstream sync chains perform.
+  const planDirty = useWorkflowStore((s) => Boolean(s.dirtySteps[stageId] || s.dirtySteps['world_kit']))
+  const [planSave, setPlanSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const savePlanNow = async () => {
+    setPlanSave('saving')
+    try {
+      const post = (stage_id: string, path: string, content: string) => fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id, path, content }),
+      }).then(async (r) => {
+        const j = await r.json().catch(() => null)
+        if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || 'save failed')
+      })
+      if (wkDraft.trim()) await post('world_kit', 'working/world-kit.md', wkDraft)
+      if (draft.trim()) await post(stageId, 'working/visual-pacing-plan.md', draft)
+      setPlanSave('saved')
+      window.setTimeout(() => setPlanSave('idle'), 2500)
+    } catch {
+      setPlanSave('error')
+      window.setTimeout(() => setPlanSave('idle'), 4000)
+    }
+  }
   const revertPacingRedraft = async () => {
     try {
       const r = await fetch(actionUrl(), {
@@ -1550,7 +1588,10 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
               type="button"
               className="vp-undo"
               style={{ marginLeft: 8 }}
-              title="Swap back to the plan as it was before the last AI update (pressing again swaps forward)"
+              disabled={!hasPrevPlan}
+              title={hasPrevPlan
+                ? 'Swap back to the plan as it was before the last AI update (pressing again swaps forward)'
+                : 'Enabled after an AI update creates a backup to reset to'}
               onClick={() => { setResetNote(null); void revertPacingRedraft() }}
             >
               ↺ Reset to original
@@ -1561,6 +1602,16 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
             </button>
           </>
         ) : null}
+        <button
+          type="button"
+          className="vp-save"
+          style={{ marginLeft: 'auto' }}
+          disabled={planSave === 'saving' || (!planDirty && planSave === 'idle')}
+          title={planDirty ? 'Write the plan (and any kit edits made here) to the engine files' : 'No unsaved changes'}
+          onClick={() => void savePlanNow()}
+        >
+          {planSave === 'saving' ? 'Saving…' : planSave === 'saved' ? 'Saved ✓' : planSave === 'error' ? 'Save failed — retry' : 'Save'}
+        </button>
         {view !== 'map' ? (
         <button
           type="button"
@@ -2358,22 +2409,18 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
             Redrafts the shot plan from the approved screenplay plus your notes. Shots keep their
             permanent ids and attachments — afterwards you’ll see exactly what changed and can revert.
           </p>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 420px', minWidth: 320 }}>
-              <FeedbackButton
-                alwaysOpen
-                label={redraft.busy ? 'Updating…' : 'Update screenplay with AI'}
-                busy={redraft.busy}
-                busyLabel={redraft.busyLabel}
-                title="Runs the AI"
-                rulesFocus="visual-pacing"
-                historyKey="draft-notes-visual-pacing"
-                ruleStep="visual_pacing"
-                onRun={redraft.run}
-              />
-            </div>
-            <ModelPicker model={redraft.model} onChange={redraft.setModel} disabled={redraft.busy} />
-          </div>
+          <FeedbackButton
+            alwaysOpen
+            label={redraft.busy ? 'Updating…' : 'Update screenplay with AI'}
+            busy={redraft.busy}
+            busyLabel={redraft.busyLabel}
+            title="Runs the AI"
+            rulesFocus="visual-pacing"
+            historyKey="draft-notes-visual-pacing"
+            ruleStep="visual_pacing"
+            runExtras={<ModelPicker model={redraft.model} onChange={redraft.setModel} disabled={redraft.busy} />}
+            onRun={redraft.run}
+          />
           {redraft.error ? (
             <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {redraft.error}</span>
           ) : null}

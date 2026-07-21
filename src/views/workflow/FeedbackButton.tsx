@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { appendUserRule, SERIES_RULES_ID } from '../../lib/rules'
 import { postAction } from '../../lib/api'
 
@@ -29,6 +29,7 @@ export function FeedbackButton({
   historyKey,
   ruleStep,
   alwaysOpen = false,
+  runExtras,
   onRun,
 }: {
   label: string
@@ -48,6 +49,9 @@ export function FeedbackButton({
   // Render the notebox permanently (no collapsed pill, no ▴) — for hosts that
   // put the control inside their own collapsible section.
   alwaysOpen?: boolean
+  // Extra controls rendered in the action row, just left of the run button
+  // (e.g. a model picker).
+  runExtras?: ReactNode
   onRun: (feedback: string) => void
 }) {
   const [open, setOpen] = useState(alwaysOpen)
@@ -239,6 +243,7 @@ export function FeedbackButton({
             ▴
           </button>
         )}
+        {runExtras}
         <button
           type="button"
           className="save-continue"
