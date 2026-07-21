@@ -325,6 +325,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     narrationStale: string[]
     remapped: string[]
     runtime: { before_s: number; after_s: number } | null
+    planRoute: 'code' | 'ai' | null
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   // Ref (not state): the diff poller's closure must see the live value.
@@ -362,9 +363,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             narrationStale: Array.isArray(upd.narration_stale_chunks) ? upd.narration_stale_chunks : [],
             remapped: Array.isArray(upd.remapped_shots) ? upd.remapped_shots : [],
             runtime: upd.runtime && typeof upd.runtime.before_s === 'number' ? upd.runtime : null,
+            planRoute: upd.plan_route === 'code' || upd.plan_route === 'ai' ? upd.plan_route : null,
           }
         : pac?.at
-          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null }
+          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null, planRoute: null }
           : null
       if (!doc) return
       if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
@@ -2268,6 +2270,13 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               Shots keep their permanent ids and attachments.
               {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
+            {pacingDiff.planRoute ? (
+              <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--ink-3)' }}>
+                {pacingDiff.planRoute === 'ai'
+                  ? 'Shot plan re-derived by AI (the note needed shot-level work — step rules applied).'
+                  : 'Shot plan carried by code (word edits copied into their shots; untouched shots preserved).'}
+              </p>
+            ) : null}
             {pacingDiff.runtime ? (
               <p style={{ margin: '2px 0 0', fontSize: 13 }}>
                 <span style={{ color: 'var(--ink-3)' }}>Total runtime: </span>
