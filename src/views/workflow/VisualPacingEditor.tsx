@@ -361,30 +361,6 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
     const timer = window.setInterval(check, 8000)
     return () => { live = false; window.clearInterval(timer) }
   }, [])
-  // SAVE: flush the board's two drafts (plan + any kit edits made here) to
-  // the engine files — the same writes the downstream sync chains perform.
-  const planDirty = useWorkflowStore((s) => Boolean(s.dirtySteps[stageId] || s.dirtySteps['world_kit']))
-  const [planSave, setPlanSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const savePlanNow = async () => {
-    setPlanSave('saving')
-    try {
-      const post = (stage_id: string, path: string, content: string) => fetch(actionUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id, path, content }),
-      }).then(async (r) => {
-        const j = await r.json().catch(() => null)
-        if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || 'save failed')
-      })
-      if (wkDraft.trim()) await post('world_kit', 'working/world-kit.md', wkDraft)
-      if (draft.trim()) await post(stageId, 'working/visual-pacing-plan.md', draft)
-      setPlanSave('saved')
-      window.setTimeout(() => setPlanSave('idle'), 2500)
-    } catch {
-      setPlanSave('error')
-      window.setTimeout(() => setPlanSave('idle'), 4000)
-    }
-  }
   const revertPacingRedraft = async () => {
     try {
       const r = await fetch(actionUrl(), {
@@ -1602,16 +1578,6 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
             </button>
           </>
         ) : null}
-        <button
-          type="button"
-          className="vp-save"
-          style={{ marginLeft: 'auto' }}
-          disabled={planSave === 'saving' || (!planDirty && planSave === 'idle')}
-          title={planDirty ? 'Write the plan (and any kit edits made here) to the engine files' : 'No unsaved changes'}
-          onClick={() => void savePlanNow()}
-        >
-          {planSave === 'saving' ? 'Saving…' : planSave === 'saved' ? 'Saved ✓' : planSave === 'error' ? 'Save failed — retry' : 'Save'}
-        </button>
         {view !== 'map' ? (
         <button
           type="button"

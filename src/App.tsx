@@ -628,6 +628,19 @@ function SpoolcastApp() {
       onRules={() => navigate(`/p/${routeSession ?? 'new'}/rules`)}
       onSave={async () => {
         try {
+          // Unsaved step drafts live in the browser — flush the dirty ones to
+          // their engine files FIRST, so the save point captures what's on
+          // screen, not what was last written.
+          const store = useWorkflowStore.getState()
+          for (const [sid, out] of Object.entries(STAGE_DRAFT_OUTPUTS)) {
+            const draftText = store.stageDrafts[sid] ?? ''
+            if (!store.dirtySteps[sid] || !draftText.trim()) continue
+            await fetch(actionUrl(), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_stage_output', stage_id: sid, path: out.path, content: draftText }),
+            })
+          }
           const r = await fetch(actionUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
