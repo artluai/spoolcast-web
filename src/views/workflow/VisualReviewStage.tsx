@@ -1778,14 +1778,24 @@ export function VisualReviewStage({
         const minFirst = resizeMinHeight(first)
         const maxFirst = resizeContentHeight(first, minFirst)
         if (tradeHeights) {
-          // ZERO-SUM: what one row gains the other gives up — the total (and
-          // the card) never changes size, and growth is possible as long as
-          // the neighbor can still shrink.
+          // Trade first: what one row gains the other gives up, so the card
+          // stays put. Once the neighbor hits its FLOOR, further growth is
+          // additive — the whole section gets taller (and scrolls) instead
+          // of the drag dead-ending while content above is still clipped.
           const minSecond = resizeMinHeight(second)
           const maxSecond = resizeContentHeight(second, minSecond)
-          const applied = delta >= 0
-            ? Math.min(delta, maxFirst - firstStart, secondStart - minSecond)
-            : Math.max(delta, minFirst - firstStart, secondStart - maxSecond)
+          if (delta >= 0) {
+            const growth = Math.min(delta, maxFirst - firstStart)
+            const traded = Math.max(0, Math.min(growth, secondStart - minSecond))
+            onResize?.(growth)
+            update((currentSizes) => ({
+              ...currentSizes,
+              [firstId]: firstStart + growth,
+              [secondId]: secondStart - traded,
+            }))
+            return
+          }
+          const applied = Math.max(delta, minFirst - firstStart, secondStart - maxSecond)
           onResize?.(applied)
           update((currentSizes) => ({
             ...currentSizes,
