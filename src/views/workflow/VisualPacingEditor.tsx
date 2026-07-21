@@ -26,6 +26,8 @@ import { parseScreenplay } from '../../lib/screenplay-md'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
+import { FeedbackButton } from './FeedbackButton'
+import { ModelPicker } from './ModelPicker'
 import { mergeKitWithDraft, patchDraftAudioLink, useWorldKitDraft } from '../../lib/kit-draft'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -57,7 +59,16 @@ const shotNoun = (n: number, medium?: string) => {
   return n === 1 ? 'shot' : 'shots'
 }
 
-export function VisualPacingEditor({ stageId }: { stageId: string }) {
+export type PacingRedraftControls = {
+  run: (feedback: string) => void
+  busy: boolean
+  busyLabel: string
+  error: string | null
+  model: string
+  setModel: (m: string) => void
+}
+
+export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redraft?: PacingRedraftControls }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const [history, setHistory] = useState<string[]>([])
@@ -2313,6 +2324,40 @@ export function VisualPacingEditor({ stageId }: { stageId: string }) {
           + Add overlay
         </button>
       </details>
+
+      {redraft ? (
+        // The redraft lives HERE (below Overlays), as a collapsed section in
+        // the same design — expand it and the house notebox + run button is
+        // already open. Shots keep permanent ids; the diff modal follows.
+        <details className="vp-section">
+          <summary className="vp-section-sum">
+            <span className="vp-sec-title">Update screenplay with AI</span>
+          </summary>
+          <p style={{ color: 'var(--ink-3)', fontSize: 12.5, lineHeight: 1.5, margin: '8px 0 10px' }}>
+            Redrafts the shot plan from the approved screenplay plus your notes. Shots keep their
+            permanent ids and attachments — afterwards you’ll see exactly what changed and can revert.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 420px', minWidth: 320 }}>
+              <FeedbackButton
+                alwaysOpen
+                label={redraft.busy ? 'Updating…' : 'Update screenplay with AI'}
+                busy={redraft.busy}
+                busyLabel={redraft.busyLabel}
+                title="Runs the AI"
+                rulesFocus="visual-pacing"
+                historyKey="draft-notes-visual-pacing"
+                ruleStep="visual_pacing"
+                onRun={redraft.run}
+              />
+            </div>
+            <ModelPicker model={redraft.model} onChange={redraft.setModel} disabled={redraft.busy} />
+          </div>
+          {redraft.error ? (
+            <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {redraft.error}</span>
+          ) : null}
+        </details>
+      ) : null}
     </div>
   )
 }

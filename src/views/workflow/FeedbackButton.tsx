@@ -28,6 +28,7 @@ export function FeedbackButton({
   rulesFocus = 'series-rules',
   historyKey,
   ruleStep,
+  alwaysOpen = false,
   onRun,
 }: {
   label: string
@@ -44,9 +45,12 @@ export function FeedbackButton({
   // Engine stage id: "save as a permanent rule" files into THIS step's rules
   // (series scope, template as fallback) instead of the legacy series rulebook.
   ruleStep?: string
+  // Render the notebox permanently (no collapsed pill, no ▴) — for hosts that
+  // put the control inside their own collapsible section.
+  alwaysOpen?: boolean
   onRun: (feedback: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(alwaysOpen)
   const [feedback, setFeedback] = useState('')
   // "Make it law": optionally save this feedback as a permanent series rule
   // (Project Wiki → Series rules → User-added rules) before running.
@@ -107,11 +111,11 @@ export function FeedbackButton({
   const wasBusy = useRef(false)
   useEffect(() => {
     if (wasBusy.current && !busy) {
-      setOpen(false)
+      if (!alwaysOpen) setOpen(false)
       setFeedback('')
     }
     wasBusy.current = busy
-  }, [busy])
+  }, [alwaysOpen, busy])
 
   if (!open) {
     return (
@@ -180,7 +184,7 @@ export function FeedbackButton({
         </div>
       )}
       <textarea
-        autoFocus
+        autoFocus={!alwaysOpen}
         rows={3}
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
@@ -225,14 +229,16 @@ export function FeedbackButton({
         </a>
         {ruleNote ? <span style={{ color: 'var(--amber)', fontSize: 12 }}>{ruleNote}</span> : null}
         <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          title="Collapse"
-          onClick={() => setOpen(false)}
-          style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12, padding: 2 }}
-        >
-          ▴
-        </button>
+        {!alwaysOpen && (
+          <button
+            type="button"
+            title="Collapse"
+            onClick={() => setOpen(false)}
+            style={{ background: 'none', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 12, padding: 2 }}
+          >
+            ▴
+          </button>
+        )}
         <button
           type="button"
           className="save-continue"
