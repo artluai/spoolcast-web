@@ -322,6 +322,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     regenerate: string[]
     narrationStale: string[]
     remapped: string[]
+    runtime: { before_s: number; after_s: number } | null
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   const pacingDiffSeenKey = `spoolcast-pacing-diff-seen:${activeSession()}`
@@ -351,9 +352,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             regenerate: Array.isArray(upd.regenerate_shots) ? upd.regenerate_shots : [],
             narrationStale: Array.isArray(upd.narration_stale_chunks) ? upd.narration_stale_chunks : [],
             remapped: Array.isArray(upd.remapped_shots) ? upd.remapped_shots : [],
+            runtime: upd.runtime && typeof upd.runtime.before_s === 'number' ? upd.runtime : null,
           }
         : pac?.at
-          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [] }
+          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null }
           : null
       if (!doc) return
       if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
@@ -2220,6 +2222,20 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               Shots keep their permanent ids and attachments.
               {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
+            {pacingDiff.runtime ? (
+              <p style={{ margin: '2px 0 0', fontSize: 13 }}>
+                <span style={{ color: 'var(--ink-3)' }}>Total runtime: </span>
+                <b style={{ fontFamily: 'var(--mono)' }}>{pacingDiff.runtime.before_s.toFixed(1)}s → {pacingDiff.runtime.after_s.toFixed(1)}s</b>
+                {Math.abs(pacingDiff.runtime.after_s - pacingDiff.runtime.before_s) < 0.05 ? (
+                  <span style={{ color: 'var(--ink-3)' }}> (unchanged)</span>
+                ) : (
+                  <span style={{ color: 'var(--amber)' }}>
+                    {' '}({pacingDiff.runtime.after_s > pacingDiff.runtime.before_s ? '+' : '−'}
+                    {Math.abs(pacingDiff.runtime.after_s - pacingDiff.runtime.before_s).toFixed(1)}s)
+                  </span>
+                )}
+              </p>
+            ) : null}
             <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
               {pacingDiff.script.map((c) => (
                 <div key={`s-${c.clip}`} style={{ margin: '8px 0', fontSize: 13 }}>
