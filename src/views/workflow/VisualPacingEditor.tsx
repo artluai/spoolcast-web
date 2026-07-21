@@ -387,6 +387,33 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // AI re-maps references for shots the update changed/added (never the rest).
   const [updRemap, setUpdRemap] = useState(true)
   const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
+  // A reload must not orphan a running job: the id persists here, and the
+  // resume effect below picks it back up on mount.
+  const updJobKey = `spoolcast-upd-job:${activeSession()}`
+  const pollUpdateJob = async (jobId: string) => {
+    // 2.5s × 840 ≈ 35 min — must outlast the engine's own job timeout, so
+    // a slow full-plan re-derive reports its real result, not a fake stall.
+    for (let i = 0; i < 840; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2500))
+      const jr = await fetch(jobsUrl(jobId))
+      const jout = await jr.json().catch(() => null)
+      const job = jout?.data
+      if (job?.status === 'done') {
+        // The plan file changed under the local draft — drop the stale
+        // draft and reload; the what-changed modal picks it up from there.
+        window.localStorage.removeItem(updJobKey)
+        clearStageDrafts(stageId)
+        window.location.reload()
+        return
+      }
+      if (job?.status === 'failed') {
+        window.localStorage.removeItem(updJobKey)
+        setUpdErr(job?.message || job?.error || 'Update failed — every file was restored.')
+        return
+      }
+    }
+    setUpdErr('The update is taking unusually long — check the engine.')
+  }
   const runUpdate = async (feedback: string) => {
     updBusyRef.current = true
     setUpdBusy(true)
@@ -413,26 +440,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         return
       }
       const jobId = String(out?.data?.id || '')
-      // 2.5s × 840 ≈ 35 min — must outlast the engine's own job timeout, so
-      // a slow full-plan re-derive reports its real result, not a fake stall.
-      for (let i = 0; i < 840; i += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2500))
-        const jr = await fetch(jobsUrl(jobId))
-        const jout = await jr.json().catch(() => null)
-        const job = jout?.data
-        if (job?.status === 'done') {
-          // The plan file changed under the local draft — drop the stale
-          // draft and reload; the what-changed modal picks it up from there.
-          clearStageDrafts(stageId)
-          window.location.reload()
-          return
-        }
-        if (job?.status === 'failed') {
-          setUpdErr(job?.message || job?.error || 'Update failed — every file was restored.')
-          return
-        }
-      }
-      setUpdErr('The update is taking unusually long — check the engine.')
+      window.localStorage.setItem(updJobKey, jobId)
+      await pollUpdateJob(jobId)
     } catch {
       setUpdErr('Could not reach the engine.')
     } finally {
@@ -440,6 +449,21 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       setUpdBusy(false)
     }
   }
+  // Resume watching after a reload: if a job id was left behind, poll it as
+  // if the button had just been pressed (busy label included).
+  useEffect(() => {
+    const pending = window.localStorage.getItem(updJobKey)
+    if (!pending) return
+    updBusyRef.current = true
+    setUpdBusy(true)
+    void pollUpdateJob(pending)
+      .catch(() => setUpdErr('Could not reach the engine.'))
+      .finally(() => {
+        updBusyRef.current = false
+        setUpdBusy(false)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [resetNote, setResetNote] = useState<string | null>(null)
   // Whether an AI-update backup exists — Reset stays disabled until one does.
   const [hasPrevPlan, setHasPrevPlan] = useState(false)
