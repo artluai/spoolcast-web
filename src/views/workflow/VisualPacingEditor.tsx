@@ -325,6 +325,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     runtime: { before_s: number; after_s: number } | null
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
+  // Ref (not state): the diff poller's closure must see the live value.
+  const updBusyRef = useRef(false)
   const pacingDiffSeenKey = `spoolcast-pacing-diff-seen:${activeSession()}`
   useEffect(() => {
     let live = true
@@ -337,11 +339,16 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       } catch { return null }
     }
     const check = async () => {
+      // Mid-job the drafter has already written pacing-diff.json while the
+      // combined diff (and the files' final state) are still in flight —
+      // showing the modal now would render a half-truth with a live Revert
+      // button. Wait for the job's reload.
+      if (updBusyRef.current) return
       const [upd, pac] = await Promise.all([
         readJson('working/update-diff.json'),
         readJson('working/pacing-diff.json'),
       ])
-      if (!live) return
+      if (!live || updBusyRef.current) return
       // Prefer the combined diff when it is the newer of the two.
       const useUpd = upd?.at && (!pac?.at || upd.at >= pac.at)
       const doc: CombinedDiff | null = useUpd && upd?.at
@@ -381,6 +388,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const [updRemap, setUpdRemap] = useState(true)
   const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
   const runUpdate = async (feedback: string) => {
+    updBusyRef.current = true
     setUpdBusy(true)
     setUpdErr(null)
     try {
@@ -428,6 +436,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     } catch {
       setUpdErr('Could not reach the engine.')
     } finally {
+      updBusyRef.current = false
       setUpdBusy(false)
     }
   }
@@ -2252,20 +2261,30 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                   ) : null}
                 </div>
               ))}
-              {(pacingDiff.plan?.updated ?? []).map((e) => (
-                <p key={`u-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
-                  <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
-                  <span style={{ color: 'var(--amber)' }}> updated</span>
-                  <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
-                </p>
-              ))}
-              {(pacingDiff.plan?.added ?? []).map((e) => (
-                <p key={`a-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
-                  <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
-                  <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
-                  <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
-                </p>
-              ))}
+              {(() => {
+                // Ids are permanent, so they say nothing about ORDER — list
+                // changes in the video's running order with their position,
+                // or "S07 new" at the bottom reads as "appended to the end".
+                const pos = new Map(images.map((img, i) => [img.id, i + 1]))
+                const entries = [
+                  ...(pacingDiff.plan?.updated ?? []).map((e) => ({ ...e, kind: 'updated' as const })),
+                  ...(pacingDiff.plan?.added ?? []).map((e) => ({ ...e, kind: 'new' as const })),
+                ].sort((a, b) => (pos.get(a.id) ?? 999) - (pos.get(b.id) ?? 999))
+                return entries.map((e) => (
+                  <p key={`p-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
+                    {pos.has(e.id) ? (
+                      <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>#{pos.get(e.id)} of {images.length} </span>
+                    ) : null}
+                    <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
+                    {e.kind === 'new' ? (
+                      <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
+                    ) : (
+                      <span style={{ color: 'var(--amber)' }}> updated</span>
+                    )}
+                    <span style={{ color: 'var(--ink-3)' }}> · {e.what}</span>
+                  </p>
+                ))
+              })()}
               {(pacingDiff.plan?.removed ?? []).map((e) => (
                 <p key={`r-${e.id}`} style={{ margin: '6px 0', fontSize: 13 }}>
                   <b style={{ fontFamily: 'var(--mono)' }}>{e.id}</b>
