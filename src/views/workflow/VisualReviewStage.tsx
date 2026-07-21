@@ -1825,7 +1825,9 @@ export function VisualReviewStage({
     const move = (moveEvent: PointerEvent) => {
       const current = axis === 'x' ? moveEvent.clientX : moveEvent.clientY
       const delta = current - start
-      const maxSize = Math.min(axis === 'y' ? resizeContentHeight(target, min) : Infinity, maxOverride ?? Infinity)
+      // An explicit override REPLACES the content cap (a bottom boundary may
+      // grow a row past its content — the extra is just empty space).
+      const maxSize = maxOverride ?? (axis === 'y' ? resizeContentHeight(target, min) : Infinity)
       const nextSize = Math.min(maxSize, Math.max(min, startSize + delta))
       onResize?.(nextSize - startSize)
       update((currentSizes) => ({
@@ -1972,7 +1974,7 @@ export function VisualReviewStage({
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, row ? resizeMinHeight(row) : 32, (delta) => {
       applyRowPanelResize(plan, delta)
-    })
+    }, Number.POSITIVE_INFINITY)
   }
 
   // Normal view: the VIDEO row gets a real height drag — the row stores its

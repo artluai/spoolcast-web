@@ -1033,6 +1033,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vr-layout-resizer-col { flex: 0 0 10px; width: 10px; min-height: 120px; cursor: col-resize; }
 .vr-layout-resizer-row,
 .vr-layout-resizer-panel { flex: 0 0 8px; height: 8px; min-height: 8px; cursor: row-resize; }
+/* The end lane sits against the card's edge — a taller grab target. */
+.vr-layout-resizer-end { flex: 0 0 14px; height: 14px; min-height: 14px; }
 /* The end-of-layout grab strip gets its own 10px lane below the last row, like
    every other row resizer (an overlay here painted the hover band over content).
    applyDefaultSizes budgets this lane in expanded mode. */
