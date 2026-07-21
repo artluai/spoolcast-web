@@ -372,7 +372,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const [updBusy, setUpdBusy] = useState(false)
   const [updErr, setUpdErr] = useState<string | null>(null)
   const [updModel, setUpdModel] = useState(DEFAULT_MODEL_ID)
-  const [updAllowAll, setUpdAllowAll] = useState(false)
+  const [updAllowAll, setUpdAllowAll] = useState(true)
   const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
   const runUpdate = async (feedback: string) => {
     setUpdBusy(true)
@@ -2478,17 +2478,19 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             your note is about may change. Afterwards you’ll see exactly what changed — and can
             revert everything in one click. If it fails midway, nothing changes at all.
           </p>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', margin: '0 0 8px' }}>
-            <input
-              type="checkbox"
-              checked={updAllowAll}
-              onChange={(e) => setUpdAllowAll(e.target.checked)}
-              style={{ accentColor: 'var(--ink-2)', margin: 0 }}
-            />
-            allow other shots to be changed as needed
-          </label>
           <FeedbackButton
             alwaysOpen
+            aboveActions={
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={updAllowAll}
+                  onChange={(e) => setUpdAllowAll(e.target.checked)}
+                  style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                />
+                allow other shots to be changed as needed
+              </label>
+            }
             label={updBusy ? 'Updating…' : 'Update screenplay with AI'}
             busy={updBusy}
             busyLabel="Updating…"

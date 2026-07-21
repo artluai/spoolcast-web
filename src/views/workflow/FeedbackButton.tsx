@@ -29,6 +29,7 @@ export function FeedbackButton({
   historyKey,
   ruleStep,
   alwaysOpen = false,
+  aboveActions,
   runExtras,
   onRun,
 }: {
@@ -49,6 +50,9 @@ export function FeedbackButton({
   // Render the notebox permanently (no collapsed pill, no ▴) — for hosts that
   // put the control inside their own collapsible section.
   alwaysOpen?: boolean
+  // Extra controls rendered on their own row between the textarea and the
+  // action row (e.g. a host-owned checkbox).
+  aboveActions?: ReactNode
   // Extra controls rendered in the action row, just left of the run button
   // (e.g. a model picker).
   runExtras?: ReactNode
@@ -211,6 +215,7 @@ export function FeedbackButton({
           lineHeight: 1.5,
         }}
       />
+      {aboveActions ? <div style={{ padding: '2px 10px 0' }}>{aboveActions}</div> : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px 10px' }}>
         <label
           title="Adds this to the series rulebook (Project Wiki) so EVERY future draft follows it — not just this one"
