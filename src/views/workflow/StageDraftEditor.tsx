@@ -86,16 +86,21 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   useEffect(() => {
     if (!cfg) return
     const store = useWorkflowStore.getState()
-    if ((store.stageDrafts[stageId] ?? '').length > 0 || store.dirtySteps[stageId]) {
+    // DIRTY drafts are unsaved user edits — never overwritten. A NON-dirty
+    // draft is only a mirror of the file, so when the file moved on (AI
+    // update, engine-side rewrite) the mirror re-seeds instead of shadowing
+    // the new content forever.
+    if (store.dirtySteps[stageId]) {
       setOpen(true)
       return
     }
+    if ((store.stageDrafts[stageId] ?? '').length > 0) setOpen(true)
     fetch(fileUrl(cfg.path))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
           const current = useWorkflowStore.getState()
-          if ((current.stageDrafts[stageId] ?? '').length === 0 && !current.dirtySteps[stageId]) {
+          if (!current.dirtySteps[stageId] && (current.stageDrafts[stageId] ?? '') !== out.data.content) {
             seedStageDraft(stageId, out.data.content)
             setOpen(true) // real content exists on disk — show it
           }

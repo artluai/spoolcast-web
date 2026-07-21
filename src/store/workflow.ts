@@ -215,7 +215,16 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         ),
       )
       const dirtySteps = { ...state.dirtySteps, [stageId]: false }
-      persistDrafts(stageDrafts, dirtySteps)
+      // SYNCHRONOUS write, no debounce: callers clear drafts right before
+      // window.location.reload(), and a pending 400ms timer dies with the
+      // page — the stale draft would then outlive the reload and shadow the
+      // freshly updated file forever.
+      window.clearTimeout(persistTimer)
+      try {
+        window.localStorage.setItem(draftsStorageKey(), JSON.stringify({ stageDrafts, dirtySteps }))
+      } catch {
+        /* storage blocked — in-memory state is still correct this session */
+      }
       return { stageDrafts, dirtySteps }
     }),
 }))
