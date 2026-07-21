@@ -346,14 +346,23 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
     if (pacingDiff) window.localStorage.setItem(pacingDiffSeenKey, pacingDiff.at)
     setPacingDiff(null)
   }
+  const [resetNote, setResetNote] = useState<string | null>(null)
   const revertPacingRedraft = async () => {
     try {
-      await fetch(actionUrl(), {
+      const r = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'revert_visual_pacing' }),
       })
-    } catch { /* engine offline — the modal stays dismissable */ }
+      const j = await r.json().catch(() => null)
+      if (!j?.ok) {
+        setResetNote(j?.error || 'Nothing to reset to yet.')
+        return
+      }
+    } catch {
+      setResetNote('Engine offline.')
+      return
+    }
     dismissPacingDiff()
     window.location.reload()
   }
@@ -1536,9 +1545,21 @@ export function VisualPacingEditor({ stageId, redraft }: { stageId: string; redr
           {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
         </button>
         {view === 'map' ? (
-          <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
-            ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
-          </button>
+          <>
+            <button
+              type="button"
+              className="vp-undo"
+              style={{ marginLeft: 8 }}
+              title="Swap back to the plan as it was before the last AI update (pressing again swaps forward)"
+              onClick={() => { setResetNote(null); void revertPacingRedraft() }}
+            >
+              ↺ Reset to original
+            </button>
+            {resetNote ? <span style={{ fontSize: 12, color: 'var(--amber)', marginLeft: 6 }}>{resetNote}</span> : null}
+            <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
+              ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
+            </button>
+          </>
         ) : null}
         {view !== 'map' ? (
         <button
