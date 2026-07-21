@@ -403,7 +403,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         return
       }
       const jobId = String(out?.data?.id || '')
-      for (let i = 0; i < 240; i += 1) {
+      // 2.5s × 840 ≈ 35 min — must outlast the engine's own job timeout, so
+      // a slow full-plan re-derive reports its real result, not a fake stall.
+      for (let i = 0; i < 840; i += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 2500))
         const jr = await fetch(jobsUrl(jobId))
         const jout = await jr.json().catch(() => null)
