@@ -1512,6 +1512,12 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-shotlist { display: flex; flex-direction: column; gap: 12px; padding: 2px; }
 .vp-map-collapse { margin-left: auto; border: 1px solid var(--line-2); background: var(--bg-3); color: var(--ink-3); border-radius: 6px; font-size: 11px; padding: 2px 9px; cursor: pointer; }
 .vp-map-collapse:hover { color: var(--ink); border-color: var(--ink-3); }
+/* Delete-shot ✕ sits in the card's top-right corner; when the collapse ▴ is
+   showing it already claimed the auto margin, so the ✕ just follows it. */
+.vp-map-del { margin-left: auto; }
+.vp-map-collapse + .vp-map-del { margin-left: 0; }
+.vp-map-del:hover { background: rgba(233,106,106,.14); color: var(--red); border-color: var(--red); }
+.vp-del-confirm:hover { background: rgba(233,106,106,.2); border-color: var(--red); }
 .vp-map-shot { border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2); padding: 12px 14px; cursor: pointer; transition: border-color .15s, box-shadow .15s, opacity .15s; }
 .vp-map-shot:hover { border-color: var(--ink-3); }
 .vp-map-shot.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }

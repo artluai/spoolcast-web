@@ -309,6 +309,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // removals are shown in a popup before anything is applied. (Hook lives
   // ABOVE the no-draft early return: hooks run in call order.)
   const [mapProposal, setMapProposal] = useState<{ mapping: Record<string, string[]>; removals: { shot: string; names: string[] }[] } | null>(null)
+  // Delete-shot confirmation (the ✕ on each shot card) — holds the shot id.
+  const [confirmDelShot, setConfirmDelShot] = useState<string | null>(null)
   // WHAT-CHANGED MODAL: after an AI update the engine writes the combined
   // diff (script line changes + plan changes + which media went stale) to
   // working/update-diff.json — or, for a plain plan redraft, just
@@ -2000,6 +2002,12 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                       {on ? (
                         <button type="button" className="vp-map-collapse" title="Collapse and unselect" onClick={(e) => { e.stopPropagation(); setMapSel(''); setActiveId('') }}>▴</button>
                       ) : null}
+                      <button
+                        type="button"
+                        className="vp-map-collapse vp-map-del"
+                        title={`Delete shot ${img.id}`}
+                        onClick={(e) => { e.stopPropagation(); setConfirmDelShot(img.id) }}
+                      >✕</button>
                     </div>
                     <span className="vp-map-shotwhat">{img.what}</span>
                     {on ? (
@@ -2360,6 +2368,29 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               <button type="button" className="vp-undo" onClick={() => setMapProposal(null)}>Cancel</button>
               <button type="button" className="vp-save" onClick={() => { applyMapping(mapProposal.mapping); setMapProposal(null) }}>
                 Apply mapping (undoable)
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmDelShot ? (
+        <div className="modal-scrim">
+          <div className="confirm-modal" style={{ minWidth: 420 }}>
+            <span className="need">CONFIRM</span>
+            <h3>Delete shot {confirmDelShot}?</h3>
+            <p style={{ fontSize: 13 }}>
+              The shot leaves the plan — its script moment and any overlays anchored to it go with it.
+              The shot list updates when you save. Already-generated video files stay on disk, and
+              Undo can bring the shot back before saving.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" className="vp-undo" onClick={() => setConfirmDelShot(null)}>Cancel</button>
+              <button
+                type="button"
+                className="vp-save vp-del-confirm"
+                onClick={() => { removeImage(confirmDelShot); setConfirmDelShot(null) }}
+              >
+                Delete shot
               </button>
             </div>
           </div>
