@@ -1760,7 +1760,6 @@ export function VisualReviewStage({
     sizes: Record<string, number>,
     update: Dispatch<SetStateAction<Record<string, number>>>,
     onResize?: (delta: number) => void,
-    tradeHeights = false,
   ) => {
     const first = document.querySelector<HTMLElement>(`[data-layout-id="${firstId}"]`)
     const second = document.querySelector<HTMLElement>(`[data-layout-id="${secondId}"]`)
@@ -1775,35 +1774,11 @@ export function VisualReviewStage({
       const current = axis === 'x' ? moveEvent.clientX : moveEvent.clientY
       const delta = current - start
       if (axis === 'y') {
+        // ADDITIVE: only the row above the lane changes; the row below keeps
+        // its height and just moves with the boundary (the card grows or
+        // shrinks and scrolls). Bounded by the row's min and its content.
         const minFirst = resizeMinHeight(first)
         const maxFirst = resizeContentHeight(first, minFirst)
-        if (tradeHeights) {
-          // Trade first: what one row gains the other gives up, so the card
-          // stays put. Once the neighbor hits its FLOOR, further growth is
-          // additive — the whole section gets taller (and scrolls) instead
-          // of the drag dead-ending while content above is still clipped.
-          const minSecond = resizeMinHeight(second)
-          const maxSecond = resizeContentHeight(second, minSecond)
-          if (delta >= 0) {
-            const growth = Math.min(delta, maxFirst - firstStart)
-            const traded = Math.max(0, Math.min(growth, secondStart - minSecond))
-            onResize?.(growth)
-            update((currentSizes) => ({
-              ...currentSizes,
-              [firstId]: firstStart + growth,
-              [secondId]: secondStart - traded,
-            }))
-            return
-          }
-          const applied = Math.max(delta, minFirst - firstStart, secondStart - maxSecond)
-          onResize?.(applied)
-          update((currentSizes) => ({
-            ...currentSizes,
-            [firstId]: firstStart + applied,
-            [secondId]: secondStart - applied,
-          }))
-          return
-        }
         const nextFirst = Math.min(maxFirst, Math.max(minFirst, firstStart + delta))
         onResize?.(nextFirst - firstStart)
         update((currentSizes) => ({
@@ -1996,11 +1971,10 @@ export function VisualReviewStage({
     secondId: string,
   ) => {
     manualRowSizeIdsRef.current.add(firstId)
-    manualRowSizeIdsRef.current.add(secondId)
     const plan = rowPanelResizePlan(firstId)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
-    }, true)
+    })
   }
 
   const startReviewLastRowResize = (
@@ -2392,9 +2366,10 @@ export function VisualReviewStage({
               style={isExpandedCard && !isMobileReview
                 // Expanded: CSS gives the preview its slot's height via
                 // container-query units — it tracks every row drag with no
-                // clipping. Only the ratio and centering live inline.
-                ? { aspectRatio: `${canvasRatio}`, width: 'auto', margin: '0 auto', maxWidth: '100%' }
-                : { aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%' }}
+                // clipping. Only the ratio and centering live inline
+                // (--vr-ratio feeds the width-bound height cap).
+                ? { aspectRatio: `${canvasRatio}`, width: 'auto', margin: '0 auto', maxWidth: '100%', '--vr-ratio': `${canvasRatio}` } as CSSProperties
+                : { aspectRatio: `${canvasRatio}`, maxHeight: '78vh', width: 'auto', margin: '0 auto', maxWidth: '100%', '--vr-ratio': `${canvasRatio}` } as CSSProperties}
               onMouseMove={wakeControls}
               onMouseEnter={wakeControls}
               onFocus={wakeControls}
