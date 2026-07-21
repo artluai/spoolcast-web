@@ -321,6 +321,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     plan: { updated: PacingDiffEntry[]; unchanged: PacingDiffEntry[]; added: PacingDiffEntry[]; removed: PacingDiffEntry[] } | null
     regenerate: string[]
     narrationStale: string[]
+    remapped: string[]
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   const pacingDiffSeenKey = `spoolcast-pacing-diff-seen:${activeSession()}`
@@ -349,9 +350,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             plan: upd.plan ?? null,
             regenerate: Array.isArray(upd.regenerate_shots) ? upd.regenerate_shots : [],
             narrationStale: Array.isArray(upd.narration_stale_chunks) ? upd.narration_stale_chunks : [],
+            remapped: Array.isArray(upd.remapped_shots) ? upd.remapped_shots : [],
           }
         : pac?.at
-          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [] }
+          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [] }
           : null
       if (!doc) return
       if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
@@ -373,6 +375,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const [updErr, setUpdErr] = useState<string | null>(null)
   const [updModel, setUpdModel] = useState(DEFAULT_MODEL_ID)
   const [updAllowAll, setUpdAllowAll] = useState(true)
+  // AI re-maps references for shots the update changed/added (never the rest).
+  const [updRemap, setUpdRemap] = useState(true)
   const clearStageDrafts = useWorkflowStore((s) => s.clearStageDrafts)
   const runUpdate = async (feedback: string) => {
     setUpdBusy(true)
@@ -388,6 +392,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           model: updModel,
           allow_cost: true,
           allow_all: updAllowAll,
+          remap_changed: updRemap,
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
           ...(draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
         }),
@@ -2261,6 +2266,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 Narration audio is now stale for {pacingDiff.narrationStale.join(', ')} — regenerate those sections’ audio.
               </p>
             ) : null}
+            {pacingDiff.remapped.length ? (
+              <p style={{ color: 'var(--ink-3)', fontSize: 12.5, margin: '10px 0 0' }}>
+                AI re-mapped references for {pacingDiff.remapped.join(', ')} — review them on the mapping board.
+              </p>
+            ) : null}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
               <button type="button" className="vp-undo" onClick={() => void revertPacingRedraft()}>Revert everything</button>
               <button type="button" className="vp-save" onClick={dismissPacingDiff}>Keep</button>
@@ -2481,15 +2491,29 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           <FeedbackButton
             alwaysOpen
             aboveActions={
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={updAllowAll}
-                  onChange={(e) => setUpdAllowAll(e.target.checked)}
-                  style={{ accentColor: 'var(--ink-2)', margin: 0 }}
-                />
-                allow other shots to be changed as needed
-              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={updAllowAll}
+                    onChange={(e) => setUpdAllowAll(e.target.checked)}
+                    style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                  />
+                  allow other shots to be changed as needed
+                </label>
+                <label
+                  title="Only shots the update changed or added get new mappings — your mappings on untouched shots stay"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={updRemap}
+                    onChange={(e) => setUpdRemap(e.target.checked)}
+                    style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                  />
+                  let AI re-map any changed shots
+                </label>
+              </div>
             }
             label={updBusy ? 'Updating…' : 'Update screenplay with AI'}
             busy={updBusy}
