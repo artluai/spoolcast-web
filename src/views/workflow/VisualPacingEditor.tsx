@@ -465,26 +465,30 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [resetNote, setResetNote] = useState<string | null>(null)
-  // Whether an AI-update backup exists — Reset stays disabled until one does.
-  const [hasPrevPlan, setHasPrevPlan] = useState(false)
+  // Whether the AI-update ORIGINAL baseline exists — the first update in a
+  // run pins it, stacked updates keep it, manual saves retire it. Reset
+  // stays disabled until one does.
+  const [hasOrigPlan, setHasOrigPlan] = useState(false)
   useEffect(() => {
     let live = true
     const check = () => {
-      fetch(fileUrl('working/visual-pacing-plan.prev.md'))
+      fetch(fileUrl('working/visual-pacing-plan.orig.md'))
         .then((r) => (r.ok ? r.json() : null))
-        .then((j) => { if (live) setHasPrevPlan(Boolean(j?.data?.exists ?? j?.data?.content)) })
+        .then((j) => { if (live) setHasOrigPlan(Boolean(j?.data?.exists ?? j?.data?.content)) })
         .catch(() => { /* engine offline */ })
     }
     check()
     const timer = window.setInterval(check, 8000)
     return () => { live = false; window.clearInterval(timer) }
   }, [])
-  const revertPacingRedraft = async () => {
+  // Modal "Revert everything" = undo THAT update (swap, reversible).
+  // Viewbar "Reset to original" = jump to before the FIRST update of the run.
+  const revertPacingRedraft = async (action: 'revert_visual_pacing' | 'reset_pacing_original' = 'revert_visual_pacing') => {
     try {
       const r = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'revert_visual_pacing' }),
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action }),
       })
       const j = await r.json().catch(() => null)
       if (!j?.ok) {
@@ -496,6 +500,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       return
     }
     dismissPacingDiff()
+    clearStageDrafts(stageId)
     window.location.reload()
   }
   // null = no user preference yet: hidden by default on the mapping board
@@ -1682,11 +1687,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               type="button"
               className="vp-undo"
               style={{ marginLeft: 8 }}
-              disabled={!hasPrevPlan}
-              title={hasPrevPlan
-                ? 'Swap back to the plan as it was before the last AI update (pressing again swaps forward)'
-                : 'Enabled after an AI update creates a backup to reset to'}
-              onClick={() => { setResetNote(null); void revertPacingRedraft() }}
+              disabled={!hasOrigPlan}
+              title={hasOrigPlan
+                ? 'Back to how everything was before the first AI update — even if you ran several. A save point of the current state is taken first.'
+                : 'Enabled after an AI update — jumps back to the pre-update original'}
+              onClick={() => { setResetNote(null); void revertPacingRedraft('reset_pacing_original') }}
             >
               ↺ Reset to original
             </button>
