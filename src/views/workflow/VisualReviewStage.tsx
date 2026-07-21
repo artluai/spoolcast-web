@@ -1727,12 +1727,14 @@ export function VisualReviewStage({
         const videoId = videoCol?.dataset.layoutId
         const sideId = sideCol?.dataset.layoutId
         if (videoId && sideId && !manualColumnSizeIdsRef.current.has(videoId) && !manualColumnSizeIdsRef.current.has(sideId)) {
-          // Expanded rows are pass-sized; the normal view's preview is capped
-          // at 78vh. Either way ~70px of chrome sits above the video, +30
-          // breathing room around its width.
+          // Expanded rows are pass-sized; a dragged row (any view) uses its
+          // live height; otherwise the normal preview cap is 78vh. ~70px of
+          // chrome sits above the video, +30 breathing room around its width.
           const previewHeight = isExpandedCard && !isMobileReview
             ? Math.max(140, (assignedVideoRowHeight ?? videoRow.getBoundingClientRect().height) - 70)
-            : window.innerHeight * 0.78
+            : videoRow.classList.contains('is-row-sized')
+              ? Math.max(140, videoRow.getBoundingClientRect().height - 44)
+              : window.innerHeight * 0.78
           const wantWidth = Math.max(window.innerWidth * 0.2, previewHeight * ratio + 30)
           const totalWidth = Math.max(1, workspace.clientWidth)
           const videoWeight = Math.min(wantWidth, totalWidth * 0.6)
@@ -1950,6 +1952,17 @@ export function VisualReviewStage({
     })
   }
 
+  // When a row drag ends, re-run the one sizing pass: the video column's
+  // width re-derives from the row's NEW height, so the player is always as
+  // big as the row allows — never a small video over a tall void.
+  const repassAfterDrag = () => {
+    const once = () => {
+      window.removeEventListener('pointerup', once)
+      window.setTimeout(() => applyDefaultSizesRef.current(), 0)
+    }
+    window.addEventListener('pointerup', once)
+  }
+
   // A row's TOP boundary only resizes the row above it (additive — the row
   // below rides the boundary); a row's BOTTOM boundary resizes the row itself,
   // growing or shrinking between its minimum and its content.
@@ -1959,6 +1972,7 @@ export function VisualReviewStage({
     secondId: string,
   ) => {
     manualRowSizeIdsRef.current.add(firstId)
+    repassAfterDrag()
     const plan = rowPanelResizePlan(firstId)
     startPairResize(event, 'y', firstId, secondId, rowSizes, setRowSizes, (delta) => {
       applyRowPanelResize(plan, delta)
@@ -1970,6 +1984,7 @@ export function VisualReviewStage({
     rowId: string,
   ) => {
     manualRowSizeIdsRef.current.add(rowId)
+    repassAfterDrag()
     const plan = rowPanelResizePlan(rowId)
     const row = document.querySelector<HTMLElement>(`[data-layout-id="${rowId}"]`)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, row ? resizeMinHeight(row) : 32, (delta) => {
@@ -1990,6 +2005,7 @@ export function VisualReviewStage({
       return
     }
     manualRowSizeIdsRef.current.add(rowId)
+    repassAfterDrag()
     const plan = rowPanelResizePlan(rowId)
     startSingleResize(event, 'y', rowId, rowSizes, setRowSizes, resizeMinHeight(row), (delta) => {
       applyRowPanelResize(plan, delta)
