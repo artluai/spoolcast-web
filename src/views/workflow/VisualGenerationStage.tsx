@@ -613,7 +613,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
   // Previous generated versions per clip — regeneration archives what it
   // replaces; nothing is ever silently overwritten.
-  const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video' }[]>>({})
+  const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video'; prompt?: string }[]>>({})
   // THE PROMPT EACH CLIP WAS ACTUALLY MADE FROM — frozen at submit time by
   // the engine, never edited by anyone. The textarea above is the WORKING
   // prompt for the NEXT generation; this is the record of the current one.
@@ -633,7 +633,20 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
   const loadMediaHistory = async () => {
     const out = await fetch(`${API}/media-history?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-    if (out?.ok && out.data?.history) setMediaHistory(out.data.history)
+    if (!out?.ok || !out.data?.history) return
+    const history = out.data.history as Record<string, { path: string; stamp: string; kind: 'image' | 'video'; prompt?: string }[]>
+    // Each archived take's sidecar prompt rides along — it is what TIES a
+    // past video to the past prompt it was made from (restore a prompt and
+    // its take fills the slot again).
+    await Promise.all(Object.values(history).flat().map(async (v) => {
+      const sidecar = v.path.replace(/\.[a-z0-9]+$/i, '.json')
+      const res = await fetch(fileUrl(sidecar)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      try {
+        const j = JSON.parse(res?.data?.content ?? 'null')
+        if (j?.prompt) v.prompt = String(j.prompt)
+      } catch { /* pre-provenance take — no sidecar */ }
+    }))
+    setMediaHistory(history)
   }
   useEffect(() => { void loadMediaHistory() }, [])
   const restoreVersion = async (rowId: string, path: string) => {
@@ -1533,6 +1546,18 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   }
 
   const runSelectedGeneration = () => {
+    // ONE runner, TWO doors, SAME behavior: while a batch is running, the
+    // selector queues exactly like per-row clicks do — everything queued
+    // flushes as one batch the moment the current run ends. (Concurrency
+    // WITHIN a batch is the engine's MAX_PARALLEL_CLIPS constant.)
+    if (activeProcess) {
+      const type = generateMode === 'image' ? 'image' as const : 'video' as const
+      setGenQueue((q) => {
+        const have = new Set(q.map((e) => e.id))
+        return [...q, ...[...selected].filter((id) => !have.has(id)).map((id) => ({ id, type }))]
+      })
+      return
+    }
     if (generateMode === 'image') void generateImages()
     else void generateVideos()
   }
@@ -2036,7 +2061,20 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
             </div>
             {rows.map((row) => {
               const outdated = takeOutdated(row)
-              const previewMedia = outdated ? null : rowPreviewMedia(row)
+              // PROMPT AND VIDEO TRAVEL TOGETHER: "outdated" only means the
+              // ACTIVE file mismatches the box — the matching take may be
+              // sitting in Previous versions (e.g. after "↺ use" on a past
+              // prompt). If one matches, it fills the slot.
+              const workingPromptText = String(row.draftText ?? row.prompt).trim()
+              const matchedPast = outdated
+                ? (mediaHistory[row.mid] ?? []).find((v) => {
+                  const p = String(v.prompt || '').trim()
+                  return p && (p === workingPromptText || p.startsWith(workingPromptText))
+                })
+                : null
+              const previewMedia = outdated
+                ? (matchedPast ? { kind: matchedPast.kind, src: contentUrl(matchedPast.path) } satisfies PreviewMedia : null)
+                : rowPreviewMedia(row)
               const firstFrameEntries = row.references
                 .map((ref, index) => ({ ref, index }))
                 .filter(({ ref }) => ref.role === 'first_frame' && referenceValue(ref))
@@ -2176,7 +2214,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         >⤢</button>
                       ) : null}
                       {previewMedia?.kind === 'video' ? (
-                        <video src={previewMedia.src} muted playsInline autoPlay controls />
+                        // No autoplay: a manifest refresh reloads every row's
+                        // <video>, and autoplaying them all made "random"
+                        // clips start (audibly, once a user had unmuted one).
+                        <video src={previewMedia.src} muted playsInline controls preload="metadata" />
                       ) : previewMedia?.kind === 'image' ? (
                         <img src={previewMedia.src} alt="" onClick={() => setMediaLightbox({ kind: 'image', src: previewMedia.src })} style={{ cursor: 'zoom-in' }} />
                       ) : (
@@ -2187,6 +2228,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             : row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
                     </div>
+                    {matchedPast ? (
+                      <small style={{ display: 'block', marginTop: 4, color: 'var(--ink-3)', fontSize: 11 }}>
+                        from Previous versions — this take matches the current prompt
+                      </small>
+                    ) : null}
                   </div>
                   <div className="vg-prompt">
                     <div className="vg-prompt-editor">
@@ -2218,15 +2264,6 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         ) : null}
                         </span>
                         <span style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto' }}>
-                        {row.status === 'generating' ? (
-                          <span className="vg-row-run">
-                            Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
-                          </span>
-                        ) : promptBusyIds.has(row.id) ? (
-                          <span className="vg-row-run" title="The AI rewrite runs in the background (a minute or two) — the new prompt replaces this box when it lands.">
-                            <span className="spin" /> AI rewriting this prompt…
-                          </span>
-                        ) : null}
                         <span
                           style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: row.draftText.length > videoModelMaxChars(row.mediaModel) || row.draftText.trim().length < 3 ? 'var(--red, #e5534b)' : 'var(--ink-3)' }}
                           title="Prompt length vs this row's model limit (kie docs)"
@@ -2240,7 +2277,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title="Opens a note — tell the AI how this prompt should change (uses model credits)"
                           onClick={() => { setRowAiFor(rowAiFor === row.id ? null : row.id); setRowAiNote('') }}
                         >
-                          {promptBusyIds.has(row.id) ? '⏳ AI rewriting…' : <>✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}</>}
+                          {promptBusyIds.has(row.id) ? 'AI rewriting…' : <>✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}</>}
                         </button>
                         </span>
                       </div>
@@ -2430,7 +2467,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         className="vp-undo"
                         title="Use your own video or image as this shot's take. The current take moves to previous versions — nothing is ever deleted."
                       >
-                        ⬆ Upload my own
+                        Upload my own
                         <input
                           type="file"
                           accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg,image/webp"
@@ -2445,7 +2482,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         title="Attach a take from the asset library — takes from deleted shots and copies of other shots' takes."
                         onClick={() => { setAttachPickFor(row.id); void loadLibrary() }}
                       >
-                        ⧉ Attach from library…
+                        Attach from library…
                       </button>
                       {row.type === 'image' ? (
                         <button
@@ -2455,7 +2492,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
                           onClick={() => queueRowGeneration(row.id, 'image')}
                         >
-                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'generating' ? '⏳ Generating…' : row.status === 'image_ready' && !outdated ? '▧ Regenerate image' : '▧ Generate image'}
+                          {genQueue.some((e) => e.id === row.id) ? 'Queued' : row.status === 'generating' ? 'Generating…' : row.status === 'image_ready' && !outdated ? '▧ Regenerate image' : '▧ Generate image'}
                         </button>
                       ) : (
                         <button
@@ -2465,10 +2502,22 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, row.mediaModel)} for this row`}
                           onClick={() => queueRowGeneration(row.id, 'video')}
                         >
-                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'generating' ? '⏳ Generating…' : row.status === 'video_ready' && !outdated ? '▶ Regenerate video' : '▶ Generate video'}
+                          {genQueue.some((e) => e.id === row.id) ? 'Queued' : row.status === 'generating' ? 'Generating…' : row.status === 'video_ready' && !outdated ? '▶ Regenerate video' : '▶ Generate video'}
                         </button>
                       )}
                     </div>
+                    {row.status === 'generating' || promptBusyIds.has(row.id) || genQueue.some((e) => e.id === row.id) ? (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                        <span className="vg-row-run">
+                          <span className="spin" />{' '}
+                          {row.status === 'generating'
+                            ? `Generating ${row.type === 'video' ? 'video' : 'image'} — a few minutes…`
+                            : promptBusyIds.has(row.id)
+                              ? 'AI rewriting this prompt — the new text lands here when done…'
+                              : 'Queued — starts the moment the current run finishes'}
+                        </span>
+                      </div>
+                    ) : null}
                     {(() => {
                       // THE RECORD, not the working text: sidecar first (has
                       // the timestamp), else the manifest's as-sent prompt —
