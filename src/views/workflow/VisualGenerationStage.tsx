@@ -2110,9 +2110,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                   </span>
                   <span
                     className={`status-pill ${outdated ? '' : row.status === 'image_ready' || row.status === 'video_ready' ? 'done' : row.status === 'generating' || promptBusyIds.has(row.id) ? 'work' : ''}`}
-                    title={outdated ? 'The prompt changed after this take was generated — regenerate to match. The old take is under Previous versions.' : undefined}
+                    title={outdated ? 'Nothing generated for the current prompt yet — the earlier take (made from an older prompt) is under Previous versions.' : undefined}
                   >
-                    {promptBusyIds.has(row.id) ? 'prompt rewrite' : outdated ? 'outdated' : row.status.replace('_', ' ')}
+                    {promptBusyIds.has(row.id) ? 'prompt rewrite' : outdated ? 'not run' : row.status.replace('_', ' ')}
                   </span>
                 </div>
                 <div className="vg-body">
