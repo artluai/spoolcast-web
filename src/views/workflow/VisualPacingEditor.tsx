@@ -525,7 +525,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           tenant: 'local',
           kind: 'update_screenplay',
           from_plan: true,
-          ...(fillLines ? { fill_lines: true, model: updModel, allow_cost: true } : {}),
+          // The click on the popup's confirm button IS the cost confirmation
+          // (the recompile's polish pass can spend credits even on the code
+          // route) — without this flag the engine refuses to start the job.
+          allow_cost: true,
+          ...(fillLines ? { fill_lines: true, model: updModel } : {}),
           ...(fillLines && draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
         }),
       })
@@ -1921,6 +1925,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               >
                 ⇄ {syncBusy ? 'Syncing…' : `Sync to screenplay${syncDelta.changes ? ` · ${syncDelta.changes}` : ''}`}
               </button>
+            ) : null}
+            {/* A sync that fails to START would otherwise die silently — the
+                only other error surface lives in the collapsed AI section. */}
+            {updErr && !updBusy ? (
+              <span style={{ fontSize: 12, color: 'var(--red)', marginLeft: 6 }}>{updErr}</span>
             ) : null}
             <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
               ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
