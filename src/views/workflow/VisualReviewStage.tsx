@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
-import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, templatesUrl } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -651,6 +651,25 @@ export function VisualReviewStage({
   const [timelineBusy, setTimelineBusy] = useState('')
   const trimInRef = useRef<HTMLInputElement>(null)
   const trimOutRef = useRef<HTMLInputElement>(null)
+  // VIDEO-FIRST: every clip carries its own sound, so a separate audio-chunk
+  // row spanning several clips is a fiction — hide it (a real music track is
+  // a future feature).
+  const [videoFirstSession, setVideoFirstSession] = useState(false)
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)),
+      getJson<{ data?: { templates?: { id?: string; format?: string }[] } }>(templatesUrl()),
+    ])
+      .then(([sess, reg]) => {
+        if (!live || typeof sess?.data?.content !== 'string') return
+        const cfg = JSON.parse(sess.data.content)
+        const hit = reg?.data?.templates?.find((t) => t.id === String(cfg?.template || ''))
+        if (hit?.format === 'video-first' || String(cfg?.shot_medium || '') === 'video') setVideoFirstSession(true)
+      })
+      .catch(() => { /* engine offline — keep the audio row */ })
+    return () => { live = false }
+  }, [])
   const [manifest, setManifest] = useState<SceneManifest | null>(null)
   const [promptDoc, setPromptDoc] = useState<GenerationPromptsDoc | null>(null)
   const [loading, setLoading] = useState(true)
@@ -928,12 +947,10 @@ export function VisualReviewStage({
       setTimelineBusy('')
     }
   }
-  const applyTrim = async (seg: ReviewSegment, clear = false) => {
-    const trimIn = clear ? 0 : Math.max(0, Number(trimInRef.current?.value) || 0)
-    const trimOut = clear ? 0 : Math.max(0, Number(trimOutRef.current?.value) || 0)
+  const sendTrim = async (seg: ReviewSegment, trimIn: number, trimOut: number, clear = false) => {
     setTimelineBusy('trim')
     try {
-      const out = await postAction({ action: 'set_clip_trim', shot_id: seg.pid, trim_in_s: trimIn, trim_out_s: trimOut })
+      const out = await postAction({ action: 'set_clip_trim', shot_id: seg.pid, trim_in_s: Math.round(trimIn * 10) / 10, trim_out_s: Math.round(trimOut * 10) / 10 })
       if (!out || out.ok === false) throw new Error(out?.error || 'Could not set the trim.')
       onToast?.(clear ? `${seg.pid}: trim cleared — the full clip plays.` : `${seg.pid}: trimmed — timeline re-synced to the real clips.`)
       setReloadTick((t) => t + 1)
@@ -943,12 +960,19 @@ export function VisualReviewStage({
       setTimelineBusy('')
     }
   }
-  const reorderShots = async (fromPid: string, toPid: string) => {
-    const order = segments.map((s) => s.pid)
+  const applyTrim = async (seg: ReviewSegment, clear = false) => {
+    const trimIn = clear ? 0 : Math.max(0, Number(trimInRef.current?.value) || 0)
+    const trimOut = clear ? 0 : Math.max(0, Number(trimOutRef.current?.value) || 0)
+    await sendTrim(seg, trimIn, trimOut, clear)
+  }
+  const applyReorder = async (fromPid: string, insertAt: number) => {
+    const current = segments.map((s) => s.pid)
+    const order = [...current]
     const fromIdx = order.indexOf(fromPid)
-    const toIdx = order.indexOf(toPid)
-    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return
-    order.splice(toIdx, 0, ...order.splice(fromIdx, 1))
+    if (fromIdx < 0) return
+    order.splice(fromIdx, 1)
+    order.splice(Math.max(0, Math.min(order.length, insertAt)), 0, fromPid)
+    if (order.join('|') === current.join('|')) return
     setTimelineBusy('reorder')
     try {
       const out = await postAction({ action: 'reorder_shots', order })
@@ -978,6 +1002,88 @@ export function VisualReviewStage({
     } finally {
       setTimelineBusy('')
     }
+  }
+
+  // ---- TIMELINE POINTER GESTURES (CapCut-style) -------------------------
+  // Grab a clip's EDGE to trim it (left = start, right = end), grab its
+  // BODY and drag to reorder (an insertion line shows where it lands).
+  // Pointer-based, not HTML5 drag — the track's scrubber ate dragstart.
+  type TimelineGesture = {
+    mode: 'in' | 'out' | 'move'
+    segment: ReviewSegment
+    startX: number
+    trackEl: HTMLElement
+    started: boolean
+    view: { dIn: number; dOut: number; insertAt: number }
+  }
+  const gestureRef = useRef<TimelineGesture | null>(null)
+  const [gestureView, setGestureView] = useState<{ pid: string; mode: string; dIn: number; dOut: number; insertAt: number } | null>(null)
+  const segmentsRef = useRef(segments)
+  segmentsRef.current = segments
+  const suppressClickRef = useRef(false)
+  const onGestureMove = useCallback((e: PointerEvent) => {
+    const g = gestureRef.current
+    if (!g) return
+    const dx = e.clientX - g.startX
+    const rect = g.trackEl.getBoundingClientRect()
+    const total = Math.max(0.001, ...segmentsRef.current.map((s) => s.end))
+    if (g.mode === 'move') {
+      if (!g.started && Math.abs(dx) < 6) return
+      g.started = true
+      const t = ((e.clientX - rect.left) / Math.max(1, rect.width)) * total
+      g.view.insertAt = segmentsRef.current.filter((s) => (s.start + s.end) / 2 < t).length
+    } else {
+      g.started = true
+      const dSec = dx * (total / Math.max(1, rect.width))
+      if (g.mode === 'in') g.view.dIn = dSec
+      else g.view.dOut = dSec
+    }
+    setGestureView({ pid: g.segment.pid, mode: g.mode, ...g.view })
+  }, [])
+  const onGestureUp = useCallback(() => {
+    const g = gestureRef.current
+    gestureRef.current = null
+    window.removeEventListener('pointermove', onGestureMove)
+    setGestureView(null)
+    if (!g || !g.started) return
+    suppressClickRef.current = true
+    window.setTimeout(() => { suppressClickRef.current = false }, 250)
+    const seg = g.segment
+    if (g.mode === 'move') {
+      if (g.view.insertAt >= 0) void applyReorder(seg.pid, g.view.insertAt)
+      return
+    }
+    const clip = seg.clipDuration || seg.trimIn + seg.duration
+    if (g.mode === 'in') {
+      const upper = (seg.trimOut || clip) - 0.2
+      const trimIn = Math.max(0, Math.min(upper, seg.trimIn + g.view.dIn))
+      void sendTrim(seg, trimIn, seg.trimOut || 0, trimIn === 0 && !seg.trimOut)
+    } else {
+      const base = seg.trimOut || clip
+      let trimOut = Math.max(seg.trimIn + 0.2, Math.min(clip, base + g.view.dOut))
+      if (trimOut >= clip - 0.05) trimOut = 0 // dragged back to full length = no out-trim
+      void sendTrim(seg, seg.trimIn, trimOut, trimOut === 0 && seg.trimIn === 0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onGestureMove])
+  const beginTimelineGesture = (e: ReactPointerEvent, segment: ReviewSegment, mode: 'in' | 'out' | 'move') => {
+    if (timelineBusy || e.button !== 0) return
+    if (mode !== 'move' && segment.mediaType !== 'video') return
+    e.stopPropagation()
+    if (mode !== 'move') e.preventDefault()
+    const trackEl = (e.currentTarget as HTMLElement).closest('.vp-tl-track') as HTMLElement | null
+    if (!trackEl) return
+    gestureRef.current = {
+      mode,
+      segment,
+      startX: e.clientX,
+      trackEl,
+      started: mode !== 'move',
+      view: { dIn: 0, dOut: 0, insertAt: -1 },
+    }
+    if (mode !== 'move') setGestureView({ pid: segment.pid, mode, dIn: 0, dOut: 0, insertAt: -1 })
+    window.addEventListener('pointermove', onGestureMove)
+    window.addEventListener('pointerup', onGestureUp, { once: true })
   }
 
   const audioChunks = useMemo<AudioChunk[]>(() => {
@@ -2671,32 +2777,45 @@ export function VisualReviewStage({
               <span className={`vr-playhead ${scrubbing ? 'scrubbing' : ''}`} style={{ left: `${pct(time)}%` }}>
                 <span className="vr-playhead-knob" />
               </span>
-              {segments.map((segment) => (
+              {segments.map((segment) => {
+                const gv = gestureView && gestureView.pid === segment.pid ? gestureView : null
+                const dIn = gv?.mode === 'in' ? gv.dIn : 0
+                const dOut = gv?.mode === 'out' ? gv.dOut : 0
+                const liveDuration = Math.max(0.2, segment.duration - dIn + dOut)
+                return (
                 <button
                   type="button"
                   key={segment.id}
-                  className={`vp-seg ${segment.id === activeSegment?.id ? 'on' : ''} ${segment.mediaType === 'video' ? 'video' : ''}`}
-                  style={{ left: `${pct(segment.start)}%`, width: `${Math.max(0.35, pct(segment.duration))}%` }}
-                  draggable={!timelineBusy}
+                  className={`vp-seg ${segment.id === activeSegment?.id ? 'on' : ''} ${segment.mediaType === 'video' ? 'video' : ''} ${gv ? 'gesturing' : ''}`}
+                  style={{ left: `${pct(segment.start + dIn)}%`, width: `${Math.max(0.35, pct(liveDuration))}%` }}
                   data-no-pan
-                  onDragStart={(e) => { e.dataTransfer.setData('text/plain', segment.pid); e.dataTransfer.effectAllowed = 'move' }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    const from = e.dataTransfer.getData('text/plain')
-                    if (from && from !== segment.pid && !timelineBusy) void reorderShots(from, segment.pid)
-                  }}
+                  onPointerDown={(e) => beginTimelineGesture(e, segment, 'move')}
                   onClick={() => {
+                    if (suppressClickRef.current) return
                     setSelectedId(segment.id)
                     setPlaybackTime(segment.start, false)
                   }}
-                  title={`${segment.pid} · selected ${segment.selectedType} · showing ${segment.mediaType} · ${segment.duration.toFixed(1)}s${segment.trimIn || segment.trimOut ? ` · trimmed ${segment.trimIn.toFixed(1)}–${(segment.trimOut ?? segment.clipDuration ?? 0).toFixed(1)}s` : ''} — drag onto another clip to reorder`}
+                  title={`${segment.pid} · selected ${segment.selectedType} · showing ${segment.mediaType} · ${segment.duration.toFixed(1)}s${segment.trimIn || segment.trimOut ? ` · trimmed ${segment.trimIn.toFixed(1)}–${(segment.trimOut ?? segment.clipDuration ?? 0).toFixed(1)}s` : ''} — drag to reorder, drag an edge to trim`}
                 >
-                  <span>{segment.pid}</span>
+                  <span>{gv ? `${liveDuration.toFixed(1)}s` : segment.pid}</span>
+                  {segment.mediaType === 'video' ? (
+                    <>
+                      <i className="vr-trim-handle l" title="Drag to trim the clip's start" onPointerDown={(e) => beginTimelineGesture(e, segment, 'in')} />
+                      <i className="vr-trim-handle r" title="Drag to trim the clip's end" onPointerDown={(e) => beginTimelineGesture(e, segment, 'out')} />
+                    </>
+                  ) : null}
                 </button>
-              ))}
+                )
+              })}
+              {gestureView?.mode === 'move' && gestureView.insertAt >= 0 ? (
+                <span
+                  className="vr-insert-line"
+                  style={{ left: `${pct(gestureView.insertAt === 0 ? 0 : (segments[gestureView.insertAt - 1]?.end ?? totalSec))}%` }}
+                />
+              ) : null}
             </div>
           </div>
+          {videoFirstSession ? null : (
           <div className="vp-tl-row">
             <span className="vp-tl-label">Audio</span>
             <div className="vp-tl-track ruler vr-scrubbable" {...timelineScrubHandlers}>
@@ -2717,6 +2836,7 @@ export function VisualReviewStage({
               ))}
             </div>
           </div>
+          )}
           <div className="vp-tl-row axis">
             <span className="vp-tl-label" />
             <div className="vp-tl-track vr-scrubbable" {...timelineScrubHandlers}>

@@ -1013,6 +1013,14 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-row-actions .vp-undo { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; box-sizing: border-box; }
 .vg-row-actions input[type="file"] { display: none; }
 .vp-edit-actions input[type="file"] { display: none; }
+/* Final-cut timeline gestures: edge handles trim, body-drag reorders. */
+.vp-seg { cursor: grab; }
+.vp-seg.gesturing { opacity: .75; z-index: 6; cursor: grabbing; }
+.vr-trim-handle { position: absolute; top: 0; bottom: 0; width: 9px; cursor: ew-resize; opacity: 0; transition: opacity .12s; }
+.vr-trim-handle.l { left: 0; border-left: 2px solid rgba(255,255,255,.7); border-radius: 4px 0 0 4px; }
+.vr-trim-handle.r { right: 0; border-right: 2px solid rgba(255,255,255,.7); border-radius: 0 4px 4px 0; }
+.vp-seg:hover .vr-trim-handle, .vp-seg.on .vr-trim-handle, .vp-seg.gesturing .vr-trim-handle { opacity: 1; background: rgba(255,255,255,.18); }
+.vr-insert-line { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--accent, #7c6cff); border-radius: 2px; z-index: 7; pointer-events: none; }
 .vg-row-run { display: inline-flex; align-items: center; min-height: 30px; color: var(--amber); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; }
 .vg-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
 .vg-tile { min-width: 0; text-align: left; background: transparent; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); padding: 0; overflow: hidden; cursor: pointer; }
