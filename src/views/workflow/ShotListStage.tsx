@@ -288,26 +288,36 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageProcess?.jobId, stageProcess?.status])
 
-  // Prefill from the engine's real file — never clobber an edit in progress.
-  // ONLY a dirty draft (real unsaved edits) may shadow the disk file: a clean
-  // persisted copy is just a stale mirror, and the engine rebuilds this file
-  // behind our back (Sync to screenplay recompiles it) — showing the mirror
-  // made step 8 look "not synced" after a successful sync.
+  // Prefill from the engine's real file. The engine rebuilds this file behind
+  // the UI (Sync to screenplay recompiles it), so a persisted local copy is
+  // just a stale mirror UNLESS it holds real unsaved edits (dirty): then the
+  // edits win, but a banner offers the rebuilt version — never a silent
+  // shadow that makes a successful sync look like it did nothing.
+  const [rebuiltOnDisk, setRebuiltOnDisk] = useState<string | null>(null)
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
-    const store = useWorkflowStore.getState()
-    if ((store.stageDrafts[stageId] ?? '').length > 0 && store.dirtySteps[stageId]) return
     fetch(fileUrl(FILE_PATH))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
-        if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
-          const cur = useWorkflowStore.getState()
-          if ((cur.stageDrafts[stageId] ?? '').length === 0) seedStageDraft(stageId, out.data.content)
+        if (!(out?.ok && out.data?.exists && typeof out.data.content === 'string')) return
+        const cur = useWorkflowStore.getState()
+        const curDraft = cur.stageDrafts[stageId] ?? ''
+        if (curDraft.length > 0 && cur.dirtySteps[stageId]) {
+          if (curDraft.trim() !== out.data.content.trim()) setRebuiltOnDisk(out.data.content)
+          return
         }
+        seedStageDraft(stageId, out.data.content)
       })
       .catch(() => {})
   }, [stageId, seedStageDraft])
+  const loadRebuilt = () => {
+    if (rebuiltOnDisk == null) return
+    useWorkflowStore.getState().clearStageDrafts(stageId)
+    seedStageDraft(stageId, rebuiltOnDisk)
+    setRebuiltOnDisk(null)
+    setEdited(false)
+  }
 
   const list: ShotList | null = (() => {
     try {
@@ -684,6 +694,22 @@ export function ShotListStage({ stageId }: { stageId: string }) {
         </div>
       ) : null}
 
+      {rebuiltOnDisk != null ? (
+        // The engine rebuilt shot-list.json underneath (a step-7 sync) while
+        // this step holds unsaved local edits — surface the conflict instead
+        // of silently showing either version as the only truth.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 10px', padding: '8px 12px', border: '1px solid var(--amber)', borderRadius: 8, fontSize: 13 }}>
+          <span style={{ color: 'var(--amber)', flex: 1 }}>
+            The shot list was rebuilt by a sync, but this step still shows your unsaved local edits.
+          </span>
+          <button type="button" className="vp-save" onClick={loadRebuilt}>
+            Load the rebuilt shot list
+          </button>
+          <button type="button" className="vp-undo" onClick={() => setRebuiltOnDisk(null)} title="Keep the local edits — saving the step will overwrite the rebuilt file">
+            Keep my edits
+          </button>
+        </div>
+      ) : null}
       <div style={{ position: 'relative' }}>
         {isBusy ? (
           <div style={{ position: 'absolute', inset: 0, zIndex: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'rgba(10,12,18,.45)', borderRadius: 8, minHeight: 120 }}>
@@ -772,9 +798,12 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                       className={`vp-seg ${`base:${event.id}` === selected ? 'on' : ''}`}
                       style={{ left: `${pct(start)}%`, width: `${pct(dur)}%` }}
                       onClick={() => setSelected((cur) => (cur === `base:${event.id}` ? '' : `base:${event.id}`))}
-                      title={`${event.id} · ${event.chunk_id || 'audio'} · ~${dur.toFixed(1)}s`}
+                      title={`${event.pacing_image_id || event.id} · ${event.chunk_id || 'audio'} · ~${dur.toFixed(1)}s`}
                     >
-                      <span>{event.id}</span>
+                      {/* DISPLAY the permanent board id (pacing_image_id) —
+                          the compiled event id is positional (clip 5 = "S05")
+                          and reads as a DIFFERENT shot the board never had. */}
+                      <span>{event.pacing_image_id || event.id}</span>
                     </button>
                   ))}
                 </div>
@@ -815,7 +844,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                     className="sl-section-head"
                     onClick={() => setSelected((cur) => (cur === `base:${event.id}` ? '' : `base:${event.id}`))}
                   >
-                    <span className="id">{event.id}</span>
+                    <span className="id">{event.pacing_image_id || event.id}</span>
                     <span className="sl-title">{spoken ? `“${spoken}”` : 'Silent clip'}</span>
                     <span className="sl-meta">{fmtTime(start)}-{fmtTime(start + dur)} · {dur.toFixed(1)}s{grp ? ` · ${grp}` : ''}{agrp ? ` · ♪ ${agrp}` : ''}</span>
                   </button>

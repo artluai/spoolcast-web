@@ -1892,7 +1892,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 <div className="vg-row-head">
                   <label className="vg-select">
                     <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggle(row.id)} />
-                    <span className="id">{row.id}</span>
+                    {/* The board's permanent shot id, not the positional
+                        compiled id — step 7 diffs say "regenerate S08" and
+                        this list must speak the same language. */}
+                    <span className="id">{shotEvents[row.id]?.pid || row.id}</span>
                   </label>
                   <b>{row.title}</b>
                   <span className="vg-meta">{row.duration} · {row.aspect} · {row.resolution} ·{' '}
