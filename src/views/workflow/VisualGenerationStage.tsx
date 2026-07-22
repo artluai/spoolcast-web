@@ -788,6 +788,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
   useEffect(() => { if (!activeProcess) void loadMediaHistory() }, [activeProcess])
 
+  // A RUNNING BATCH SURVIVES NAVIGATION AND RELOADS (same pattern as step
+  // 7's compile job): the job id persists in localStorage; on mount, if the
+  // engine says it is still running, the watch resumes — without this a
+  // reload orphaned the batch and finished videos never populated the rows.
+  const batchJobKey = `spoolcast-batch-job:${activeSession()}`
+  useEffect(() => {
+    if (stageProcess) return
+    const jobId = window.localStorage.getItem(batchJobKey)
+    if (!jobId) return
+    void readJsonFile<{ state?: string }>(`working/jobs/${jobId}.json`)
+      .then((job) => {
+        if (['created', 'running'].includes(String(job?.state || ''))) {
+          setStageProcess(stageId, { stageId, jobId, status: 'running', label: 'Resuming generation…', updatedAt: new Date().toISOString() })
+        } else {
+          window.localStorage.removeItem(batchJobKey)
+        }
+      })
+      .catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
   // flush together the moment the job ends (the batch parallelizes inside).
   const [genQueue, setGenQueue] = useState<{ id: string; type: 'image' | 'video' }[]>([])
@@ -979,6 +1000,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         if (manifestDoc) setSceneManifest(manifestDoc)
         const state = String(job?.state || '')
         if (['succeeded', 'failed', 'stopped', 'lost'].includes(state)) {
+          window.localStorage.removeItem(batchJobKey)
           await load()
           pollingRef.current = ''
           if (state === 'succeeded') {
@@ -1344,6 +1366,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) throw new Error(out?.details || out?.message || out?.error || 'Could not start image generation.')
       const jobId = String(out?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+      if (jobId) window.localStorage.setItem(batchJobKey, jobId)
       setStageProcess(stageId, {
         stageId,
         jobId,
@@ -1435,6 +1458,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       const out = await res.json().catch(() => null)
       if (!res.ok || out?.ok === false) throw new Error(out?.details || out?.message || out?.error || 'Could not start video generation.')
       const jobId = String(out?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+      if (jobId) window.localStorage.setItem(batchJobKey, jobId)
       setStageProcess(stageId, {
         stageId,
         jobId,
