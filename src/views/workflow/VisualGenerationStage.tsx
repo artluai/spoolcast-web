@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
-import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl } from '../../lib/api'
+import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl, uploadTake } from '../../lib/api'
 import { appendDraftVariantRow, mergeKitWithDraft, patchDraftShotRefs, useWorldKitDraft } from '../../lib/kit-draft'
 import { VariantModule, type VariantBase } from './VariantModule'
 import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL_ID } from '../../lib/image-models'
@@ -27,6 +27,9 @@ type PromptReference = {
 type GenerationPromptItem = {
   id?: string
   chunk_id?: string
+  // The PERMANENT shot id — media files are named by this, never by the
+  // positional item id (which shifts when shots are added or deleted).
+  pacing_image_id?: string
   // Per-clip model override — beats the doc-level preferred model.
   video_model?: string
   image_model?: string
@@ -96,6 +99,8 @@ type SceneManifest = {
 type PromptRow = {
   item: GenerationPromptItem
   id: string
+  /** Media key: the permanent shot id that owns this row's takes on disk. */
+  mid: string
   type: OutputType
   status: RowStatus
   title: string
@@ -113,6 +118,25 @@ type PromptRow = {
 type PreviewMedia = {
   kind: 'image' | 'video'
   src: string
+}
+
+// One take in the session's asset library: any media file on disk, grouped
+// by the permanent shot id that owns it. Orphaned owners (shot deleted from
+// the board) keep their takes forever — attachable to any shot.
+type LibraryTake = {
+  path: string
+  kind: 'image' | 'video'
+  active: boolean
+  stamp: string
+  origin: string
+  model?: string
+  original_name?: string
+}
+
+type LibraryGroup = {
+  id: string
+  on_board: boolean
+  takes: LibraryTake[]
 }
 
 const imageModels = [
@@ -223,6 +247,14 @@ function generatedSceneRel(id: string) {
   return `source/generated-assets/scenes/${id}.png`
 }
 
+/** Permanent shot id for a prompt item — the key its media files live under.
+ *  Old docs (before the engine stamped pacing_image_id on items) fall back to
+ *  the item id; the two only diverge after shots are added or deleted. */
+function itemMediaId(item: GenerationPromptItem, pids?: Record<string, string>) {
+  const id = String(item.id || item.chunk_id || '').trim()
+  return String(item.pacing_image_id || '').trim() || (pids?.[id] ?? '') || id
+}
+
 function defaultFirstFrameReference(id: string): PromptReference {
   return {
     name: `${id} first frame`,
@@ -289,8 +321,9 @@ function withManifestPromptVariants(
   const items = doc.items.map((item) => {
     const id = String(item.id || item.chunk_id || '').trim()
     if (!id) return item
-    const imagePrompt = String(mediaManifestItem(manifest, id, 'image')?.prompt || '').trim()
-    const videoPrompt = String(mediaManifestItem(manifest, id, 'video')?.prompt || '').trim()
+    const mid = itemMediaId(item)
+    const imagePrompt = String(mediaManifestItem(manifest, mid, 'image')?.prompt || '').trim()
+    const videoPrompt = String(mediaManifestItem(manifest, mid, 'video')?.prompt || '').trim()
     if (!imagePrompt && !videoPrompt) return item
     const variants = { ...(item.prompt_variants ?? {}) }
     let itemChanged = false
@@ -320,14 +353,15 @@ function withDefaultFirstFrameRefs(
   let changed = false
   const items = doc.items.map((item) => {
     const id = String(item.id || item.chunk_id || '').trim()
-    if (!id || item.output_type !== 'video' || item.first_frame_removed || (!completed.has(id) && manifestReady.get(id) !== 'image')) return item
-    const relPath = generatedSceneRel(id)
+    const mid = itemMediaId(item)
+    if (!id || item.output_type !== 'video' || item.first_frame_removed || (!completed.has(id) && manifestReady.get(mid) !== 'image')) return item
+    const relPath = generatedSceneRel(mid)
     const refs = Array.isArray(item.references) ? item.references : []
     if (hasFirstFrameReference(refs, relPath)) return item
     changed = true
     return {
       ...item,
-      references: [defaultFirstFrameReference(id), ...refs],
+      references: [defaultFirstFrameReference(mid), ...refs],
     }
   })
   return changed ? { doc: { ...doc, items }, changed } : { doc, changed: false }
@@ -342,6 +376,7 @@ function normalizeRows(
   videoModel: string,
   drafts: Record<string, string>,
   errors: Record<string, string>,
+  pids?: Record<string, string>,
 ): PromptRow[] {
   if (!doc?.items?.length) return []
   const completed = new Set(status?.completed ?? [])
@@ -353,6 +388,9 @@ function normalizeRows(
   const ready = mediaReadyMap(manifest)
   return doc.items.map((item) => {
     const id = String(item.id || item.chunk_id || '')
+    // Batch status keys by the positional item id; media (the manifest) keys
+    // by the permanent shot id. Both are consulted on purpose.
+    const mid = itemMediaId(item, pids)
     const type = item.output_type || defaultType
     const mediaType = type === 'video' ? 'video' : 'image'
     const payload = promptParts(item, doc)
@@ -362,12 +400,16 @@ function normalizeRows(
     let rowStatus: RowStatus = 'not_run'
     if (failed[id]) rowStatus = 'failed'
     else if (running && (!targetIds.size || targetIds.has(id)) && !doneIds.has(id)) rowStatus = 'generating'
-    else if (ready.get(id) === 'video' && type === 'video') rowStatus = 'video_ready'
-    else if (ready.get(id) === 'image' && type !== 'video') rowStatus = 'image_ready'
-    else if (doneIds.has(id)) rowStatus = type === 'video' ? 'video_ready' : 'image_ready'
+    else if (ready.get(mid) === 'video' && type === 'video') rowStatus = 'video_ready'
+    else if (ready.get(mid) === 'image' && type !== 'video') rowStatus = 'image_ready'
+    // The completed list keys by the POSITIONAL id of the run that wrote it,
+    // so after shots move it can vouch for the wrong row. Only trust it while
+    // a run is live (manifest not landed yet) or when no manifest exists.
+    else if (doneIds.has(id) && (running || !manifest?.items?.length)) rowStatus = type === 'video' ? 'video_ready' : 'image_ready'
     return {
       item,
       id,
+      mid,
       type,
       status: rowStatus,
       title: String(item.scene || item.chunk_id || id),
@@ -543,9 +585,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // the engine, never edited by anyone. The textarea above is the WORKING
   // prompt for the NEXT generation; this is the record of the current one.
   const [usedPrompts, setUsedPrompts] = useState<Record<string, { prompt: string; model?: string; generated_at?: string }>>({})
-  const loadUsedPrompts = async (ids: string[]) => {
-    const entries = await Promise.all(ids.map(async (id) => {
-      const out = await fetch(fileUrl(`source/generated-assets/videos/${id}.json`)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  const loadUsedPrompts = async (pairs: { id: string; mid: string }[]) => {
+    // Sidecars live next to the media → named by the PERMANENT shot id;
+    // stored under the row id, which is what the render below looks up.
+    const entries = await Promise.all(pairs.map(async ({ id, mid }) => {
+      const out = await fetch(fileUrl(`source/generated-assets/videos/${mid}.json`)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
       try {
         const j = JSON.parse(out?.data?.content ?? 'null')
         if (j?.prompt) return [id, { prompt: String(j.prompt), model: j.model, generated_at: j.generated_at }] as const
@@ -572,6 +616,61 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     }
     setSaveNote(`${rowId}: previous version restored (the replaced one is archived too).`)
     await loadMediaHistory()
+  }
+  // THE ASSET LIBRARY: every take on disk grouped by its permanent owner.
+  // Deleting a shot orphans its takes — they stay here, attachable to any
+  // shot. Attaching COPIES (the same asset may serve several shots).
+  const [library, setLibrary] = useState<LibraryGroup[] | null>(null)
+  const [attachPickFor, setAttachPickFor] = useState<string | null>(null)
+  const [attachBusy, setAttachBusy] = useState(false)
+  const loadLibrary = async () => {
+    const out = await fetch(`${API}/asset-library?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (out?.ok && Array.isArray(out.data?.library)) setLibrary(out.data.library as LibraryGroup[])
+  }
+  const refreshAfterTakeChange = async () => {
+    await load()
+    await Promise.all([loadMediaHistory(), loadLibrary()])
+  }
+  const attachTake = async (row: PromptRow, take: LibraryTake) => {
+    setAttachBusy(true)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'attach_take_to_shot', path: take.path, shot_id: row.mid }),
+      })
+      const out = await r.json().catch(() => null)
+      if (!r.ok || out?.ok === false) throw new Error(out?.error || 'Could not attach the take.')
+      setAttachPickFor(null)
+      // Keep the row's medium in step with what it now shows.
+      if (take.kind === 'video' && row.type !== 'video') changeRowType(row.id, 'video')
+      else if (take.kind === 'image' && row.type === 'video') changeRowType(row.id, 'image')
+      setSaveNote(`${row.mid}: take attached from the library — anything it replaced moved to previous versions.`)
+      await refreshAfterTakeChange()
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'Could not attach the take.')
+    } finally {
+      setAttachBusy(false)
+    }
+  }
+  const uploadOwnTake = async (row: PromptRow, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setAttachBusy(true)
+    try {
+      const out = await uploadTake(row.mid, file)
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not upload the file.')
+      const kind = out.data?.kind
+      if (kind === 'video' && row.type !== 'video') changeRowType(row.id, 'video')
+      else if (kind === 'image' && row.type === 'video') changeRowType(row.id, 'image')
+      setSaveNote(`${row.mid}: your own ${kind || 'file'} is now this shot's take — anything it replaced moved to previous versions.`)
+      await refreshAfterTakeChange()
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : 'Could not upload the file.')
+    } finally {
+      setAttachBusy(false)
+    }
   }
   const planRefsByPid = useMemo(() => {
     const md = (pacingDraft || planFileMd || '').trim()
@@ -909,15 +1008,20 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageProcess?.jobId, activeProcess])
 
+  // Fallback pid map for docs older than the engine's pacing_image_id stamp.
+  const rowPids = useMemo(
+    () => Object.fromEntries(Object.entries(shotEvents).map(([id, ev]) => [id, ev.pid])),
+    [shotEvents],
+  )
   const rows = useMemo(
-    () => normalizeRows(doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors),
-    [doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors],
+    () => normalizeRows(doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors, rowPids),
+    [doc, batchStatus, sceneManifest, defaultType, imageModel, videoModel, drafts, errors, rowPids],
   )
 
   const progress = useMemo(() => {
     const total = rows.length
     const ready = mediaReadyMap(sceneManifest)
-    const done = rows.filter((row) => ready.has(row.id) || row.status === 'image_ready' || row.status === 'video_ready').length
+    const done = rows.filter((row) => ready.has(row.mid) || row.status === 'image_ready' || row.status === 'video_ready').length
     return { total, done, pct: total ? Math.round((done / total) * 100) : 0 }
   }, [rows, sceneManifest])
   const pendingSignature = useMemo(() => {
@@ -940,7 +1044,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // left chips stuck amber after any hiccup); a few tries per distinct diff
   // caps hard-failure loops — the manual button stays as the last resort.
   useEffect(() => {
-    const ids = rows.filter((r) => r.type === 'video').map((r) => r.id)
+    const ids = rows.filter((r) => r.type === 'video').map((r) => ({ id: r.id, mid: r.mid }))
     if (ids.length && !activeProcess) void loadUsedPrompts(ids)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length, activeProcess])
@@ -1370,9 +1474,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         const withTargetPrompt = withPromptForType(remembered, targetType, targetPrompt)
         if (type === 'video') {
           const refs = Array.isArray(withTargetPrompt.references) ? withTargetPrompt.references : []
-          const relPath = generatedSceneRel(itemId)
+          const mid = itemMediaId(item, rowPids)
+          const relPath = generatedSceneRel(mid)
           const nextRefs = completed.has(itemId) && !hasFirstFrameReference(refs, relPath)
-            ? [defaultFirstFrameReference(itemId), ...refs]
+            ? [defaultFirstFrameReference(mid), ...refs]
             : refs
           return { ...withTargetPrompt, output_type: type, first_frame_removed: false, references: nextRefs }
         }
@@ -1457,12 +1562,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   const rowPreviewMedia = (row: PromptRow): PreviewMedia | null => {
     if (row.type === 'video' && row.status === 'video_ready') {
-      const videoSrc = sceneVideoSrc(row.id)
+      const videoSrc = sceneVideoSrc(row.mid)
       if (videoSrc) return { kind: 'video', src: videoSrc }
     }
     const firstFrame = firstFrameReference(row)
     if (row.type === 'video' && firstFrame) return { kind: 'image', src: referenceSrc(referenceValue(firstFrame)) }
-    if (row.status === 'image_ready') return { kind: 'image', src: sceneImageSrc(row.id) }
+    if (row.status === 'image_ready') return { kind: 'image', src: sceneImageSrc(row.mid) }
     return null
   }
 
@@ -2181,6 +2286,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     {/* THE row action, bottom right — above the collapsed
                         history sections, same spot as every other module. */}
                     <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                      <label
+                        className="vp-undo"
+                        title="Use your own video or image as this shot's take. The current take moves to previous versions — nothing is ever deleted."
+                      >
+                        ⬆ Upload my own
+                        <input
+                          type="file"
+                          accept="video/mp4,video/webm,video/quicktime,image/png,image/jpeg,image/webp"
+                          disabled={attachBusy}
+                          onChange={(event) => void uploadOwnTake(row, event)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="vp-undo"
+                        disabled={attachBusy}
+                        title="Attach a take from the asset library — takes from deleted shots and copies of other shots' takes."
+                        onClick={() => { setAttachPickFor(row.id); void loadLibrary() }}
+                      >
+                        ⧉ Attach from library…
+                      </button>
                       {row.type === 'image' ? (
                         <button
                           type="button"
@@ -2209,12 +2335,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-2)', margin: '8px 0 0', fontFamily: 'var(--mono)' }}>{usedPrompts[row.id].prompt}</pre>
                       </details>
                     ) : null}
-                    {(mediaHistory[row.id] ?? []).length ? (
+                    {(mediaHistory[row.mid] ?? []).length ? (
                       <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
-                        <summary>Previous versions · {(mediaHistory[row.id] ?? []).length}</summary>
+                        <summary>Previous versions · {(mediaHistory[row.mid] ?? []).length}</summary>
                         <div className="vg-refs" style={{ marginTop: 8 }}>
-                          {(mediaHistory[row.id] ?? []).map((v) => {
-                            const src = `${API}/content?session=${encodeURIComponent(activeSession())}&path=${encodeURIComponent(v.path)}`
+                          {(mediaHistory[row.mid] ?? []).map((v) => {
+                            const src = contentUrl(v.path)
                             const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
                             return (
                               <span key={v.path} className="vg-ref-thumb">
@@ -2295,6 +2421,92 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 setRefEdit(null)
               }}
             />
+          )
+        })() : null}
+
+        {attachPickFor ? (() => {
+          const row = rows.find((r) => r.id === attachPickFor)
+          if (!row) return null
+          // The row's own takes live under "Previous versions" already — the
+          // library popup is about EVERYTHING ELSE: orphaned takes first
+          // (that is what the library is for), then other shots' takes.
+          const others = (library ?? []).filter((g) => g.id !== row.mid && g.takes.length)
+          const orphaned = others.filter((g) => !g.on_board)
+          const owned = others.filter((g) => g.on_board)
+          const takeTile = (group: LibraryGroup, take: LibraryTake) => {
+            const src = contentUrl(take.path)
+            const when = take.stamp ? `${take.stamp.slice(4, 6)}/${take.stamp.slice(6, 8)} ${take.stamp.slice(9, 11)}:${take.stamp.slice(11, 13)}` : ''
+            const label = [
+              group.on_board ? `shot ${group.id}` : `deleted shot ${group.id}`,
+              take.active ? 'current take' : when,
+              take.origin !== 'generated' ? take.origin : take.model || '',
+            ].filter(Boolean).join(' · ')
+            return (
+              <span key={take.path} className="vg-ref-thumb" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start' }} title={`${label} — click to attach a copy to ${row.mid}`}>
+                {take.kind === 'video' ? (
+                  <video
+                    src={src}
+                    muted
+                    playsInline
+                    preload="auto"
+                    style={{ cursor: attachBusy ? 'wait' : 'copy' }}
+                    onLoadedMetadata={(e) => {
+                      const el = e.currentTarget
+                      const r = el.videoWidth / el.videoHeight || 1
+                      const h = Math.min(190, Math.sqrt(20000 / r))
+                      el.style.height = `${Math.round(h)}px`
+                      el.style.width = `${Math.round(h * r)}px`
+                      el.currentTime = 0.01
+                    }}
+                    onMouseEnter={(e) => { void e.currentTarget.play().catch(() => undefined) }}
+                    onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0.01 }}
+                    onClick={() => { if (!attachBusy) void attachTake(row, take) }}
+                  />
+                ) : (
+                  <img
+                    src={src}
+                    alt=""
+                    style={{ cursor: attachBusy ? 'wait' : 'copy' }}
+                    onLoad={equalAreaThumb}
+                    onClick={() => { if (!attachBusy) void attachTake(row, take) }}
+                  />
+                )}
+                <small style={{ display: 'block', marginTop: 4, color: 'var(--ink-2)' }}>{label}</small>
+              </span>
+            )
+          }
+          return (
+            <div className="modal-scrim" onClick={() => setAttachPickFor(null)}>
+              <div className="confirm-modal vg-ref-modal" onClick={(event) => event.stopPropagation()} style={{ width: 'min(880px, 94vw)', maxHeight: '86vh', overflowY: 'auto' }}>
+                <div className="vg-ref-modal-head">
+                  <b>Asset library — attach a take to {row.mid}</b>
+                  <button type="button" className="vp-undo" onClick={() => setAttachPickFor(null)}>Close</button>
+                </div>
+                {library === null ? (
+                  <p style={{ color: 'var(--ink-2)' }}>Loading the library…</p>
+                ) : !orphaned.length && !owned.length ? (
+                  <p style={{ color: 'var(--ink-2)' }}>
+                    Nothing to attach yet. Takes land here when a shot is deleted (its media is
+                    kept, never thrown away) and every shot's takes can be copied to another shot.
+                  </p>
+                ) : (
+                  <>
+                    {orphaned.length ? (
+                      <>
+                        <p className="vp-menu-h" style={{ margin: '12px 0 4px' }}>TAKES FROM DELETED SHOTS</p>
+                        <div className="vg-refs">{orphaned.flatMap((g) => g.takes.map((t) => takeTile(g, t)))}</div>
+                      </>
+                    ) : null}
+                    {owned.length ? (
+                      <>
+                        <p className="vp-menu-h" style={{ margin: '16px 0 4px' }}>OTHER SHOTS' TAKES — attaching makes a copy; the other shot keeps its own</p>
+                        <div className="vg-refs">{owned.flatMap((g) => g.takes.map((t) => takeTile(g, t)))}</div>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
           )
         })() : null}
 

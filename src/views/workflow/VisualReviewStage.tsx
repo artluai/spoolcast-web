@@ -855,7 +855,9 @@ export function VisualReviewStage({
           ? 'video'
           : 'image'
         const activeType = selectedMediaType(promptItem, fallbackType)
-        const manifestItem = mediaManifestItem(manifest, id, activeType)
+        // The manifest keys takes by the PERMANENT shot id; the segment id
+        // stays positional (timeline/caption keys) on purpose.
+        const manifestItem = mediaManifestItem(manifest, String(event.pacing_image_id || '').trim() || id, activeType)
         const manifestPath = manifestContentPath(manifestItem)
         const path = manifestPath.replace(new RegExp(`^sessions/${activeSession()}/`), '')
           || eventPathForType(event, activeType)

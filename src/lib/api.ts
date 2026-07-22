@@ -112,6 +112,25 @@ export async function postAction<T = unknown>(
   }
 }
 
+/** Upload the user's own take (raw bytes, no base64 — videos are tens of MB)
+ *  straight into a shot's active media slot. `shot` is the PERMANENT shot id;
+ *  the engine archives the slot's current take to history first. */
+export async function uploadTake(
+  shot: string,
+  file: File,
+): Promise<{ ok?: boolean; data?: { path?: string; kind?: string }; error?: string } | null> {
+  try {
+    const res = await fetch(apiUrl('upload-take', { session: activeSession(), shot, filename: file.name }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    })
+    return (await res.json()) as { ok?: boolean; data?: { path?: string; kind?: string }; error?: string }
+  } catch {
+    return null
+  }
+}
+
 /** Existence probe: does a GET of this URL succeed? (body discarded) */
 export async function urlOk(url: string): Promise<boolean> {
   try {
