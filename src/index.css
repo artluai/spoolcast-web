@@ -1162,7 +1162,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
 /* Drag anywhere on a track to scrub. Segments/ruler become visual-only so the
    track surface receives the pointer; touch-action:none lets a touch drag scrub. */
 .vr-scrubbable { cursor: ew-resize; touch-action: none; }
-.vr-scrubbable .vp-seg, .vr-scrubbable .vp-ruler-seg, .vr-scrubbable .vp-tick { pointer-events: none; }
+.vr-scrubbable .vp-ruler-seg, .vr-scrubbable .vp-tick { pointer-events: none; }
+/* Visual clips are LIVE (drag = reorder, edges = trim, click = select);
+   scrubbing still works on the empty track, the axis row and the ruler. */
+.vr-scrubbable .vp-seg { pointer-events: auto; }
 .vp-seg.video { background: linear-gradient(180deg, rgba(176,139,255,.34), rgba(176,139,255,.16)); }
 .vp-seg.video:hover, .vp-seg.video.on { background: linear-gradient(180deg, var(--purple), rgba(176,139,255,.56)); }
 .vr-panel { position: relative; min-width: 0; padding: 0; }
