@@ -479,7 +479,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         return
       }
       const jobId = String(out?.data?.id || '')
-      window.localStorage.setItem(updJobKey, jobId)
+      window.localStorage.setItem(updJobKey, `${jobId}|edit`)
       await pollUpdateJob(jobId)
     } catch {
       setUpdErr('Could not reach the engine.')
@@ -539,7 +539,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         return
       }
       const jobId = String(out?.data?.id || '')
-      window.localStorage.setItem(updJobKey, jobId)
+      window.localStorage.setItem(updJobKey, `${jobId}|sync`)
       await pollUpdateJob(jobId)
     } catch {
       setUpdErr('Could not reach the engine.')
@@ -550,17 +550,23 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     }
   }
   // Resume watching after a reload: if a job id was left behind, poll it as
-  // if the button had just been pressed (busy label included).
+  // if the button had just been pressed — including WHICH button: the stored
+  // value is "<jobId>|<edit|sync>" (a bare id from older builds means edit),
+  // so the right label ("Syncing…" vs "Updating…") survives the reload.
   useEffect(() => {
     const pending = window.localStorage.getItem(updJobKey)
     if (!pending) return
+    const [jobId, kind] = pending.split('|')
+    if (!jobId) return
     updBusyRef.current = true
     setUpdBusy(true)
-    void pollUpdateJob(pending)
+    if (kind === 'sync') setSyncBusy(true)
+    void pollUpdateJob(jobId)
       .catch(() => setUpdErr('Could not reach the engine.'))
       .finally(() => {
         updBusyRef.current = false
         setUpdBusy(false)
+        setSyncBusy(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -2938,9 +2944,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 </label>
               </div>
             }
-            label={updBusy ? 'Updating…' : 'Update shots with AI'}
+            label={updBusy ? (syncBusy ? 'Waiting for the sync to finish…' : 'Updating…') : 'Update shots with AI'}
             busy={updBusy}
-            busyLabel="Updating…"
+            busyLabel={syncBusy ? 'Waiting for the sync to finish…' : 'Updating…'}
             title="Edits this board only — sync to screenplay when you're happy (uses model credits)"
             rulesFocus="visual-pacing"
             historyKey="draft-notes-visual-pacing"
