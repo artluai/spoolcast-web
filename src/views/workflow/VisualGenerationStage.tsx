@@ -33,6 +33,9 @@ type GenerationPromptItem = {
   // Past working prompts, oldest first (engine compile/AI-rewrite and user
   // edits all append; capped engine-side).
   prompt_history?: { prompt?: string; at?: string; by?: string }[]
+  // Past "Improve prompt with AI" instructions, oldest first (engine appends
+  // on each rewrite; carried across rebuilds).
+  improve_notes?: { note?: string; at?: string }[]
   // Per-clip model override — beats the doc-level preferred model.
   video_model?: string
   image_model?: string
@@ -2237,6 +2240,23 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                             placeholder="Tell the AI what to change — e.g. focus on one shoe, slower motion, tighter framing..."
                             rows={3}
                           />
+                          {(row.item.improve_notes ?? []).length ? (
+                            <details className="sl-json" style={{ margin: '6px 0 0', borderTop: 'none', paddingTop: 0 }}>
+                              <summary>Past notes · {(row.item.improve_notes ?? []).length}</summary>
+                              {[...(row.item.improve_notes ?? [])].reverse().map((n, i) => (
+                                <button
+                                  type="button"
+                                  key={`${row.id}-in-${i}`}
+                                  className="vp-undo"
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', marginTop: 6, whiteSpace: 'normal', textTransform: 'none', letterSpacing: 0 }}
+                                  title={`Reuse this note${n.at ? ` (from ${String(n.at).slice(5, 16).replace('T', ' ')})` : ''}`}
+                                  onClick={() => setRowAiNote(String(n.note || ''))}
+                                >
+                                  {n.note}
+                                </button>
+                              ))}
+                            </details>
+                          ) : null}
                           {/* Step-5 pattern: while the improve panel is open,
                               improving IS the action — one vp-save, bottom right. */}
                           <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
