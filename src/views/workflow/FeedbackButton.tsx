@@ -29,6 +29,7 @@ export function FeedbackButton({
   historyKey,
   ruleStep,
   alwaysOpen = false,
+  historyRideAlong = true,
   aboveActions,
   runExtras,
   onRun,
@@ -50,6 +51,11 @@ export function FeedbackButton({
   // Render the notebox permanently (no collapsed pill, no ▴) — for hosts that
   // put the control inside their own collapsible section.
   alwaysOpen?: boolean
+  // true (drafters): checked past notes ride along with every run — a redraft
+  // from scratch must not forget note A while fixing note B. false
+  // (incremental updates): each run sends ONLY the textarea; past notes are a
+  // click-to-reuse reference, never silent passengers.
+  historyRideAlong?: boolean
   // Extra controls rendered on their own row between the textarea and the
   // action row (e.g. a host-owned checkbox).
   aboveActions?: ReactNode
@@ -102,8 +108,10 @@ export function FeedbackButton({
     })
   }
 
-  // What actually reaches the AI: every checked past note + the new one.
+  // What actually reaches the AI: every checked past note + the new one —
+  // unless ride-along is off, in which case ONLY the textarea goes.
   const composeFeedback = (fresh: string) => {
+    if (!historyRideAlong) return fresh.trim()
     const past = (history ?? []).filter((n) => n.on).map((n) => n.text)
     return [...past, fresh.trim()].filter(Boolean).join('\n')
   }
@@ -165,18 +173,24 @@ export function FeedbackButton({
       {historyKey && (history?.length ?? 0) > 0 && (
         <div style={{ padding: '10px 12px 0' }}>
           <div style={{ fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)', marginBottom: 5 }}>
-            PAST NOTES — CHECKED ONES APPLY TO EVERY DRAFT
+            {historyRideAlong ? 'PAST NOTES — CHECKED ONES APPLY TO EVERY DRAFT' : 'PAST NOTES — CLICK ONE TO REUSE IT (nothing applies on its own)'}
           </div>
           {history!.map((n, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginBottom: 4 }}>
-              <input
-                type="checkbox"
-                checked={n.on}
-                title={n.on ? 'Applied to the next drafts — uncheck to park it' : 'Parked — check to apply it again'}
-                onChange={(e) => saveHistory(history!.map((x, xi) => (xi === i ? { ...x, on: e.target.checked } : x)))}
-                style={{ accentColor: 'var(--ink-2)', margin: '2px 0 0' }}
-              />
-              <span style={{ flex: 1, fontSize: 12.5, lineHeight: 1.45, color: n.on ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+              {historyRideAlong ? (
+                <input
+                  type="checkbox"
+                  checked={n.on}
+                  title={n.on ? 'Applied to the next drafts — uncheck to park it' : 'Parked — check to apply it again'}
+                  onChange={(e) => saveHistory(history!.map((x, xi) => (xi === i ? { ...x, on: e.target.checked } : x)))}
+                  style={{ accentColor: 'var(--ink-2)', margin: '2px 0 0' }}
+                />
+              ) : null}
+              <span
+                title={historyRideAlong ? undefined : 'Click to put this note in the box'}
+                onClick={historyRideAlong ? undefined : () => setFeedback((f) => (f.trim() ? `${f.trim()}\n${n.text}` : n.text))}
+                style={{ flex: 1, fontSize: 12.5, lineHeight: 1.45, color: historyRideAlong && n.on ? 'var(--ink-2)' : 'var(--ink-3)', cursor: historyRideAlong ? undefined : 'pointer' }}
+              >
                 {n.text}
               </span>
               <button

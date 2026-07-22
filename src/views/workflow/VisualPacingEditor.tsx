@@ -2596,6 +2596,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           </p>
           <FeedbackButton
             alwaysOpen
+            historyRideAlong={false}
             aboveActions={
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}>
