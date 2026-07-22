@@ -649,8 +649,6 @@ export function VisualReviewStage({
   // controls while one runs.
   const [reloadTick, setReloadTick] = useState(0)
   const [timelineBusy, setTimelineBusy] = useState('')
-  const trimInRef = useRef<HTMLInputElement>(null)
-  const trimOutRef = useRef<HTMLInputElement>(null)
   // VIDEO-FIRST: every clip carries its own sound, so a separate audio-chunk
   // row spanning several clips is a fiction — hide it (a real music track is
   // a future feature).
@@ -959,11 +957,6 @@ export function VisualReviewStage({
     } finally {
       setTimelineBusy('')
     }
-  }
-  const applyTrim = async (seg: ReviewSegment, clear = false) => {
-    const trimIn = clear ? 0 : Math.max(0, Number(trimInRef.current?.value) || 0)
-    const trimOut = clear ? 0 : Math.max(0, Number(trimOutRef.current?.value) || 0)
-    await sendTrim(seg, trimIn, trimOut, clear)
   }
   const timelineHistory = async (dir: 'undo' | 'redo') => {
     setTimelineBusy(dir)
@@ -2792,40 +2785,6 @@ export function VisualReviewStage({
         className={panelClassName('timeline', 'vr-timeline-panel')}
         title="Timeline"
         meta={`${segments.length} visuals · ${audioChunks.length} audio chunks · ${fmtTime(totalSec)}`}
-        actions={(
-          <>
-            <button
-              type="button"
-              className="vp-undo"
-              disabled={!!timelineBusy}
-              title="Undo the last timeline change (trim or sync). Reorders aren't on this stack — drag the clip back."
-              onClick={() => void timelineHistory('undo')}
-            >↶ Undo</button>
-            <button
-              type="button"
-              className="vp-undo"
-              disabled={!!timelineBusy}
-              title="Redo the timeline change you just undid"
-              onClick={() => void timelineHistory('redo')}
-            >↷ Redo</button>
-            <button
-              type="button"
-              className="vp-undo"
-              disabled={!!timelineBusy}
-              title="Measure each generated clip and rebuild the timeline with its REAL durations (trims respected). Until then the times are pre-generation estimates."
-              onClick={() => void syncClipTiming()}
-            >
-              {timelineBusy === 'sync' ? 'Syncing…' : timelineBusy === 'reorder' ? 'Reordering…' : timelineBusy === 'trim' ? 'Trimming…' : '⟳ Sync to real clips'}
-            </button>
-            <button
-              type="button"
-              className="vp-undo"
-              disabled={!!timelineBusy}
-              title="Clear every trim and give each clip its FULL generated length — the default timeline"
-              onClick={() => void resetToFullClips()}
-            >Reset to full clips</button>
-          </>
-        )}
       >
         <TimelineScroller
           zoom={zoom}
@@ -2891,6 +2850,7 @@ export function VisualReviewStage({
           <div className="vp-tl-row">
             <span className="vp-tl-label">Audio</span>
             <div className="vp-tl-track ruler vr-scrubbable" {...timelineScrubHandlers}>
+              <span className={`vr-playhead ${scrubbing ? 'scrubbing' : ''}`} style={{ left: `${pct(time)}%` }} />
               {audioChunks.map((chunk, index) => (
                 <button
                   type="button"
@@ -2912,34 +2872,23 @@ export function VisualReviewStage({
           <div className="vp-tl-row axis">
             <span className="vp-tl-label" />
             <div className="vp-tl-track vr-scrubbable" {...timelineScrubHandlers}>
+              <span className={`vr-playhead ${scrubbing ? 'scrubbing' : ''}`} style={{ left: `${pct(time)}%` }} />
               {ticks.map((tick) => (
                 <span key={tick} className="vp-tick" style={{ left: `${pct(tick)}%` }}>{fmtTime(tick)}</span>
               ))}
               <span className="vp-tick end" style={{ left: '100%' }}>{fmtTime(totalSec)}</span>
             </div>
           </div>
-          {activeSegment && activeSegment.mediaType === 'video' ? (
-            // BASIC TRIM for the selected clip. key: switching clips resets
-            // the uncontrolled inputs to that clip's stored window.
-            <div key={activeSegment.id} data-no-pan style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 2px', fontSize: 12, color: 'var(--ink-2)' }}>
-              <span className="vp-tl-label" style={{ width: 'auto' }}>Trim {activeSegment.pid}</span>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                start at
-                <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={activeSegment.trimIn || undefined} placeholder="0" style={{ width: 64, background: 'transparent', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', padding: '4px 6px' }} />s
-              </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                end at
-                <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={activeSegment.trimOut || undefined} placeholder={activeSegment.clipDuration ? activeSegment.clipDuration.toFixed(1) : 'clip end'} style={{ width: 64, background: 'transparent', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', padding: '4px 6px' }} />s
-              </label>
-              {activeSegment.clipDuration ? <span style={{ color: 'var(--ink-3)' }}>clip is {activeSegment.clipDuration.toFixed(1)}s</span> : null}
-              <button type="button" className="vp-save" disabled={!!timelineBusy} onClick={() => void applyTrim(activeSegment)}>
-                {timelineBusy === 'trim' ? 'Trimming…' : 'Apply trim'}
-              </button>
-              {activeSegment.trimIn || activeSegment.trimOut ? (
-                <button type="button" className="vp-undo" disabled={!!timelineBusy} onClick={() => void applyTrim(activeSegment, true)}>Clear trim</button>
-              ) : null}
-            </div>
-          ) : null}
+          {/* TIMELINE OPS — inside the scroller so they are always visible
+              with the tracks (the panel title row scrolls out of view). */}
+          <div data-no-pan style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 2px' }}>
+            <button type="button" className="vp-undo" disabled={!!timelineBusy} title="Undo the last timeline change (trim or sync). Reorders aren't on this stack — drag the clip back." onClick={() => void timelineHistory('undo')}>↶ Undo</button>
+            <button type="button" className="vp-undo" disabled={!!timelineBusy} title="Redo the timeline change you just undid" onClick={() => void timelineHistory('redo')}>↷ Redo</button>
+            <button type="button" className="vp-undo" disabled={!!timelineBusy} title="Measure each generated clip and rebuild the timeline with its REAL durations (trims respected)." onClick={() => void syncClipTiming()}>
+              {timelineBusy === 'sync' ? 'Syncing…' : timelineBusy === 'reorder' ? 'Reordering…' : timelineBusy === 'trim' ? 'Trimming…' : '⟳ Sync to real clips'}
+            </button>
+            <button type="button" className="vp-undo" disabled={!!timelineBusy} title="Clear every trim and give each clip its FULL generated length — the default timeline" onClick={() => void resetToFullClips()}>Reset to full clips</button>
+          </div>
         </TimelineScroller>
       </ReviewPanel>
     )
