@@ -36,6 +36,9 @@ type GenerationPromptItem = {
   // Past "Improve prompt with AI" instructions, oldest first (engine appends
   // on each rewrite; carried across rebuilds).
   improve_notes?: { note?: string; at?: string }[]
+  // Free compose-time checks: duplicated reference text, polluted kit
+  // descriptions, over-length — flagged BEFORE they cost a generation.
+  lint?: string[]
   // Per-clip model override — beats the doc-level preferred model.
   video_model?: string
   image_model?: string
@@ -2151,6 +2154,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                   >
                     {promptBusyIds.has(row.id) ? 'prompt rewrite' : outdated ? 'not run' : row.status.replace('_', ' ')}
                   </span>
+                  {(row.item.lint ?? []).length ? (
+                    <span
+                      className="vp-undo"
+                      style={{ cursor: 'help', borderColor: 'var(--amber)', color: 'var(--amber)' }}
+                      title={(row.item.lint ?? []).join('\n')}
+                    >
+                      ⚠ prompt check · {(row.item.lint ?? []).length}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="vg-body">
                   <div className="vg-media-col">

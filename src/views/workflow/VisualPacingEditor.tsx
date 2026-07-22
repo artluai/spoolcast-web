@@ -230,6 +230,20 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_session_fields', fields: { prompt_ai: next } }),
     }).catch(() => setPromptAi(!next)) // engine offline — revert the switch
   }
+  // OPTIMIZE ON THE WAY OUT: one AI pass over the composed prompts as part
+  // of Save and continue (default off; skips prompts unchanged since the
+  // last pass, so repeat saves stay free).
+  const [optimizePrompts, setOptimizePrompts] = useState(false)
+  const optimizePromptsRef = useRef(false)
+  useEffect(() => { optimizePromptsRef.current = optimizePrompts }, [optimizePrompts])
+  const toggleOptimizePrompts = async (next: boolean) => {
+    setOptimizePrompts(next)
+    await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_session_fields', fields: { optimize_prompts: next } }),
+    }).catch(() => setOptimizePrompts(!next)) // engine offline — revert
+  }
   useEffect(() => {
     let live = true
     Promise.all([
@@ -243,6 +257,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         if (m === 'video' || m === 'image') setShotMedium(m)
         // MANUAL MODE: prompt_ai:false = the user writes their own prompts.
         setPromptAi(cfg?.prompt_ai !== false)
+        setOptimizePrompts(cfg?.optimize_prompts === true)
         const hit = reg?.data?.templates?.find((t: { id?: string }) => t.id === String(cfg?.template || ''))
         // Video-first generates picture and sound together, so there is no
         // separate audio track to show. Default true: an unknown template is
@@ -752,6 +767,18 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'build_generation_prompts' }),
         }).catch(() => null)
+        if (optimizePromptsRef.current) {
+          // THE OPTIMIZE CHECKBOX rides the same save: one AI pass over the
+          // fresh prompts (unchanged ones skip — free no-op). The job id
+          // lands in step 8's watch key so its rows pick it up on arrival.
+          const opt = await fetch(actionUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'rewrite_generation_prompts', allow_cost: true, optimize: true, output_type: 'current' }),
+          }).then((r) => r.json()).catch(() => null)
+          const optJob = String(opt?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+          if (optJob) window.localStorage.setItem(`spoolcast-batch-job:${activeSession()}`, optJob)
+        }
         setCompileDone(true)
         void loadCompiled() // the embedded prompt folds refresh in place
         return
@@ -3529,6 +3556,15 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               voice and style wrapper are still added by code.
             </p>
           ) : null}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12.5, cursor: 'pointer', marginTop: 6 }}>
+            <input
+              type="checkbox"
+              checked={optimizePrompts}
+              onChange={(e) => void toggleOptimizePrompts(e.target.checked)}
+              style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+            />
+            optimize prompts for video generation on Save and continue (one AI pass; only changed prompts re-run)
+          </label>
           {promptAi ? <RulesPanel step={shotListStageId} title="RULES FOR THE GENERATION PROMPTS" /> : null}
         </div>
       ) : null}
