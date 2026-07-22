@@ -77,15 +77,22 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const setStepUndo = useWorkflowStore((s) => s.setStepUndo)
   const undoRef = useRef<() => void>(() => {})
   const redoRef = useRef<() => void>(() => {})
+  // Header-Undo fallback: with no local edits left to undo, Undo swaps the
+  // last AI update back (engine .prev swap — pressing again swaps forward).
+  const aiRevertRef = useRef<() => void>(() => {})
+  const [hasPrevForUndo, setHasPrevForUndo] = useState(false)
   useEffect(() => {
     setStepUndo({
-      count: history.length,
-      run: () => undoRef.current(),
+      count: history.length + (hasPrevForUndo ? 1 : 0),
+      run: () => {
+        if (history.length) undoRef.current()
+        else aiRevertRef.current()
+      },
       redoCount: redoHistory.length,
       redo: () => redoRef.current(),
     })
     return () => setStepUndo(null)
-  }, [history.length, redoHistory.length, setStepUndo])
+  }, [history.length, redoHistory.length, hasPrevForUndo, setStepUndo])
   // TIMELINE EDGE DRAG: live hold overrides while dragging the boundary
   // between two images of the same beat (zero-sum — the words own the total).
   const [dragHolds, setDragHolds] = useState<Record<string, number> | null>(null)
@@ -423,6 +430,23 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     setUpdBusy(true)
     setUpdErr(null)
     try {
+      // The chain edits the FILES for minutes — a live local draft is a
+      // landmine (a mid-run flush once reverted the chain's write). Unsaved
+      // board edits are saved NOW so the note applies to them, then the
+      // local copy is dropped for the duration.
+      const store = useWorkflowStore.getState()
+      const localDraft = store.stageDrafts[stageId] ?? ''
+      if (store.dirtySteps[stageId] && localDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: activeSession(), tenant: 'local', action: 'set_stage_output',
+            stage_id: stageId, path: 'working/visual-pacing-plan.md', content: localDraft,
+          }),
+        })
+      }
+      clearStageDrafts(stageId)
       const res = await fetch(jobsUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -480,6 +504,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => { if (live) setHasOrigPlan(Boolean(j?.data?.exists ?? j?.data?.content)) })
         .catch(() => { /* engine offline */ })
+      // .prev backup present → the header Undo's AI-swap fallback is armed.
+      fetch(fileUrl('working/visual-pacing-plan.prev.md'))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (live) setHasPrevForUndo(Boolean(j?.data?.exists ?? j?.data?.content)) })
+        .catch(() => { /* engine offline */ })
     }
     check()
     const timer = window.setInterval(check, 8000)
@@ -507,6 +536,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     clearStageDrafts(stageId)
     window.location.reload()
   }
+  aiRevertRef.current = () => { setResetNote(null); void revertPacingRedraft('revert_visual_pacing') }
   // null = no user preference yet: hidden by default on the mapping board
   // (the board is the star there), shown by default on script/table.
   const [tlOpen, setTlOpen] = useState<boolean | null>(null)
