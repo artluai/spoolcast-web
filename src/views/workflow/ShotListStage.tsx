@@ -3,7 +3,7 @@ import { FeedbackButton } from './FeedbackButton'
 import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
-import { activeSession, actionUrl, apiUrl, contentUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
@@ -165,13 +165,6 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   // Per-clip tab: the PROMPT is the default lens (read-only here — editing
   // lives at the generation step); the description is the second tab.
   const [clipTab, setClipTab] = useState<Record<string, 'prompt' | 'description'>>({})
-  const [openCards, setOpenCards] = useState<Set<string>>(new Set())
-  const toggleCard = (key: string) => setOpenCards((cur) => {
-    const next = new Set(cur)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    return next
-  })
   // The World Kit, for CONFIRMING each clip's references visually: image refs
   // as thumbnails, prompt-only objects as chips, audio as ♪ chips — including
   // audio riding in via an object link (variants inherit).
@@ -831,6 +824,14 @@ export function ShotListStage({ stageId }: { stageId: string }) {
 
           {videoFirst ? (
           <div className="sl-review">
+            {/* SLIM VERIFY PAGE: shots are reviewed and edited on the Visual
+                pacing board (step 7 — collapse the World Kit for the full-width
+                review). These cards confirm the COMPILED artifact only: the
+                assembled prompt, direction, timing, and raw JSON. */}
+            <p className="vp-hint" style={{ margin: '10px 0 0' }}>
+              Shots are edited on the Visual pacing board (step 7). This step verifies what was
+              compiled — prompt, direction, timing.
+            </p>
             {positioned.map(({ event, start, dur }) => {
               const chunk = chunkById.get(String(event.chunk_id ?? ''))
               const spoken = clipSpoken(event, chunk)
@@ -868,74 +869,6 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                           ) : (
                             <p style={{ margin: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 6, padding: '8px 10px', fontSize: 13, lineHeight: 1.55, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>{event.visual_direction || '—'}</p>
                           )}
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  {(() => {
-                    // CONFIRM THE REFERENCES: what actually reaches this clip.
-                    const refs = (event.references ?? []).map(String)
-                    const find = (n: string) => kit.find((k) => k.name === n)
-                    const AUD = new Set(['voice', 'music', 'ambience', 'sfx', 'audio'])
-                    const imgs = refs.filter((n) => find(n)?.image_path)
-                    const texts = refs.filter((n) => { const k = find(n); return k ? !k.image_path && !AUD.has(k.kind) : true })
-                    const attachedAudio = refs.filter((n) => AUD.has(find(n)?.kind ?? ''))
-                    const planned = planRefsById[String(event.pacing_image_id ?? '')] ?? null
-                    const pending = planned ? planned.filter((n) => !refs.includes(n) && find(n)) : []
-                    const inherited = kit
-                      .filter((k) => AUD.has(k.kind) && k.linked_to && !attachedAudio.includes(k.name))
-                      .filter((k) => refs.some((n) => n === k.linked_to || find(n)?.variant_of === k.linked_to))
-                    if (!imgs.length && !texts.length && !attachedAudio.length && !inherited.length && !pending.length) return null
-                    const cardFor = (key: string, chip: string, name: string, notes?: string) => {
-                      const isOpen = openCards.has(key)
-                      return (
-                        <span
-                          key={key}
-                          className="vp-map-txtatt"
-                          style={{ cursor: 'pointer', ...(isOpen ? { maxWidth: 420 } : {}) }}
-                          title={isOpen ? 'Click to collapse' : 'Click to show the full content'}
-                          onClick={() => toggleCard(key)}
-                        >
-                          <span className="vp-map-chip">{chip}</span>
-                          <span className="vp-map-attname">{name}</span>
-                          {notes ? <span className="txt-notes" style={isOpen ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : undefined}>{notes}</span> : null}
-                        </span>
-                      )
-                    }
-                    return (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        {imgs.map((n) => (
-                          <img
-                            key={n}
-                            src={contentUrl(find(n)!.image_path!)}
-                            alt={n}
-                            title={`${n} — reference image (uploads to the model)`}
-                            style={{ height: 132, width: 'auto', borderRadius: 9, border: '1px solid var(--line-2)', display: 'block' }}
-                            onLoad={(e) => {
-                              // Visuals first: every thumb gets the same square
-                              // footage at its true ratio, not the same height.
-                              const im = e.currentTarget
-                              const r = im.naturalWidth / im.naturalHeight || 1
-                              const h = Math.min(200, Math.sqrt(19000 / r))
-                              im.style.height = `${Math.round(h)}px`
-                              im.style.width = `${Math.round(h * r)}px`
-                            }}
-                          />
-                        ))}
-                        {texts.map((n) => cardFor(`${event.id}:t:${n}`, find(n)?.kind || 'ref', n, find(n)?.notes))}
-                        {attachedAudio.map((n) => cardFor(`${event.id}:a:${n}`, `♪ ${find(n)?.kind || 'audio'}`, `${n} · this clip`, find(n)?.notes))}
-                        {inherited.map((k) => cardFor(`${event.id}:i:${k.name}`, `♪ ${k.kind}`, `${k.name} · via ${k.linked_to}`, k.notes))}
-                        {pending.map((n) => (
-                          <span key={`p-${n}`} className="vp-undo" style={{ cursor: 'default', borderColor: 'var(--amber)', color: 'var(--amber)' }} title={`${n} is attached in the pacing plan but not in the compiled shot list yet — Sync refs (free) applies it.`}>
-                            {AUD.has(find(n)?.kind ?? '') ? '♪ ' : ''}{n} · in plan, not synced
-                          </span>
-                        ))}
-                        {pending.length ? (
-                          <button type="button" className="vp-undo" disabled={syncing} onClick={() => void syncRefsFromPlan()} title="Free — copies each shot's refs from the pacing plan into the compiled shot list (code only, prose untouched)">
-                            {syncing ? 'Syncing…' : '⟳ Sync refs from plan'}
-                          </button>
-                        ) : null}
                         </div>
                       </div>
                     )

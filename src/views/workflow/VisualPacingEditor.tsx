@@ -23,7 +23,7 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay, type Clip } from '../../lib/screenplay-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
@@ -31,6 +31,7 @@ import { FeedbackButton } from './FeedbackButton'
 import { ModelPicker } from './ModelPicker'
 import { mergeKitWithDraft, patchDraftAudioLink, useWorldKitDraft } from '../../lib/kit-draft'
 import { TimelineScroller } from './TimelineScroller'
+import { ShotListStage } from './ShotListStage'
 
 // The Visual Pacing panel, made real: the timeline/table/script views are a
 // VIEW over working/visual-pacing-plan.md (the engine's contract output for
@@ -312,6 +313,44 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // re-measured on resize and settle timers; equality guard stops loops.
   const [mapSel, setMapSel] = useState('')
   const [mapAI, setMapAI] = useState(false)
+  // KIT COLLAPSE = REVIEW MODE: the kit column folds away, the shots go full
+  // width and all expand by default — the confirmation view that used to live
+  // on step 8. Mapping mode (kit open) keeps single-select expansion.
+  const kitOpenKey = `sc-map-kit-open-${activeSession()}`
+  const [kitOpen, setKitOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(kitOpenKey) !== '0' } catch { return true }
+  })
+  const setKitOpenPersist = (v: boolean) => {
+    setKitOpen(v)
+    if (!v) setMapSel('')
+    try { localStorage.setItem(kitOpenKey, v ? '1' : '0') } catch { /* private mode */ }
+  }
+  // Review-mode card state is a CLOSED set — the default is all-open.
+  const [closedShots, setClosedShots] = useState<Set<string>>(new Set())
+  // Kit wall arrangement: loose type clustering (default) or labeled type
+  // sections; plus a visuals-only filter that hides text/audio cards.
+  const kitTypeKey = `sc-map-kit-bytype-${activeSession()}`
+  const [kitByType, setKitByType] = useState<boolean>(() => {
+    try { return localStorage.getItem(kitTypeKey) === '1' } catch { return false }
+  })
+  const setKitByTypePersist = (v: boolean) => {
+    setKitByType(v)
+    try { localStorage.setItem(kitTypeKey, v ? '1' : '0') } catch { /* private mode */ }
+  }
+  const kitVisKey = `sc-map-kit-visonly-${activeSession()}`
+  const [kitVisualsOnly, setKitVisualsOnly] = useState<boolean>(() => {
+    try { return localStorage.getItem(kitVisKey) === '1' } catch { return false }
+  })
+  const setKitVisualsPersist = (v: boolean) => {
+    setKitVisualsOnly(v)
+    try { localStorage.setItem(kitVisKey, v ? '1' : '0') } catch { /* private mode */ }
+  }
+  // Attach-reference popup: which shot's picker is open (review mode has no
+  // kit wall to click, and the popup works in mapping mode too).
+  const [attachFor, setAttachFor] = useState<string | null>(null)
+  // Click-to-edit on the card itself: What / spoken line swap to a textarea
+  // in place; commit on blur or Enter, Esc discards.
+  const [inlineEdit, setInlineEdit] = useState<{ id: string; field: 'what' | 'line'; value: string } | null>(null)
   // An AI mapping that would DETACH existing references must be confirmed —
   // removals are shown in a popup before anything is applied. (Hook lives
   // ABOVE the no-draft early return: hooks run in call order.)
@@ -570,6 +609,119 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // SAVE & COMPILE: one click saves the plan file and recompiles the shot
+  // list (step 8's artifact), so it never goes stale behind board edits. The
+  // compile is the engine's own draft_stage job for the shot-list stage —
+  // incremental: unchanged shots reuse their polish, a no-change compile
+  // makes no AI call. Sync to screenplay stays a separate button (its chain
+  // already recompiles at the end). The stage id comes from the CONTRACT
+  // (the stage whose actions include build_shot_list) — no per-contract map.
+  const [shotListStageId, setShotListStageId] = useState('')
+  // Contract says the shot-list stage FOLDS into this step (ui.fold_into) —
+  // its node is hidden from the graph and its screen mounts here instead.
+  const [shotListFolded, setShotListFolded] = useState(false)
+  useEffect(() => {
+    let live = true
+    fetch(contractUrl())
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!live) return
+        const stages = out?.data?.contract?.stages ?? out?.data?.stages ?? out?.stages
+        if (!Array.isArray(stages)) return
+        const hit = stages.find((s: { actions?: string[] }) => Array.isArray(s?.actions) && s.actions.includes('build_shot_list'))
+        if (hit?.id) setShotListStageId(String(hit.id))
+        if (hit?.ui?.fold_into && String(hit.ui.fold_into) === stageId) setShotListFolded(true)
+      })
+      .catch(() => { /* engine offline — the button stays hidden */ })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [compileBusy, setCompileBusy] = useState(false)
+  const [compileErr, setCompileErr] = useState<string | null>(null)
+  const [compileDone, setCompileDone] = useState(false)
+  const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const compileJobKey = `spoolcast-compile-job:${activeSession()}`
+  const pollCompileJob = async (jobId: string, slStage: string) => {
+    for (let i = 0; i < 840; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2500))
+      const jr = await fetch(jobsUrl(jobId)).catch(() => null)
+      const jout = await jr?.json().catch(() => null)
+      const job = jout?.data
+      if (job?.status === 'done') {
+        window.localStorage.removeItem(compileJobKey)
+        setStageProcess(slStage, null)
+        setCompileDone(true)
+        return
+      }
+      if (job?.status === 'failed') {
+        window.localStorage.removeItem(compileJobKey)
+        setStageProcess(slStage, null)
+        setCompileErr(job?.message || job?.error || 'Compile failed — the previous shot list is untouched.')
+        return
+      }
+    }
+    setCompileErr('The compile is taking unusually long — check the engine.')
+  }
+  const runCompile = async () => {
+    if (!shotListStageId || compileBusy || updBusy) return
+    setCompileBusy(true)
+    setCompileErr(null)
+    setCompileDone(false)
+    try {
+      // The compile reads the plan FILE — unsaved board edits are saved
+      // first, then the local copy is dropped (same dance as sync).
+      const store = useWorkflowStore.getState()
+      const localDraft = store.stageDrafts[stageId] ?? ''
+      if (store.dirtySteps[stageId] && localDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: activeSession(), tenant: 'local', action: 'set_stage_output',
+            stage_id: stageId, path: 'working/visual-pacing-plan.md', content: localDraft,
+          }),
+        })
+        clearStageDrafts(stageId)
+      }
+      const res = await fetch(jobsUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(), tenant: 'local', kind: 'draft_stage',
+          stage_id: shotListStageId,
+          // The button click IS the cost confirmation — only changed shots
+          // re-run their polish.
+          allow_cost: true,
+          model: updModel,
+          ...(draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setCompileErr(out?.message || out?.error || 'Could not start the compile.')
+        return
+      }
+      const jobId = String(out?.data?.id || '')
+      window.localStorage.setItem(compileJobKey, jobId)
+      // Step 8 shows (and resumes) the same job through the shared store.
+      setStageProcess(shotListStageId, { stageId: shotListStageId, jobId, status: 'running', label: 'AI is compiling the shot list…' })
+      await pollCompileJob(jobId, shotListStageId)
+    } catch {
+      setCompileErr('Could not reach the engine.')
+    } finally {
+      setCompileBusy(false)
+    }
+  }
+  // Resume a compile the reload orphaned (stageProcesses don't persist).
+  useEffect(() => {
+    if (!shotListStageId) return
+    const jobId = window.localStorage.getItem(compileJobKey)
+    if (!jobId) return
+    setCompileBusy(true)
+    setStageProcess(shotListStageId, { stageId: shotListStageId, jobId, status: 'running', label: 'AI is compiling the shot list…' })
+    void pollCompileJob(jobId, shotListStageId).finally(() => setCompileBusy(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shotListStageId])
   const [resetNote, setResetNote] = useState<string | null>(null)
   // Whether the AI-update ORIGINAL baseline exists — the first update in a
   // run pins it, stacked updates keep it, manual saves retire it. Reset
@@ -839,63 +991,80 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // vertical scrolling.
   const GAP = 10
   type Packed = { k: { name: string; kind: string; notes: string; image_path: string }; w: number; h: number; x: number; y: number }
+  // One skyline pass at a given area A — shared by the single wall and the
+  // per-type sections, so equal footprint holds across section boundaries.
+  const layoutKit = (objects: { name: string; kind: string; notes: string; image_path: string }[], A: number, W: number): { items: Packed[]; totalH: number } => {
+    const STEP = 8 // skyline resolution; cards land on an 8px grid
+    // Text cards: a fixed 1.4:1 box at ~70% of the image area — comparable
+    // to its neighbors, but the pictures always read larger.
+    const tw = Math.round(Math.min(W - 8, Math.max(150, Math.sqrt(A * 0.7 * 1.4))))
+    const th = Math.round(Math.max(105, tw / 1.4))
+    const cols = Math.max(1, Math.floor(W / STEP))
+    const heights = new Array<number>(cols).fill(0)
+    const items: Packed[] = []
+    let totalH = 0
+    for (const k of objects) {
+      let w = tw
+      let h = th
+      if (k.image_path) {
+        const r = imgRatios[k.name] ?? 1.25
+        const area = k.kind === 'master' || k.kind === 'variant' ? A * 1.5 : A
+        w = Math.round(Math.min(W - 8, Math.max(90, Math.sqrt(area / r))))
+        h = Math.round(w * r)
+      }
+      const span = Math.min(cols, Math.ceil((w + GAP) / STEP))
+      let bestC = 0
+      let bestY = Infinity
+      for (let c = 0; c + span <= cols; c += 1) {
+        let y = 0
+        for (let i = c; i < c + span; i += 1) y = Math.max(y, heights[i])
+        if (y < bestY - 0.5) {
+          bestY = y
+          bestC = c
+        }
+      }
+      if (!Number.isFinite(bestY)) {
+        bestY = Math.max(0, ...heights)
+        bestC = 0
+      }
+      items.push({ k, w, h, x: bestC * STEP, y: bestY })
+      const top = bestY + h + GAP
+      for (let i = bestC; i < Math.min(cols, bestC + span); i += 1) heights[i] = top
+      totalH = Math.max(totalH, bestY + h)
+    }
+    return { items, totalH }
+  }
+  // MINIMUM FOOTPRINT: below this area a card stops being readable. When a
+  // huge kit can't fit the height budget at this floor, the wall grows
+  // SIDEWAYS and scrolls horizontally — never vertically (user law).
+  const A_MIN = 15000
   const packKit = (objects: { name: string; kind: string; notes: string; image_path: string }[]) => {
     const W = Math.max(320, kitDims.w)
     const HB = Math.max(240, kitDims.h - 8)
-    const STEP = 8 // skyline resolution; cards land on an 8px grid
-    const layout = (A: number): { items: Packed[]; totalH: number } => {
-      // Text cards: a fixed 1.4:1 box at ~70% of the image area — comparable
-      // to its neighbors, but the pictures always read larger.
-      const tw = Math.round(Math.min(W - 8, Math.max(150, Math.sqrt(A * 0.7 * 1.4))))
-      const th = Math.round(Math.max(105, tw / 1.4))
-      const cols = Math.max(1, Math.floor(W / STEP))
-      const heights = new Array<number>(cols).fill(0)
-      const items: Packed[] = []
-      let totalH = 0
-      for (const k of objects) {
-        let w = tw
-        let h = th
-        if (k.image_path) {
-          const r = imgRatios[k.name] ?? 1.25
-          const area = k.kind === 'master' || k.kind === 'variant' ? A * 1.5 : A
-          w = Math.round(Math.min(W - 8, Math.max(90, Math.sqrt(area / r))))
-          h = Math.round(w * r)
-        }
-        const span = Math.min(cols, Math.ceil((w + GAP) / STEP))
-        let bestC = 0
-        let bestY = Infinity
-        for (let c = 0; c + span <= cols; c += 1) {
-          let y = 0
-          for (let i = c; i < c + span; i += 1) y = Math.max(y, heights[i])
-          if (y < bestY - 0.5) {
-            bestY = y
-            bestC = c
-          }
-        }
-        if (!Number.isFinite(bestY)) {
-          bestY = Math.max(0, ...heights)
-          bestC = 0
-        }
-        items.push({ k, w, h, x: bestC * STEP, y: bestY })
-        const top = bestY + h + GAP
-        for (let i = bestC; i < Math.min(cols, bestC + span); i += 1) heights[i] = top
-        totalH = Math.max(totalH, bestY + h)
+    let lo = A_MIN
+    const hiInit = 220000
+    let best = layoutKit(objects, lo, W)
+    if (best.totalH <= HB) {
+      let hi = hiInit
+      for (let i = 0; i < 14; i += 1) {
+        const mid = (lo + hi) / 2
+        const cand = layoutKit(objects, mid, W)
+        if (cand.totalH <= HB) {
+          best = cand
+          lo = mid
+        } else hi = mid
       }
-      return { items, totalH }
+      return { ...best, width: W }
     }
-    let lo = 7000
-    let hi = 220000
-    let best = layout(lo)
-    if (best.totalH > HB) return best // even minimal doesn't fit — show anyway
-    for (let i = 0; i < 14; i += 1) {
-      const mid = (lo + hi) / 2
-      const cand = layout(mid)
-      if (cand.totalH <= HB) {
-        best = cand
-        lo = mid
-      } else hi = mid
+    // Even the floor area overflows the height at container width — widen
+    // until everything fits at the floor (horizontal scroll takes the rest).
+    let W2 = W
+    while (W2 < W * 8) {
+      W2 = Math.round(W2 * 1.25)
+      const cand = layoutKit(objects, A_MIN, W2)
+      if (cand.totalH <= HB) return { ...cand, width: W2 }
     }
-    return best
+    return { ...layoutKit(objects, A_MIN, W * 8), width: W * 8 }
   }
 
   // Threads re-measure when the board's data settles.
@@ -968,7 +1137,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       window.clearInterval(watchIv)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, draft, mapSel, kit, imgRatios, srcPool, hiddenRefs.length])
+  }, [view, draft, mapSel, kit, imgRatios, srcPool, hiddenRefs.length, kitOpen, kitByType, kitVisualsOnly])
 
   // What C001 actually is. Only an audio-first project's chunks are audio.
   const chunkWord = audioIsSeparate ? 'audio chunk' : 'scene'
@@ -1523,6 +1692,41 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
 
   const round1 = (n: number) => Math.round(n * 10) / 10
 
+  // CLICK-TO-EDIT on the board card: What / spoken line commit through the
+  // same parse→mutate→serialize path as every other edit (step Undo covers
+  // them). A line edit re-estimates the hold from words (2.5 w/s), exactly
+  // like the editor panel; empty line = a legal silent clip.
+  const lineEditableFor = (imageId: string) => {
+    if (!clipFlow) return false
+    const hit = findImage(imageId)
+    return !!hit && hit.beat.images.length === 1
+  }
+  const commitInline = () => {
+    const d = inlineEdit
+    if (!d) return
+    setInlineEdit(null)
+    const hit = findImage(d.id)
+    if (!hit) return
+    const next = clone()
+    if (d.field === 'what') {
+      const v = d.value.trim()
+      if (!v || v === hit.img.what) return
+      for (const c of next.chunks)
+        for (const b of c.beats)
+          for (const i of b.images) if (i.id === d.id) i.what = v
+    } else {
+      const v = d.value.trim()
+      if (v === hit.beat.narration.trim()) return
+      const chunk = next.chunks.find((c) => c.id === hit.chunk.id)
+      const beat = chunk?.beats.find((b) => b.images.some((i) => i.id === d.id))
+      if (!beat || beat.images.length !== 1) return
+      beat.narration = v
+      const words = v ? v.split(/\s+/).length : 0
+      if (words) for (const i of beat.images) if (i.id === d.id) i.holdS = Math.max(1, round1(words / 2.5))
+    }
+    apply(next)
+  }
+
   // --- sections (dimension lines): write resolved bounds back into the plan.
   // The last section's end is always written as 'end' so it follows runtime.
   function writeSections(resolved: ResolvedSection[]) {
@@ -1901,6 +2105,26 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         <button type="button" className="vp-undo" style={{ marginLeft: 8 }} onClick={() => setTlOpen(!tlShown)}>
           {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
         </button>
+        {shotListStageId ? (
+          <button
+            type="button"
+            className="vp-save"
+            style={{ marginLeft: 8 }}
+            disabled={compileBusy || updBusy}
+            title={updBusy
+              ? 'Waiting for the running update/sync to finish'
+              : 'Save the plan file and recompile the shot list. Incremental — only changed shots re-run their AI polish.'}
+            onClick={() => void runCompile()}
+          >
+            {compileBusy ? 'Compiling…' : 'Save & compile'}
+          </button>
+        ) : null}
+        {compileErr && !compileBusy ? (
+          <span style={{ fontSize: 12, color: 'var(--red)', marginLeft: 6 }}>{compileErr}</span>
+        ) : null}
+        {compileDone && !compileBusy && !compileErr ? (
+          <span style={{ fontSize: 12, color: 'var(--green, #3fb950)', marginLeft: 6 }}>✓ Shot list compiled</span>
+        ) : null}
         {view === 'map' ? (
           <>
             <button
@@ -1921,12 +2145,14 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 type="button"
                 className="vp-undo"
                 style={{ marginLeft: 8 }}
-                disabled={syncDelta.changes === 0 || syncDelta.multiBeat || updBusy}
-                title={syncDelta.multiBeat
+                disabled={syncDelta.changes === 0 || syncDelta.multiBeat || updBusy || compileBusy}
+                title={compileBusy
+                  ? 'Waiting for the shot-list compile to finish'
+                  : syncDelta.multiBeat
                   ? 'A beat holds more than one shot — every shot needs its own spoken line before syncing'
                   : syncDelta.changes === 0
                     ? 'The screenplay already matches the board'
-                    : 'Carry your board edits into the screenplay (step 6) and shot list (step 8) — word-for-word, by code'}
+                    : 'Carry your board edits into the screenplay and the shot list — word-for-word, by code'}
                 onClick={() => { setSyncFill(false); setSyncOpen(true) }}
               >
                 ⇄ {syncBusy ? 'Syncing…' : `Sync to screenplay${syncDelta.changes ? ` · ${syncDelta.changes}` : ''}`}
@@ -2181,35 +2407,52 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
 
       {view === 'map' ? (
         <div
-          className="vp-map"
+          className={`vp-map ${kitOpen ? '' : 'kit-closed'}`}
           ref={boardRef}
           onClick={(e) => {
             // Click on background = collapse. Cards, shots and buttons handle
             // their own clicks and never fall through to here.
-            if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button')) setMapSel('')
+            if (!(e.target as HTMLElement).closest('.vp-map-shot, .vp-map-card, button, textarea')) setMapSel('')
           }}
         >
           {/* Two layers: unselected threads run BEHIND the cards; the selected
               shot's threads render on a front layer ABOVE everything. Both
-              vanish while scrolling and return re-measured at rest. */}
-          <svg className={`vp-map-svg ${threadsHidden ? 'hush' : ''}`}>
-            {threads.filter((th) => th.shot !== mapSel).map((th, i) => (
-              <path key={i} d={th.d} className={mapSel ? 'off' : ''} />
-            ))}
-          </svg>
-          <svg className={`vp-map-svg front ${threadsHidden ? 'hush' : ''}`}>
-            {mapSel ? threads.filter((th) => th.shot === mapSel).map((th, i) => <path key={i} d={th.d} className="lit" />) : null}
-          </svg>
+              vanish while scrolling and return re-measured at rest. Review
+              mode (kit closed) has no kit cards, so no threads. */}
+          {kitOpen ? (
+            <>
+              <svg className={`vp-map-svg ${threadsHidden ? 'hush' : ''}`}>
+                {threads.filter((th) => th.shot !== mapSel).map((th, i) => (
+                  <path key={i} d={th.d} className={mapSel ? 'off' : ''} />
+                ))}
+              </svg>
+              <svg className={`vp-map-svg front ${threadsHidden ? 'hush' : ''}`}>
+                {mapSel ? threads.filter((th) => th.shot === mapSel).map((th, i) => <path key={i} d={th.d} className="lit" />) : null}
+              </svg>
+            </>
+          ) : null}
 
           <div className="vp-map-shots">
             <div className="vp-map-shotshead">
               <span className="vp-map-colhead">Shots</span>
+              {!kitOpen ? (
+                <span className="vp-map-kitbtns">
+                  <button type="button" className="vp-undo" title="Expand every shot card" onClick={() => setClosedShots(new Set())}>Expand all</button>
+                  <button type="button" className="vp-undo" title="Collapse every shot card" onClick={() => setClosedShots(new Set(images.map((i) => i.id)))}>Collapse all</button>
+                  <button type="button" className="vp-undo" title="Reopen the World Kit — back to mapping mode" onClick={() => setKitOpenPersist(true)}>▸ World Kit</button>
+                </span>
+              ) : null}
             </div>
             <div className="vp-map-shotlist">
               {images.map((img) => {
                 const names = refsOf(img)
                 const ff = firstFrameOf(img)
                 const on = mapSel === img.id
+                // Mapping mode: single-select expansion (the selection also
+                // targets kit-card clicks). Review mode: every card is open
+                // unless explicitly closed — the step-8-like confirmation view.
+                const expanded = kitOpen ? on : !closedShots.has(img.id)
+                const lineEditable = expanded && lineEditableFor(img.id)
                 // Threads include audio that RIDES IN via a character link
                 // (variants inherit): if the object goes somewhere, its sound
                 // goes too — the board shows that as a thread.
@@ -2226,10 +2469,21 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                     key={img.id}
                     data-mapshot={img.id}
                     data-maprefs={[...names, ...linkedAudioNames].join('|')}
-                    className={`vp-map-shot ${on ? 'on' : ''} ${mapSel && !on ? 'dim' : ''}`}
+                    className={`vp-map-shot ${expanded ? 'open' : ''} ${kitOpen && on ? 'on' : ''} ${kitOpen && mapSel && !on ? 'dim' : ''}`}
                     onClick={() => {
-                      setMapSel(on ? '' : img.id)
-                      setActiveId(on ? '' : img.id)
+                      if (kitOpen) {
+                        setMapSel(on ? '' : img.id)
+                        setActiveId(on ? '' : img.id)
+                        return
+                      }
+                      // Review mode: click toggles this card only, multi-open.
+                      setClosedShots((cur) => {
+                        const next = new Set(cur)
+                        if (next.has(img.id)) next.delete(img.id)
+                        else next.add(img.id)
+                        return next
+                      })
+                      setActiveId(img.id)
                     }}
                   >
                     <div className="vp-map-rowhead">
@@ -2238,8 +2492,17 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                       {clipGroups.length === images.length && clipGroups[images.indexOf(img)] ? (
                         <span className="vp-map-grpchip" title="Visual consistency group — shares a master with its group">{clipGroups[images.indexOf(img)]}</span>
                       ) : null}
-                      {on ? (
-                        <button type="button" className="vp-map-collapse" title="Collapse and unselect" onClick={(e) => { e.stopPropagation(); setMapSel(''); setActiveId('') }}>▴</button>
+                      {expanded ? (
+                        <button
+                          type="button"
+                          className="vp-map-collapse"
+                          title={kitOpen ? 'Collapse and unselect' : 'Collapse this card'}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (kitOpen) { setMapSel(''); setActiveId('') }
+                            else setClosedShots((cur) => new Set(cur).add(img.id))
+                          }}
+                        >▴</button>
                       ) : null}
                       <button
                         type="button"
@@ -2248,15 +2511,70 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                         onClick={(e) => { e.stopPropagation(); setConfirmDelShot(img.id) }}
                       >✕</button>
                     </div>
-                    <span className="vp-map-shotwhat">{img.what}</span>
-                    {on ? (
-                      <div className={`vp-map-shotline ${img.narration ? '' : 'silent'}`}>
+                    {inlineEdit?.id === img.id && inlineEdit.field === 'what' ? (
+                      <textarea
+                        className="vp-inline-edit"
+                        autoFocus
+                        rows={3}
+                        value={inlineEdit.value}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setInlineEdit((d) => (d ? { ...d, value: e.target.value } : d))}
+                        onBlur={commitInline}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitInline() }
+                          if (e.key === 'Escape') setInlineEdit(null)
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className={`vp-map-shotwhat ${expanded ? 'editable' : ''}`}
+                        title={expanded ? 'Click to edit what the viewer sees' : undefined}
+                        onClick={expanded ? (e) => { e.stopPropagation(); setInlineEdit({ id: img.id, field: 'what', value: img.what }) } : undefined}
+                      >{img.what}</span>
+                    )}
+                    {inlineEdit?.id === img.id && inlineEdit.field === 'line' ? (
+                      <textarea
+                        className="vp-inline-edit"
+                        autoFocus
+                        rows={2}
+                        value={inlineEdit.value}
+                        placeholder="What is said during this shot — empty = silent"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setInlineEdit((d) => (d ? { ...d, value: e.target.value } : d))}
+                        onBlur={commitInline}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitInline() }
+                          if (e.key === 'Escape') setInlineEdit(null)
+                        }}
+                      />
+                    ) : (
+                      <div
+                        className={`vp-map-shotline ${img.narration ? '' : 'silent'} ${lineEditable ? 'editable' : ''}`}
+                        title={lineEditable ? 'Click to edit the spoken line (empty = silent; the hold re-estimates from words)' : undefined}
+                        onClick={lineEditable ? (e) => { e.stopPropagation(); setInlineEdit({ id: img.id, field: 'line', value: img.narration ?? '' }) } : undefined}
+                      >
                         {img.narration ? `“${img.narration}”` : 'Silent — music/SFX carry this shot.'}
                       </div>
+                    )}
+                    {!expanded && names.length ? (
+                      // Collapsed cards still show their attachments — a
+                      // compact strip, no controls; click the card to expand.
+                      <div className="vp-map-attmini">
+                        {names.map((name) => {
+                          const obj = kit.find((k) => k.name === name)
+                          if (obj?.image_path) return <img key={name} src={contentUrl(obj.image_path)} alt={name} title={name} loading="lazy" />
+                          if (obj && AUDIO_KINDS.has(obj.kind)) return <span key={name} className="mini-chip">♪ {name}</span>
+                          return <span key={name} className="mini-chip">{name}</span>
+                        })}
+                      </div>
                     ) : null}
-                    {on ? (
+                    {expanded ? (
                       <div className="vp-map-attached" onClick={(e) => e.stopPropagation()}>
-                        {names.length === 0 ? <span className="vp-hint">No references yet — click kit cards on the right.</span> : null}
+                        {names.length === 0 ? (
+                          <span className="vp-hint">
+                            {kitOpen ? 'No references yet — click kit cards on the right.' : 'No references yet — attach from the World Kit.'}
+                          </span>
+                        ) : null}
                         {(() => {
                           // IMAGE refs go to kie as reference images — order
                           // and 1st-frame apply. Prompt-only objects are
@@ -2326,9 +2644,15 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                             </>
                           )
                         })()}
+                        <button
+                          type="button"
+                          className="vp-undo vp-map-attachbtn"
+                          title="Pick references from the World Kit in a popup"
+                          onClick={() => setAttachFor(img.id)}
+                        >+ Attach…</button>
                       </div>
                     ) : null}
-                    {on ? (() => {
+                    {expanded ? (() => {
                       // THE SHOT'S AUDIO, both kinds of belonging:
                       //   character-linked voices ride in via the shot's
                       //   references (variants inherit the base's link);
@@ -2445,10 +2769,34 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           </div>
 
           {/* THE WORLD KIT — masters first (upper-left, solid tint), sized to
-              fit vertically; a huge kit overflows sideways, never down. */}
+              fit vertically; a huge kit overflows sideways, never down.
+              Collapsible: closed = review mode, shots go full width. */}
+          {kitOpen ? (
           <div className="vp-map-kit">
             <div className="vp-map-kithead">
               <span className="vp-map-colhead">World Kit</span>
+              <span className="vp-map-kitbtns">
+                <button
+                  type="button"
+                  className="vp-undo"
+                  style={kitByType ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+                  title="Cluster same-type cards next to each other — still one wall, equal footprint, no rows"
+                  onClick={() => setKitByTypePersist(!kitByType)}
+                >By type</button>
+                <button
+                  type="button"
+                  className="vp-undo"
+                  style={kitVisualsOnly ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+                  title="Hide text-only and audio cards — images only (they stay attachable via + Attach)"
+                  onClick={() => setKitVisualsPersist(!kitVisualsOnly)}
+                >Visuals only</button>
+                <button
+                  type="button"
+                  className="vp-undo"
+                  title="Collapse the kit — shots go full width, all expanded (review mode)"
+                  onClick={() => setKitOpenPersist(false)}
+                >▾ Hide</button>
+              </span>
             </div>
             {(() => {
               // Audio objects pack onto the wall as text cards too — they
@@ -2467,14 +2815,26 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               const sources = srcPool
                 .filter((s) => !s.ref && !s.imported_as && isDisplayable(s.path) && !kitPaths.has(s.path) && !hiddenRefs.includes(s.path))
                 .map((s) => ({ name: s.path, kind: 'source', notes: '', image_path: s.path }))
-              // Images first, text-only refs last: image rows stay pure (every
-              // pixel of row width goes to pictures) and the text cards form
-              // their own bottom rows instead of punching holes.
-              const sorted = [...ordered.filter((k) => k.image_path), ...sources, ...ordered.filter((k) => !k.image_path)]
-              const { items, totalH } = packKit(sorted)
+              // Images first, text-only refs last: image runs stay pure (every
+              // pixel of width goes to pictures) and the text cards pack at
+              // the bottom instead of punching holes. "By type" clusters
+              // same-type cards ADJACENT inside the one skyline wall — never
+              // labeled sections or shelf rows (user law: rows don't exist on
+              // this wall; masters lead either way via `ordered`).
+              const kindRank = (k: { kind: string }) =>
+                k.kind === 'master' || k.kind === 'variant' ? 0 : k.kind === 'character' ? 1 : k.kind === 'background' ? 2 : k.kind === 'prop' ? 3 : AUDIO_KINDS.has(k.kind) ? 5 : 4
+              const clusterByKind = <T extends { kind: string }>(arr: T[]): T[] =>
+                arr.map((k, i) => [k, i] as const).sort((a, b) => kindRank(a[0]) - kindRank(b[0]) || a[1] - b[1]).map(([k]) => k)
+              const order = kitByType ? clusterByKind : <T extends { kind: string }>(arr: T[]): T[] => arr
+              let sorted = [...order(ordered.filter((k) => k.image_path)), ...sources, ...order(ordered.filter((k) => !k.image_path))]
+              if (kitVisualsOnly) sorted = sorted.filter((k) => k.image_path)
+              const { items, totalH, width } = packKit(sorted)
+              const wide = width > Math.max(320, kitDims.w)
               return (
-                <div className="vp-map-wall" style={{ position: 'relative', height: totalH }}>
-                  {items.map((it) => kitCard(it.k, it.w, it.h, it.x, it.y))}
+                <div style={wide ? { overflowX: 'auto', overflowY: 'hidden' } : undefined}>
+                  <div className="vp-map-wall" style={{ position: 'relative', height: totalH, width }}>
+                    {items.map((it) => kitCard(it.k, it.w, it.h, it.x, it.y))}
+                  </div>
                 </div>
               )
             })()}
@@ -2485,6 +2845,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               </button>
             ) : null}
           </div>
+          ) : null}
 
           {variantFor ? (
             <VariantModule
@@ -2673,8 +3034,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             <span className="need">CONFIRM</span>
             <h3>Sync the screenplay to the board?</h3>
             <p style={{ fontSize: 13 }}>
-              Your board edits become the screenplay (step 6) — copied word-for-word by code,
-              never rewritten by AI. The shot list (step 8) then recompiles the way it always
+              Your board edits become the screenplay — copied word-for-word by code,
+              never rewritten by AI. The shot list then recompiles the way it always
               does (that pass uses model credits). Afterwards you’ll see exactly what changed
               and can revert everything in one click.
             </p>
@@ -2727,6 +3088,46 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           </div>
         </div>
       ) : null}
+      {attachFor ? (() => {
+        // ATTACH-REFERENCE POPUP: the same toggle-chip grid the shot editor
+        // panel uses, in a modal — so review mode (kit hidden) can attach
+        // without reopening the wall. Toggles apply live; Done just closes.
+        const img = images.find((i) => i.id === attachFor)
+        if (!img) return null
+        const cur = refsOf(img)
+        return (
+          <div className="modal-scrim" onClick={() => setAttachFor(null)}>
+            <div className="confirm-modal" style={{ minWidth: 520, maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+              <span className="need">{attachFor}</span>
+              <h3>Attach references</h3>
+              <p style={{ fontSize: 13 }}>
+                Click to attach or detach. Image refs reach the model in order; text-only refs join
+                the prompt as description. Audio attaches from the card&rsquo;s ♪ menu.
+              </p>
+              <div className="vp-ref-chips" style={{ maxHeight: '50vh', overflowY: 'auto', marginBottom: 0 }}>
+                {kit.filter((k) => !AUDIO_KINDS.has(k.kind)).map((k) => {
+                  const on = cur.includes(k.name)
+                  return (
+                    <button
+                      key={k.name}
+                      type="button"
+                      className={`vp-ref-chip ${on ? 'on' : ''}`}
+                      title={on ? `Detach ${k.name} from ${attachFor}` : `Attach ${k.name} to ${attachFor}`}
+                      onClick={() => toggleMapRef(attachFor, k.name)}
+                    >
+                      {k.image_path ? <img src={contentUrl(k.image_path)} alt="" /> : null}
+                      <span>{k.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+                <button type="button" className="vp-save" onClick={() => setAttachFor(null)}>Done</button>
+              </div>
+            </div>
+          </div>
+        )
+      })() : null}
       {lightbox ? (
             <div className="vp-var-overlay" onClick={() => setLightbox('')}>
               <img className="vp-lightbox" src={contentUrl(lightbox)} alt="" />
@@ -2914,7 +3315,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             Your note edits this board and nothing else — only the shots your note is about may
             change (checked by code), and every shot keeps its permanent id and attachments.
             You’ll see exactly what changed and can revert in one click. When you’re happy,
-            press “Sync to screenplay” to carry the result into step 6 and the shot list.
+            press “Sync to screenplay” to carry the result into the screenplay and shot list.
           </p>
           <FeedbackButton
             alwaysOpen
@@ -2944,9 +3345,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 </label>
               </div>
             }
-            label={updBusy ? (syncBusy ? 'Waiting for the sync to finish…' : 'Updating…') : 'Update shots with AI'}
-            busy={updBusy}
-            busyLabel={syncBusy ? 'Waiting for the sync to finish…' : 'Updating…'}
+            label={updBusy || compileBusy ? (syncBusy ? 'Waiting for the sync to finish…' : compileBusy ? 'Waiting for the shot-list compile…' : 'Updating…') : 'Update shots with AI'}
+            busy={updBusy || compileBusy}
+            busyLabel={syncBusy ? 'Waiting for the sync to finish…' : compileBusy ? 'Waiting for the shot-list compile…' : 'Updating…'}
             title="Edits this board only — sync to screenplay when you're happy (uses model credits)"
             rulesFocus="visual-pacing"
             historyKey="draft-notes-visual-pacing"
@@ -2957,6 +3358,19 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           {updErr ? (
             <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {updErr}</span>
           ) : null}
+        </details>
+      ) : null}
+
+      {shotListFolded && shotListStageId ? (
+        // THE RENDER CONTRACT, folded in: the old step-8 screen lives here
+        // now — the graph shows one step, compiling happens on save, and the
+        // machine-precise view (validation, xlsx, per-clip prompt) stays
+        // reachable without its own node.
+        <details className="vp-section">
+          <summary className="vp-section-sum">
+            <span className="vp-sec-title">Render contract — compiled shot list</span>
+          </summary>
+          <ShotListStage stageId={shotListStageId} />
         </details>
       ) : null}
     </div>
