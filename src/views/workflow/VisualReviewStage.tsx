@@ -965,6 +965,32 @@ export function VisualReviewStage({
     const trimOut = clear ? 0 : Math.max(0, Number(trimOutRef.current?.value) || 0)
     await sendTrim(seg, trimIn, trimOut, clear)
   }
+  const timelineHistory = async (dir: 'undo' | 'redo') => {
+    setTimelineBusy(dir)
+    try {
+      const out = await postAction({ action: dir === 'undo' ? 'timeline_undo' : 'timeline_redo' })
+      if (!out || out.ok === false) throw new Error(out?.error || `Nothing to ${dir}.`)
+      onToast?.(dir === 'undo' ? 'Timeline change undone.' : 'Timeline change redone.')
+      setReloadTick((t) => t + 1)
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : `Nothing to ${dir}.`)
+    } finally {
+      setTimelineBusy('')
+    }
+  }
+  const resetToFullClips = async () => {
+    setTimelineBusy('sync')
+    try {
+      const out = await postAction<{ events_measured?: number; total_duration_s?: number }>({ action: 'sync_clip_timing', clear_trims: true })
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not reset the timeline.')
+      onToast?.(`All trims cleared — every clip plays full length · total ${fmtTime(out.data?.total_duration_s || 0)}`)
+      setReloadTick((t) => t + 1)
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Could not reset the timeline.')
+    } finally {
+      setTimelineBusy('')
+    }
+  }
   const applyReorder = async (fromPid: string, insertAt: number) => {
     const current = segments.map((s) => s.pid)
     const order = [...current]
@@ -1035,8 +1061,20 @@ export function VisualReviewStage({
     } else {
       g.started = true
       const dSec = dx * (total / Math.max(1, rect.width))
-      if (g.mode === 'in') g.view.dIn = dSec
-      else g.view.dOut = dSec
+      const seg = g.segment
+      const clip = seg.clipDuration || 0
+      if (g.mode === 'in') {
+        // The start handle lives between 0 and (end-trim − 0.2s).
+        const upper = (seg.trimOut || clip || seg.trimIn + seg.duration) - 0.2
+        g.view.dIn = Math.max(-seg.trimIn, Math.min(dSec, upper - seg.trimIn))
+      } else {
+        // The end handle lives between (start-trim + 0.2s) and the clip's
+        // FULL length — a slot can never outgrow its source video.
+        const base = seg.trimOut || clip || seg.trimIn + seg.duration
+        let bounded = dSec
+        if (clip) bounded = Math.min(bounded, clip - base)
+        g.view.dOut = Math.max(bounded, seg.trimIn + 0.2 - base)
+      }
     }
     setGestureView({ pid: g.segment.pid, mode: g.mode, ...g.view })
   }, [])
@@ -2755,15 +2793,38 @@ export function VisualReviewStage({
         title="Timeline"
         meta={`${segments.length} visuals · ${audioChunks.length} audio chunks · ${fmtTime(totalSec)}`}
         actions={(
-          <button
-            type="button"
-            className="vp-undo"
-            disabled={!!timelineBusy}
-            title="Measure each generated clip and rebuild the timeline with its REAL durations (trims respected). Until then the times are pre-generation estimates."
-            onClick={() => void syncClipTiming()}
-          >
-            {timelineBusy === 'sync' ? 'Syncing…' : timelineBusy === 'reorder' ? 'Reordering…' : timelineBusy === 'trim' ? 'Trimming…' : '⟳ Sync to real clips'}
-          </button>
+          <>
+            <button
+              type="button"
+              className="vp-undo"
+              disabled={!!timelineBusy}
+              title="Undo the last timeline change (trim or sync). Reorders aren't on this stack — drag the clip back."
+              onClick={() => void timelineHistory('undo')}
+            >↶ Undo</button>
+            <button
+              type="button"
+              className="vp-undo"
+              disabled={!!timelineBusy}
+              title="Redo the timeline change you just undid"
+              onClick={() => void timelineHistory('redo')}
+            >↷ Redo</button>
+            <button
+              type="button"
+              className="vp-undo"
+              disabled={!!timelineBusy}
+              title="Measure each generated clip and rebuild the timeline with its REAL durations (trims respected). Until then the times are pre-generation estimates."
+              onClick={() => void syncClipTiming()}
+            >
+              {timelineBusy === 'sync' ? 'Syncing…' : timelineBusy === 'reorder' ? 'Reordering…' : timelineBusy === 'trim' ? 'Trimming…' : '⟳ Sync to real clips'}
+            </button>
+            <button
+              type="button"
+              className="vp-undo"
+              disabled={!!timelineBusy}
+              title="Clear every trim and give each clip its FULL generated length — the default timeline"
+              onClick={() => void resetToFullClips()}
+            >Reset to full clips</button>
+          </>
         )}
       >
         <TimelineScroller
@@ -2771,6 +2832,17 @@ export function VisualReviewStage({
           setZoom={setZoom}
           hint="Click a segment to preview it · drag the scrubber to review an exact time"
         >
+          {/* DEDICATED SCRUB ROW: the clips row now reorders/trims on drag,
+              so this strip is pure navigation — click or drag anywhere to
+              move the playhead. */}
+          <div className="vp-tl-row">
+            <span className="vp-tl-label">Scrub</span>
+            <div className="vp-tl-track vr-scrubbable vr-scrubrow" {...timelineScrubHandlers}>
+              <span className={`vr-playhead ${scrubbing ? 'scrubbing' : ''}`} style={{ left: `${pct(time)}%` }}>
+                <span className="vr-playhead-knob" />
+              </span>
+            </div>
+          </div>
           <div className="vp-tl-row">
             <span className="vp-tl-label">Visuals</span>
             <div className="vp-tl-track visuals vr-scrubbable" {...timelineScrubHandlers}>
