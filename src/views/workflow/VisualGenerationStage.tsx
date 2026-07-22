@@ -825,10 +825,18 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     if (stageProcess) return
     const jobId = window.localStorage.getItem(batchJobKey)
     if (!jobId) return
-    void readJsonFile<{ state?: string }>(`working/jobs/${jobId}.json`)
+    void readJsonFile<{ state?: string; job?: string; command?: string[] }>(`working/jobs/${jobId}.json`)
       .then((job) => {
         if (['created', 'running'].includes(String(job?.state || ''))) {
-          setStageProcess(stageId, { stageId, jobId, status: 'running', label: 'Resuming generation…', updatedAt: new Date().toISOString() })
+          // Prompt rewrites carry their target rows in the job command
+          // (--ids S04,…) — restore the per-row busy marks too, so a
+          // reload mid-rewrite still shows which prompt is cooking.
+          if (job?.job === 'rewrite_generation_prompts' && Array.isArray(job.command)) {
+            const idx = job.command.indexOf('--ids')
+            const ids = idx >= 0 ? String(job.command[idx + 1] || '').split(',').filter(Boolean) : []
+            if (ids.length) setPromptBusyIds(new Set(ids))
+          }
+          setStageProcess(stageId, { stageId, jobId, status: 'running', label: 'Resuming background work…', updatedAt: new Date().toISOString() })
         } else {
           window.localStorage.removeItem(batchJobKey)
         }
@@ -2199,6 +2207,10 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           <span className="vg-row-run">
                             Generating {batchStatus?.media_type === 'video' ? 'video' : 'image'}...
                           </span>
+                        ) : promptBusyIds.has(row.id) ? (
+                          <span className="vg-row-run" title="The AI rewrite runs in the background (a minute or two) — the new prompt replaces this box when it lands.">
+                            <span className="spin" /> AI rewriting this prompt…
+                          </span>
                         ) : null}
                         <span
                           style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: row.draftText.length > videoModelMaxChars(row.mediaModel) || row.draftText.trim().length < 3 ? 'var(--red, #e5534b)' : 'var(--ink-3)' }}
@@ -2209,11 +2221,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         <button
                           type="button"
                           className="vp-undo"
-                          disabled={rowAiBusy === row.id}
+                          disabled={rowAiBusy === row.id || promptBusyIds.has(row.id)}
                           title="Opens a note — tell the AI how this prompt should change (uses model credits)"
                           onClick={() => { setRowAiFor(rowAiFor === row.id ? null : row.id); setRowAiNote('') }}
                         >
-                          ✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}
+                          {promptBusyIds.has(row.id) ? '⏳ AI rewriting…' : <>✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}</>}
                         </button>
                         </span>
                       </div>
