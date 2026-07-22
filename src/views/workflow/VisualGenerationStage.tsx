@@ -2131,9 +2131,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       ) : previewMedia?.kind === 'image' ? (
                         <img src={previewMedia.src} alt="" onClick={() => setMediaLightbox({ kind: 'image', src: previewMedia.src })} style={{ cursor: 'zoom-in' }} />
                       ) : (
-                        <span>{outdated
-                          ? 'prompt changed — nothing generated for this prompt yet'
-                          : row.type === 'video' ? 'video planned' : 'image preview'}</span>
+                        <span>{row.status === 'generating'
+                          ? <><span className="spin" /> generating {row.type === 'video' ? 'video' : 'image'}…</>
+                          : outdated
+                            ? 'prompt changed — nothing generated for this prompt yet'
+                            : row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
                     </div>
                   </div>
@@ -2383,7 +2385,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title={activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : undefined}
                           onClick={() => queueRowGeneration(row.id, 'image')}
                         >
-                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'image_ready' ? '▧ Regenerate image' : '▧ Generate image'}
+                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'generating' ? '⏳ Generating…' : row.status === 'image_ready' && !outdated ? '▧ Regenerate image' : '▧ Generate image'}
                         </button>
                       ) : (
                         <button
@@ -2393,7 +2395,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title={videoTooLong(row) ? videoDisabledTitle(row) : activeProcess ? 'A batch is running — this row queues and starts the moment it finishes' : `Use ${modelLabel(videoModels, row.mediaModel)} for this row`}
                           onClick={() => queueRowGeneration(row.id, 'video')}
                         >
-                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'video_ready' ? '▶ Regenerate video' : '▶ Generate video'}
+                          {genQueue.some((e) => e.id === row.id) ? '⏳ Queued' : row.status === 'generating' ? '⏳ Generating…' : row.status === 'video_ready' && !outdated ? '▶ Regenerate video' : '▶ Generate video'}
                         </button>
                       )}
                     </div>
