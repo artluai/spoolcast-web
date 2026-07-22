@@ -23,7 +23,7 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay, type Clip } from '../../lib/screenplay-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, downloadUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
@@ -31,7 +31,7 @@ import { FeedbackButton } from './FeedbackButton'
 import { ModelPicker } from './ModelPicker'
 import { mergeKitWithDraft, patchDraftAudioLink, useWorldKitDraft } from '../../lib/kit-draft'
 import { TimelineScroller } from './TimelineScroller'
-import { ShotListStage } from './ShotListStage'
+import { RulesPanel } from './RulesPanel'
 
 // The Visual Pacing panel, made real: the timeline/table/script views are a
 // VIEW over working/visual-pacing-plan.md (the engine's contract output for
@@ -636,6 +636,86 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // THE COMPILED LENS, embedded per shot: what the machine made of each card
+  // (polished description, composed prompt, compiled timing) renders INSIDE
+  // the shot's expanded view — the render contract is not a separate screen.
+  type CompiledShot = { eventId: string; vd: string; draft: string; dur: number; prompt?: string }
+  const [compiledByPid, setCompiledByPid] = useState<Record<string, CompiledShot>>({})
+  const loadCompiled = async () => {
+    const [slOut, gpOut] = await Promise.all([
+      fetch(fileUrl('shot-list/shot-list.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(fileUrl('working/generation-prompts.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ])
+    try {
+      const sl = JSON.parse(slOut?.data?.content ?? 'null')
+      const prompts: Record<string, string> = {}
+      try {
+        const gp = JSON.parse(gpOut?.data?.content ?? 'null')
+        for (const it of gp?.items ?? []) {
+          const id = String(it?.id ?? '')
+          const text = String(it?.prompt || it?.kie_request_preview?.input?.prompt || '')
+          if (id && text) prompts[id] = text
+        }
+      } catch { /* prompts not built yet */ }
+      const map: Record<string, CompiledShot> = {}
+      for (const e of sl?.base_layer ?? []) {
+        const pid = String(e?.pacing_image_id || e?.id || '')
+        if (!pid) continue
+        const start = Number(e?.start_s ?? 0)
+        const end = Number(e?.end_s ?? 0)
+        map[pid] = {
+          eventId: String(e?.id ?? ''),
+          vd: String(e?.visual_direction || ''),
+          draft: String(e?.draft_visual_direction || ''),
+          dur: Math.max(0, end > start ? end - start : Number(e?.duration_s ?? 0)),
+          prompt: prompts[String(e?.id ?? '')],
+        }
+      }
+      setCompiledByPid(map)
+    } catch { /* no shot list yet — cards simply show no compiled block */ }
+  }
+  useEffect(() => { void loadCompiled() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Contract utilities: free deterministic re-check + spreadsheet download.
+  const [contractAudit, setContractAudit] = useState<{ passed: boolean; msg?: string } | null>(null)
+  const [contractBusy, setContractBusy] = useState(false)
+  const recheckContract = async () => {
+    setContractBusy(true)
+    try {
+      const res = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'run_audit', stage: 'shot-list' }),
+      })
+      const out = await res.json().catch(() => null)
+      const d = out?.data ?? out
+      if (!res.ok || out?.ok === false) setContractAudit({ passed: false, msg: out?.message || out?.error || 'could not run' })
+      else setContractAudit({ passed: Boolean(d?.passed), msg: d?.passed ? undefined : String(d?.blocking?.[0]?.detail || d?.blocking?.[0] || 'see findings') })
+    } catch {
+      setContractAudit({ passed: false, msg: 'engine offline' })
+    } finally {
+      setContractBusy(false)
+    }
+  }
+  const downloadXlsx = async () => {
+    setContractBusy(true)
+    try {
+      // Export first (cheap script), then download — the file may not exist
+      // or may predate the last compile.
+      await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'export_xlsx' }),
+      }).catch(() => null)
+      const link = document.createElement('a')
+      link.href = downloadUrl('shot-list/shot-list.xlsx')
+      link.download = 'shot-list.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      setContractBusy(false)
+    }
+  }
   const [compileBusy, setCompileBusy] = useState(false)
   const [compileErr, setCompileErr] = useState<string | null>(null)
   const [compileDone, setCompileDone] = useState(false)
@@ -651,6 +731,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         window.localStorage.removeItem(compileJobKey)
         setStageProcess(slStage, null)
         setCompileDone(true)
+        void loadCompiled() // the embedded compiled blocks refresh in place
         return
       }
       if (job?.status === 'failed') {
@@ -2762,6 +2843,34 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                         </div>
                       )
                     })() : null}
+                    {expanded && compiledByPid[img.id] ? (() => {
+                      // WHAT THE MACHINE MADE OF THIS CARD — the compiled
+                      // description (your text blended with style/world
+                      // context) and the composed generation prompt, inline.
+                      // Read-only: the board text above is the editable truth.
+                      const c = compiledByPid[img.id]
+                      const draftNow = img.what.trim() + (img.why.trim() ? ' — ' + img.why.trim() : '')
+                      const stale = c.draft !== '' && c.draft !== draftNow
+                      return (
+                        <div className="vp-map-compiled" onClick={(e) => e.stopPropagation()}>
+                          <div className="vp-map-compiledhead">
+                            <span className="vp-map-chip">COMPILED{c.dur ? ` · ${c.dur.toFixed(1)}s` : ''}</span>
+                            {stale ? (
+                              <span style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+                                board changed since the last compile — Save &amp; compile refreshes this
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="vp-map-compiledtext">{c.vd || '—'}</p>
+                          {c.prompt ? (
+                            <details className="vp-map-promptfold">
+                              <summary>Generation prompt</summary>
+                              <pre>{c.prompt}</pre>
+                            </details>
+                          ) : null}
+                        </div>
+                      )
+                    })() : null}
                   </div>
                 )
               })}
@@ -3362,16 +3471,31 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       ) : null}
 
       {shotListFolded && shotListStageId ? (
-        // THE RENDER CONTRACT, folded in: the old step-8 screen lives here
-        // now — the graph shows one step, compiling happens on save, and the
-        // machine-precise view (validation, xlsx, per-clip prompt) stays
-        // reachable without its own node.
-        <details className="vp-section">
-          <summary className="vp-section-sum">
-            <span className="vp-sec-title">Render contract — compiled shot list</span>
-          </summary>
-          <ShotListStage stageId={shotListStageId} />
-        </details>
+        // THE RENDER CONTRACT, fully absorbed: per-shot compiled output lives
+        // INSIDE each card above. What remains global is one thin utility
+        // row — validation, spreadsheet export — plus the rules that steer
+        // the compiled descriptions (the only AI touch of the compile).
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span className="vp-sec-title">Render contract</span>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+              shot-list/shot-list.json{Object.keys(compiledByPid).length ? ` · ${Object.keys(compiledByPid).length} clips` : ' · not compiled yet'}
+            </span>
+            <span style={{ flex: 1 }} />
+            {contractAudit ? (
+              <span style={{ fontSize: 12, color: contractAudit.passed ? 'var(--green, #3fb950)' : 'var(--red, #e5534b)' }}>
+                {contractAudit.passed ? '✓ validated' : `✗ ${contractAudit.msg || 'validation failed'}`}
+              </span>
+            ) : null}
+            <button type="button" className="vp-undo" disabled={contractBusy} onClick={() => void recheckContract()} title="Free — reruns the deterministic validator on the compiled file">
+              {contractBusy ? 'Checking…' : 'Re-check'}
+            </button>
+            <button type="button" className="vp-undo" disabled={contractBusy} onClick={() => void downloadXlsx()} title="Export and download the spreadsheet view of the compiled shot list">
+              ⤓ .xlsx
+            </button>
+          </div>
+          <RulesPanel step={shotListStageId} title="RULES FOR THE COMPILED DESCRIPTIONS" />
+        </div>
       ) : null}
     </div>
   )

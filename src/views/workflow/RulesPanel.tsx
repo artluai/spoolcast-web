@@ -17,7 +17,7 @@ const SCOPE_LABEL: Record<Rule['scope'], string> = {
 const slugify = (t: string) =>
   t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'rule'
 
-export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: string) => void }) {
+export function RulesPanel({ step, onToast, title }: { step: string; onToast?: (m: string) => void; title?: string }) {
   const [open, setOpen] = useState(false)
   const [rules, setRules] = useState<Rule[] | null>(null)
   const [newText, setNewText] = useState('')
@@ -83,7 +83,7 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
     return (
       <div style={{ marginTop: 14 }}>
         <button type="button" onClick={() => setOpen(true)} style={label()}>
-          <span style={{ fontSize: 10 }}>▸</span> RULES FOR THIS STEP{rules ? ` (${onCount} ON)` : ''}
+          <span style={{ fontSize: 10 }}>▸</span> {title ?? 'RULES FOR THIS STEP'}{rules ? ` (${onCount} ON)` : ''}
         </button>
       </div>
     )
@@ -92,7 +92,7 @@ export function RulesPanel({ step, onToast }: { step: string; onToast?: (m: stri
   return (
     <div style={{ marginTop: 14 }}>
       <button type="button" onClick={() => setOpen(false)} style={{ ...label(), marginBottom: 8 }}>
-        <span style={{ fontSize: 10 }}>▾</span> RULES FOR THIS STEP — EVERY AI DRAFT HERE OBEYS THEM
+        <span style={{ fontSize: 10 }}>▾</span> {title ?? 'RULES FOR THIS STEP'} — EVERY AI DRAFT HERE OBEYS THEM
       </button>
       {rules === null ? (
         <div style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</div>
