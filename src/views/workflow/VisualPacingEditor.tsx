@@ -22,7 +22,7 @@ import {
   type ResolvedSection,
   type TimedImage,
 } from '../../lib/pacing-md'
-import { parseScreenplay } from '../../lib/screenplay-md'
+import { parseScreenplay, type Clip } from '../../lib/screenplay-md'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { useWorkflowStore } from '../../store/workflow'
@@ -40,7 +40,7 @@ import { TimelineScroller } from './TimelineScroller'
 // via the engine, metered); this component is pure human review & editing.
 
 type EditDraft =
-  | { scope: 'image'; chunkId: string; beatCode: string; imageId: string; isNew: boolean; nearImageId?: string; insertPos?: 'before' | 'after'; what: string; why: string; hold: string; refs: string }
+  | { scope: 'image'; chunkId: string; beatCode: string; imageId: string; isNew: boolean; nearImageId?: string; insertPos?: 'before' | 'after'; what: string; why: string; hold: string; refs: string; line?: string }
   | { scope: 'chunk'; chunkId: string; isNew: boolean; refChunkId?: string; insertPos?: 'before' | 'after'; title: string; summary: string; narration: string }
   | { scope: 'overlay'; overlayId: string; isNew: boolean; anchor: string; trigger: string; what: string; hold: string; placement: string; asset: string }
   | { scope: 'section'; index: number; isNew: boolean; name: string; to: string; imageBudget: string; overlayBudget: string }
@@ -333,6 +333,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     remapped: string[]
     runtime: { before_s: number; after_s: number } | null
     planRoute: 'code' | 'ai' | null
+    // 'sync' = the reverse chain (board → script); null = the forward chain.
+    mode: 'sync' | null
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   // Ref (not state): the diff poller's closure must see the live value.
@@ -371,9 +373,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             remapped: Array.isArray(upd.remapped_shots) ? upd.remapped_shots : [],
             runtime: upd.runtime && typeof upd.runtime.before_s === 'number' ? upd.runtime : null,
             planRoute: upd.plan_route === 'code' || upd.plan_route === 'ai' ? upd.plan_route : null,
+            mode: upd.mode === 'sync' ? ('sync' as const) : null,
           }
         : pac?.at
-          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null, planRoute: null }
+          ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null, planRoute: null, mode: null }
           : null
       if (!doc) return
       if (window.localStorage.getItem(pacingDiffSeenKey) === doc.at) return
@@ -475,6 +478,63 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     } finally {
       updBusyRef.current = false
       setUpdBusy(false)
+    }
+  }
+  // SYNC TO SCRIPT (the reverse chain): the board is the editing surface —
+  // the button rebuilds the script's Clips table FROM the plan, word-for-word
+  // by code. AI is invoked only when the user opts in to writing spoken lines
+  // for new shots left empty (empty = a legal silent clip otherwise).
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [syncFill, setSyncFill] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const runSync = async (fillLines: boolean) => {
+    setSyncOpen(false)
+    updBusyRef.current = true
+    setUpdBusy(true)
+    setSyncBusy(true)
+    setUpdErr(null)
+    try {
+      // The engine reads the plan FILE — unsaved board edits are saved first,
+      // then the local copy is dropped for the duration (same as runUpdate).
+      const store = useWorkflowStore.getState()
+      const localDraft = store.stageDrafts[stageId] ?? ''
+      if (store.dirtySteps[stageId] && localDraft.trim()) {
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: activeSession(), tenant: 'local', action: 'set_stage_output',
+            stage_id: stageId, path: 'working/visual-pacing-plan.md', content: localDraft,
+          }),
+        })
+      }
+      clearStageDrafts(stageId)
+      const res = await fetch(jobsUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          kind: 'update_screenplay',
+          from_plan: true,
+          ...(fillLines ? { fill_lines: true, model: updModel, allow_cost: true } : {}),
+          ...(fillLines && draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok || out?.ok === false) {
+        setUpdErr(out?.message || out?.error || 'Could not start the sync.')
+        return
+      }
+      const jobId = String(out?.data?.id || '')
+      window.localStorage.setItem(updJobKey, jobId)
+      await pollUpdateJob(jobId)
+    } catch {
+      setUpdErr('Could not reach the engine.')
+    } finally {
+      updBusyRef.current = false
+      setUpdBusy(false)
+      setSyncBusy(false)
     }
   }
   // Resume watching after a reload: if a job id was left behind, poll it as
@@ -665,9 +725,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     setHiddenRefs(names)
     try { localStorage.setItem(`sc-map-hidden-${activeSession()}`, JSON.stringify(names)) } catch { /* private mode */ }
   }
-  // Consistency groups ride in from the screenplay (one clip = one shot, so
-  // index i maps when the counts line up). Shown as badges on shot cards.
-  const [clipGroups, setClipGroups] = useState<string[]>([])
+  // THE SCRIPT'S CLIP ROWS: consistency-group badges ride on them (one clip =
+  // one shot, index i maps when counts line up), and the full rows feed the
+  // Sync-to-script divergence check (clips.length > 0 = clip-based script).
+  const [clips, setClips] = useState<Clip[]>([])
+  const clipGroups = useMemo(() => clips.map((c) => c.group), [clips])
   useEffect(() => {
     let live = true
     fetch(fileUrl('working/screenplay-v3.md'))
@@ -675,10 +737,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       .then((out) => {
         if (!live || typeof out?.data?.content !== 'string') return
         const doc = parseScreenplay(out.data.content)
-        setClipGroups((doc.clips ?? []).map((c) => c.group))
+        setClips(doc.clips ?? [])
       })
       .catch(() => {
-        /* no screenplay yet — no badges */
+        /* no screenplay yet — no badges, no sync */
       })
     return () => {
       live = false
@@ -1135,6 +1197,62 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const pct = (sec: number) => (sec / totalSec) * 100
   const active = images.find((img) => img.id === activeId) ?? images[0]
 
+  // A clip-based script (the ad flow): one clip = one spoken line = one shot.
+  const clipFlow = clips.length > 0
+  // SYNC DIVERGENCE: order-preserving weighted match between the script's
+  // clip rows and the plan's shots. Exact line equality is the strong signal,
+  // exact What/on-screen equality rescues shots whose line was edited.
+  // MIRRORS weighted_clip_match in spoolcast/scripts/update_screenplay.py —
+  // keep the two in sync. Live: counts follow unsaved board edits.
+  const syncDelta = (() => {
+    if (!clipFlow) return null
+    const rows = p.chunks.flatMap((c) =>
+      c.beats.flatMap((b) =>
+        b.images.map((img) => ({ line: b.narration.trim(), what: img.what.trim(), shared: b.images.length > 1 })),
+      ),
+    )
+    const multiBeat = rows.some((r) => r.shared)
+    const n = clips.length
+    const m = rows.length
+    const scoreOf = (i: number, j: number) => {
+      if (clips[i].line.trim() && clips[i].line.trim() === rows[j].line) return 2
+      if (clips[i].screen.trim() && clips[i].screen.trim() === rows[j].what) return 1
+      return 0
+    }
+    const score: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+    for (let i = n - 1; i >= 0; i -= 1)
+      for (let j = m - 1; j >= 0; j -= 1) {
+        let best = Math.max(score[i + 1][j], score[i][j + 1])
+        const s = scoreOf(i, j)
+        if (s) best = Math.max(best, s + score[i + 1][j + 1])
+        score[i][j] = best
+      }
+    const pairOfNew = new Map<number, number>()
+    let i = 0
+    let j = 0
+    while (i < n && j < m) {
+      const s = scoreOf(i, j)
+      if (s && score[i][j] === s + score[i + 1][j + 1]) {
+        pairOfNew.set(j, i)
+        i += 1
+        j += 1
+      } else if (score[i + 1][j] >= score[i][j + 1]) i += 1
+      else j += 1
+    }
+    let edited = 0
+    let added = 0
+    let emptyNew = 0
+    rows.forEach((r, k) => {
+      const oi = pairOfNew.get(k)
+      if (oi == null) {
+        added += 1
+        if (!r.line) emptyNew += 1
+      } else if (clips[oi].line.trim() !== r.line || clips[oi].screen.trim() !== r.what) edited += 1
+    })
+    const removed = n - pairOfNew.size
+    return { edited, added, removed, emptyNew, multiBeat, changes: edited + added + removed }
+  })()
+
   const chunkSpans = dp.chunks.map((chunk) => {
     const imgs = images.filter((img) => img.chunkId === chunk.id)
     const start = imgs[0]?.startS ?? 0
@@ -1191,6 +1309,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       setEditing({
         scope: 'image', chunkId: hit.chunk.id, beatCode: hit.beat.code, imageId, isNew: false,
         what: hit.img.what, why: hit.img.why, hold: `${hit.img.holdS}s`, refs: hit.img.refs,
+        // Clip flow: the beat's narration IS this shot's spoken line (1:1).
+        ...(clipFlow && hit.beat.images.length === 1 ? { line: hit.beat.narration } : {}),
       })
     setMenu(null)
   }
@@ -1201,6 +1321,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     setEditing({
       scope: 'image', chunkId, beatCode, imageId: nextImageId(p), isNew: true,
       nearImageId: opts?.nearImageId, insertPos: opts?.pos, what: '', why: '', hold: '6s', refs: '',
+      ...(clipFlow ? { line: '' } : {}),
     })
     setMenu(null)
   }
@@ -1246,6 +1367,17 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     }
     return `R${String(max + 1).padStart(2, '0')}`
   }
+  // Beat codes are chunk digits + a letter (001A) — pick the first unused
+  // letter so a new clip-flow beat never collides.
+  const nextBeatCode = (chunk: PacingChunk) => {
+    const num = chunk.id.replace(/\D/g, '')
+    const used = new Set(chunk.beats.map((b) => b.code))
+    for (let i = 0; i < 26; i += 1) {
+      const code = `${num}${String.fromCharCode(65 + i)}`
+      if (!used.has(code)) return code
+    }
+    return `${num}Z${chunk.beats.length + 1}`
+  }
 
   const saveEdit = () => {
     if (!editing) return
@@ -1276,15 +1408,27 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       const chunk = next.chunks.find((c) => c.id === d.chunkId)
       if (chunk) {
         if (d.isNew) {
-          const beat = chunk.beats.find((b) => b.code === d.beatCode) ?? chunk.beats[chunk.beats.length - 1]
-          if (beat) {
-            if (d.nearImageId) {
-              const idx = beat.images.findIndex((i) => i.id === d.nearImageId)
-              beat.images.splice(idx < 0 ? beat.images.length : d.insertPos === 'before' ? idx : idx + 1, 0, img)
-            } else beat.images.push(img)
+          if (clipFlow) {
+            // CLIP FLOW: one shot = one spoken line = one beat — a new shot
+            // gets its OWN beat (empty line = a silent clip until synced).
+            const beatIdx = chunk.beats.findIndex((b) => b.code === d.beatCode)
+            const at = beatIdx < 0 ? chunk.beats.length : d.insertPos === 'before' ? beatIdx : beatIdx + 1
+            chunk.beats.splice(at, 0, { code: nextBeatCode(chunk), narration: (d.line ?? '').trim(), images: [img] })
+          } else {
+            const beat = chunk.beats.find((b) => b.code === d.beatCode) ?? chunk.beats[chunk.beats.length - 1]
+            if (beat) {
+              if (d.nearImageId) {
+                const idx = beat.images.findIndex((i) => i.id === d.nearImageId)
+                beat.images.splice(idx < 0 ? beat.images.length : d.insertPos === 'before' ? idx : idx + 1, 0, img)
+              } else beat.images.push(img)
+            }
           }
         } else {
           for (const b of chunk.beats) b.images = b.images.map((i) => (i.id === d.imageId ? img : i))
+          if (clipFlow && d.line != null) {
+            const beat = chunk.beats.find((b) => b.images.some((i) => i.id === d.imageId))
+            if (beat) beat.narration = d.line.trim()
+          }
         }
         setActiveId(d.imageId)
       }
@@ -1294,7 +1438,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         const beatNum = d.chunkId.replace(/\D/g, '')
         const chunk = {
           id: d.chunkId, title: d.title.trim() || 'New chunk', summary: d.summary.trim(),
-          beats: [{ code: `${beatNum}A`, narration: d.narration.trim() || '(narration for this chunk)', images: [{ id: nextImageId(next), holdS: 6, refs: '', what: 'New visual — right-click it to edit.', why: '' }] }],
+          // Clip flow: an empty narration is a legal silent clip — never the
+          // prose placeholder, which would sync into the script as words.
+          beats: [{ code: `${beatNum}A`, narration: d.narration.trim() || (clipFlow ? '' : '(narration for this chunk)'), images: [{ id: nextImageId(next), holdS: 6, refs: '', what: 'New visual — right-click it to edit.', why: '' }] }],
         }
         let at = next.chunks.length
         if (d.refChunkId) {
@@ -1325,7 +1471,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     if (!d) return
     const blank =
       d.scope === 'image'
-        ? !d.what.trim() && !d.why.trim()
+        ? !d.what.trim() && !d.why.trim() && !(d.line ?? '').trim()
         : d.scope === 'chunk'
           ? !d.title.trim() && !d.summary.trim()
           : d.scope === 'overlay'
@@ -1634,6 +1780,28 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             </>
           ) : (
             <>
+              {clipFlow && editing.line != null ? (
+                // The shot's spoken line (beat narration, 1:1 in clip flow).
+                // Editing it re-estimates the hold from the word count — the
+                // hold field stays hand-editable afterwards. Carried into the
+                // script word-for-word by "Sync to script".
+                <label className="vp-edit-field">Spoken line (said over this shot — empty = silent)
+                  <textarea
+                    rows={2}
+                    value={editing.line}
+                    onChange={(e) => {
+                      const line = e.target.value
+                      const words = line.trim() ? line.trim().split(/\s+/).length : 0
+                      setEditing((d) =>
+                        d && d.scope === 'image'
+                          ? { ...d, line, ...(words ? { hold: `${Math.max(1, round1(words / 2.5))}s` } : {}) }
+                          : d,
+                      )
+                    }}
+                    placeholder="What is said during this shot — Sync to script carries it word-for-word"
+                  />
+                </label>
+              ) : null}
               <label className="vp-edit-field">What the viewer sees
                 <textarea rows={3} value={editing.what} onChange={(e) => setDraftField({ what: e.target.value })} placeholder="Describe the on-screen visual — concrete and physical…" />
               </label>
@@ -1730,6 +1898,22 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               ↺ Reset to original
             </button>
             {resetNote ? <span style={{ fontSize: 12, color: 'var(--amber)', marginLeft: 6 }}>{resetNote}</span> : null}
+            {syncDelta ? (
+              <button
+                type="button"
+                className="vp-undo"
+                style={{ marginLeft: 8 }}
+                disabled={syncDelta.changes === 0 || syncDelta.multiBeat || updBusy}
+                title={syncDelta.multiBeat
+                  ? 'A beat holds more than one shot — every shot needs its own spoken line before syncing'
+                  : syncDelta.changes === 0
+                    ? 'The script already matches the board'
+                    : 'Carry your board edits into the script — word-for-word, by code'}
+                onClick={() => { setSyncFill(false); setSyncOpen(true) }}
+              >
+                ⇄ {syncBusy ? 'Syncing…' : `Sync to script${syncDelta.changes ? ` · ${syncDelta.changes}` : ''}`}
+              </button>
+            ) : null}
             <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
               ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
             </button>
@@ -2293,18 +2477,23 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           {pacingDiff ? (
         <div className="modal-scrim">
           <div className="confirm-modal" style={{ minWidth: 460, maxWidth: 680 }}>
-            <span className="need">AI UPDATE</span>
+            <span className="need">{pacingDiff.mode === 'sync' ? 'SYNCED' : 'AI UPDATE'}</span>
             <h3>What changed</h3>
             <p>
-              The screenplay is the source of truth; the plan and shot list re-derived from it.
-              Shots keep their permanent ids and attachments.
+              {pacingDiff.mode === 'sync'
+                ? 'Your board edits were carried into the script, and the shot list recompiled. Shots keep their permanent ids and attachments.'
+                : 'The screenplay is the source of truth; the plan and shot list re-derived from it. Shots keep their permanent ids and attachments.'}
               {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
             {pacingDiff.planRoute ? (
               <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--ink-3)' }}>
-                {pacingDiff.planRoute === 'ai'
-                  ? 'Shot plan re-derived by AI (the note needed shot-level work — step rules applied).'
-                  : 'Shot plan carried by code (word edits copied into their shots; untouched shots preserved).'}
+                {pacingDiff.mode === 'sync'
+                  ? pacingDiff.planRoute === 'ai'
+                    ? 'AI wrote the missing spoken line(s); everything else was copied word-for-word.'
+                    : 'Copied word-for-word by code — no AI involved.'
+                  : pacingDiff.planRoute === 'ai'
+                    ? 'Shot plan re-derived by AI (the note needed shot-level work — step rules applied).'
+                    : 'Shot plan carried by code (word edits copied into their shots; untouched shots preserved).'}
               </p>
             ) : null}
             {pacingDiff.runtime ? (
@@ -2322,21 +2511,37 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               </p>
             ) : null}
             <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
-              {pacingDiff.script.map((c) => (
-                <div key={`s-${c.clip}`} style={{ margin: '8px 0', fontSize: 13 }}>
-                  <b style={{ fontFamily: 'var(--mono)' }}>clip {c.clip}</b>
-                  <span style={{ color: 'var(--amber)' }}> script changed</span>
-                  {c.before_line !== c.after_line ? (
-                    <>
-                      <p style={{ margin: '3px 0 0', color: 'var(--ink-3)', textDecoration: 'line-through' }}>“{c.before_line}”</p>
-                      <p style={{ margin: '2px 0 0', color: 'var(--ink)' }}>“{c.after_line}”</p>
-                    </>
-                  ) : null}
-                  {c.before_screen !== c.after_screen ? (
-                    <p style={{ margin: '2px 0 0', color: 'var(--ink-3)' }}>visual: {c.after_screen}</p>
-                  ) : null}
-                </div>
-              ))}
+              {pacingDiff.script.map((c) => {
+                // A row with nothing after it is a clip removed from the
+                // script (sync direction); nothing before it is a new clip.
+                const gone = !c.after_line && !c.after_screen && (c.before_line || c.before_screen)
+                const born = !c.before_line && !c.before_screen && (c.after_line || c.after_screen)
+                return (
+                  <div key={`s-${c.clip}`} style={{ margin: '8px 0', fontSize: 13 }}>
+                    <b style={{ fontFamily: 'var(--mono)' }}>clip {c.clip}</b>
+                    {gone ? (
+                      <span style={{ color: 'var(--red, #e5534b)' }}> removed from the script</span>
+                    ) : born ? (
+                      <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
+                    ) : (
+                      <span style={{ color: 'var(--amber)' }}> script changed</span>
+                    )}
+                    {c.before_line !== c.after_line ? (
+                      <>
+                        {c.before_line ? (
+                          <p style={{ margin: '3px 0 0', color: 'var(--ink-3)', textDecoration: 'line-through' }}>“{c.before_line}”</p>
+                        ) : null}
+                        {c.after_line ? (
+                          <p style={{ margin: '2px 0 0', color: 'var(--ink)' }}>“{c.after_line}”</p>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {c.before_screen !== c.after_screen && !gone ? (
+                      <p style={{ margin: '2px 0 0', color: 'var(--ink-3)' }}>visual: {c.after_screen}</p>
+                    ) : null}
+                  </div>
+                )
+              })}
               {(() => {
                 // Ids are permanent, so they say nothing about ORDER — list
                 // changes in the video's running order with their position,
@@ -2430,6 +2635,66 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 onClick={() => { removeImage(confirmDelShot); setConfirmDelShot(null) }}
               >
                 Delete shot
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {syncOpen && syncDelta ? (
+        <div className="modal-scrim">
+          <div className="confirm-modal" style={{ minWidth: 440 }}>
+            <span className="need">CONFIRM</span>
+            <h3>Sync the script to the board?</h3>
+            <p style={{ fontSize: 13 }}>
+              Your board edits become the script — copied word-for-word by code, never rewritten
+              by AI. The shot list then recompiles the way it always does (that pass uses model
+              credits). Afterwards you’ll see exactly what changed and can revert everything in
+              one click.
+            </p>
+            {syncDelta.edited ? (
+              <p style={{ margin: '6px 0', fontSize: 13 }}>
+                <b style={{ fontFamily: 'var(--mono)' }}>{syncDelta.edited}</b>
+                <span style={{ color: 'var(--ink-3)' }}> clip(s) updated — spoken line or visual carried over</span>
+              </p>
+            ) : null}
+            {syncDelta.added ? (
+              <p style={{ margin: '6px 0', fontSize: 13 }}>
+                <b style={{ fontFamily: 'var(--mono)' }}>{syncDelta.added}</b>
+                <span style={{ color: 'var(--ink-3)' }}> new clip(s) added</span>
+              </p>
+            ) : null}
+            {syncDelta.removed ? (
+              <p style={{ margin: '6px 0', fontSize: 13 }}>
+                <b style={{ fontFamily: 'var(--mono)' }}>{syncDelta.removed}</b>
+                <span style={{ color: 'var(--ink-3)' }}> clip(s) removed from the script</span>
+              </p>
+            ) : null}
+            {syncDelta.emptyNew ? (
+              <div style={{ margin: '10px 0 0' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12.5, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={syncFill}
+                    onChange={(e) => setSyncFill(e.target.checked)}
+                    style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                  />
+                  let AI write the {syncDelta.emptyNew} missing spoken line(s) (uses model credits)
+                </label>
+                {!syncFill ? (
+                  <p style={{ margin: '4px 0 0 22px', fontSize: 12, color: 'var(--ink-3)' }}>
+                    Unchecked, the new shot(s) stay silent — no words over them.
+                  </p>
+                ) : (
+                  <div style={{ margin: '6px 0 0 22px' }}>
+                    <ModelPicker model={updModel} onChange={setUpdModel} />
+                  </div>
+                )}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" className="vp-undo" onClick={() => setSyncOpen(false)}>Cancel</button>
+              <button type="button" className="vp-save" onClick={() => void runSync(syncFill)}>
+                {syncFill ? 'Sync — AI writes the missing lines' : 'Sync to script'}
               </button>
             </div>
           </div>
