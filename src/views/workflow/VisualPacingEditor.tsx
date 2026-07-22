@@ -218,6 +218,18 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // MUST sit above the early return below: hooks run in call order.
   const [shotMedium, setShotMedium] = useState('')
   const [audioIsSeparate, setAudioIsSeparate] = useState(true)
+  // MANUAL MODE: prompt_ai:false in session.json = the whole flow runs with
+  // no AI in the compile — the user's descriptions ARE the prompts, carried
+  // verbatim; code still glues on the spoken line, voice and style.
+  const [promptAi, setPromptAi] = useState(true)
+  const togglePromptAi = async (next: boolean) => {
+    setPromptAi(next)
+    await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_session_fields', fields: { prompt_ai: next } }),
+    }).catch(() => setPromptAi(!next)) // engine offline — revert the switch
+  }
   useEffect(() => {
     let live = true
     Promise.all([
@@ -229,6 +241,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         const cfg = JSON.parse(sess.data.content)
         const m = String(cfg?.shot_medium || '')
         if (m === 'video' || m === 'image') setShotMedium(m)
+        // MANUAL MODE: prompt_ai:false = the user writes their own prompts.
+        setPromptAi(cfg?.prompt_ai !== false)
         const hit = reg?.data?.templates?.find((t: { id?: string }) => t.id === String(cfg?.template || ''))
         // Video-first generates picture and sound together, so there is no
         // separate audio track to show. Default true: an unknown template is
@@ -3497,7 +3511,25 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               ⤓ .xlsx
             </button>
           </div>
-          <RulesPanel step={shotListStageId} title="RULES FOR THE GENERATION PROMPTS" />
+          {/* THE NO-AI SWITCH: the entire flow works with the user's own
+              words. Off = descriptions carry into the prompts verbatim;
+              code still adds the spoken line, voice and style wrapper. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12.5, cursor: 'pointer', marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={promptAi}
+              onChange={(e) => void togglePromptAi(e.target.checked)}
+              style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+            />
+            use AI to blend each description with style &amp; context into its generation prompt
+          </label>
+          {!promptAi ? (
+            <p style={{ margin: '4px 0 0 22px', fontSize: 12, color: 'var(--ink-3)' }}>
+              Off — your descriptions are sent word-for-word as the prompts. The spoken line,
+              voice and style wrapper are still added by code.
+            </p>
+          ) : null}
+          {promptAi ? <RulesPanel step={shotListStageId} title="RULES FOR THE GENERATION PROMPTS" /> : null}
         </div>
       ) : null}
     </div>
