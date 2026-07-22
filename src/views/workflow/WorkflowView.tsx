@@ -1366,6 +1366,10 @@ export function WorkflowView({
                               aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script' || activeStep.id === 'pacing') && updateKitAfter,
                             })
                             if (ok === false) return
+                            // Step-registered ride-along work (step 7: compile
+                            // the shot list + build generation prompts) — the
+                            // job keeps running while we navigate on.
+                            useWorkflowStore.getState().advanceHook?.()
                             clearDirty(activeStep.sourceId ?? activeStep.id)
                             if (isLast) onToast('Approved and finished.')
                             else {

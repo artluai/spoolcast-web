@@ -730,8 +730,16 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       if (job?.status === 'done') {
         window.localStorage.removeItem(compileJobKey)
         setStageProcess(slStage, null)
+        // PROMPTS RIDE ALONG, free: compose the final generation prompts from
+        // the fresh compile (pure code) so the generation step opens current.
+        // A stale approval receipt SHOULD reset here — the shots changed.
+        await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'build_generation_prompts' }),
+        }).catch(() => null)
         setCompileDone(true)
-        void loadCompiled() // the embedded compiled blocks refresh in place
+        void loadCompiled() // the embedded prompt folds refresh in place
         return
       }
       if (job?.status === 'failed') {
@@ -743,6 +751,18 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     }
     setCompileErr('The compile is taking unusually long — check the engine.')
   }
+  // "SAVE AND CONTINUE" IS THE COMPILE: regular users never meet the word.
+  // The footer button approves the step, then this hook fires — the compile
+  // job (incremental) and the free prompt build run while they move on.
+  const advanceRef = useRef<() => void>(() => {})
+  // eslint-disable-next-line react-hooks/refs
+  advanceRef.current = () => { void runCompile() }
+  useEffect(() => {
+    if (!shotListFolded || !shotListStageId) return
+    const store = useWorkflowStore.getState()
+    store.setAdvanceHook(() => advanceRef.current())
+    return () => store.setAdvanceHook(null)
+  }, [shotListFolded, shotListStageId])
   const runCompile = async () => {
     if (!shotListStageId || compileBusy || updBusy) return
     setCompileBusy(true)
@@ -2186,25 +2206,17 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         <button type="button" className="vp-undo" style={{ marginLeft: 8 }} onClick={() => setTlOpen(!tlShown)}>
           {tlShown ? '▾' : '▸'} Timeline · {fmtClock(stats.runtimeS)}
         </button>
-        {shotListStageId ? (
-          <button
-            type="button"
-            className="vp-save"
-            style={{ marginLeft: 8 }}
-            disabled={compileBusy || updBusy}
-            title={updBusy
-              ? 'Waiting for the running update/sync to finish'
-              : 'Save the plan file and recompile the shot list. Incremental — only changed shots re-run their AI polish.'}
-            onClick={() => void runCompile()}
-          >
-            {compileBusy ? 'Compiling…' : 'Save & compile'}
-          </button>
+        {/* No compile button — "Save and continue" at the bottom compiles
+            and builds the prompts on the way out. The board's own quiet
+            status only speaks when a background compile runs or fails. */}
+        {compileBusy ? (
+          <span style={{ fontSize: 12, color: 'var(--ink-3)', marginLeft: 8 }}><span className="spin" /> Preparing shots…</span>
         ) : null}
         {compileErr && !compileBusy ? (
           <span style={{ fontSize: 12, color: 'var(--red)', marginLeft: 6 }}>{compileErr}</span>
         ) : null}
         {compileDone && !compileBusy && !compileErr ? (
-          <span style={{ fontSize: 12, color: 'var(--green, #3fb950)', marginLeft: 6 }}>✓ Shot list compiled</span>
+          <span style={{ fontSize: 12, color: 'var(--green, #3fb950)', marginLeft: 6 }}>✓ Shots prepared</span>
         ) : null}
         {view === 'map' ? (
           <>
@@ -2844,31 +2856,22 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                       )
                     })() : null}
                     {expanded && compiledByPid[img.id] ? (() => {
-                      // WHAT THE MACHINE MADE OF THIS CARD — the compiled
-                      // description (your text blended with style/world
-                      // context) and the composed generation prompt, inline.
-                      // Read-only: the board text above is the editable truth.
+                      // ONE quiet fold: the final generation prompt (what the
+                      // model actually receives), built from this card on
+                      // "Save and continue". Closed by default — regular
+                      // users never need it; the card above is the truth
+                      // they edit. Falls back to the blended description
+                      // when prompts haven't been composed yet.
                       const c = compiledByPid[img.id]
+                      const text = c.prompt || c.vd
+                      if (!text) return null
                       const draftNow = img.what.trim() + (img.why.trim() ? ' — ' + img.why.trim() : '')
                       const stale = c.draft !== '' && c.draft !== draftNow
                       return (
-                        <div className="vp-map-compiled" onClick={(e) => e.stopPropagation()}>
-                          <div className="vp-map-compiledhead">
-                            <span className="vp-map-chip">COMPILED{c.dur ? ` · ${c.dur.toFixed(1)}s` : ''}</span>
-                            {stale ? (
-                              <span style={{ fontSize: 11.5, color: 'var(--amber)' }}>
-                                board changed since the last compile — Save &amp; compile refreshes this
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="vp-map-compiledtext">{c.vd || '—'}</p>
-                          {c.prompt ? (
-                            <details className="vp-map-promptfold">
-                              <summary>Generation prompt</summary>
-                              <pre>{c.prompt}</pre>
-                            </details>
-                          ) : null}
-                        </div>
+                        <details className="vp-map-promptfold" onClick={(e) => e.stopPropagation()}>
+                          <summary>Prompt{stale ? ' · outdated — rebuilds when you save and continue' : ''}</summary>
+                          <pre>{text}</pre>
+                        </details>
                       )
                     })() : null}
                   </div>
@@ -3494,7 +3497,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
               ⤓ .xlsx
             </button>
           </div>
-          <RulesPanel step={shotListStageId} title="RULES FOR THE COMPILED DESCRIPTIONS" />
+          <RulesPanel step={shotListStageId} title="RULES FOR THE GENERATION PROMPTS" />
         </div>
       ) : null}
     </div>

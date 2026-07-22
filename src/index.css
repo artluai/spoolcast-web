@@ -1537,11 +1537,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 /* Collapsed cards keep their attachments visible — a compact strip. */
 .vp-map-attmini { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .vp-map-attmini img { height: 46px; border-radius: 6px; display: block; border: 1px solid var(--line-2); }
-/* The compiled lens inside an expanded shot card — machine output, read-only. */
-.vp-map-compiled { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line, #2a3142); border-radius: 8px; }
-.vp-map-compiledhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.vp-map-compiledtext { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.vp-map-promptfold { margin-top: 6px; }
+/* The prompt fold inside an expanded shot card — machine output, read-only. */
+.vp-map-promptfold { margin-top: 8px; }
 .vp-map-promptfold summary { font-size: 11.5px; color: var(--ink-3); cursor: pointer; font-family: var(--mono); }
 .vp-map-promptfold pre { white-space: pre-wrap; margin: 6px 0 0; font-size: 12px; line-height: 1.5; font-family: var(--mono); color: var(--ink-2); max-height: 260px; overflow: auto; }
 .vp-map-attmini .mini-chip { font-family: var(--mono); font-size: 10px; color: var(--ink-3); border: 1px dashed var(--line-2); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }

@@ -110,6 +110,10 @@ interface WorkflowStore extends Drafts {
   // history available on the active step.
   stepUndo: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null
   setStepUndo: (u: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null) => void
+  // A step can register work that rides on "Save and continue" (e.g. step 7
+  // compiles the shot list + builds generation prompts on the way out).
+  advanceHook: (() => void) | null
+  setAdvanceHook: (fn: (() => void) | null) => void
   // Everything in this store belongs to ONE session. Switching the route to a
   // different session must drop it all — a draft leaking across sessions would
   // be written into the wrong project's files.
@@ -192,6 +196,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     }),
   stepUndo: null,
   setStepUndo: (u) => set(() => ({ stepUndo: u })),
+  advanceHook: null,
+  setAdvanceHook: (fn) => set(() => ({ advanceHook: fn })),
   resetSession: () => {
     try { window.localStorage.removeItem(draftsStorageKey()) } catch { /* fine */ }
     return set(() => ({
