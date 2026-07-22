@@ -466,6 +466,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           tenant: 'local',
           kind: 'edit_visual_pacing',
           model: updModel,
+          allow_cost: true,
           allow_all: updAllowAll,
           remap_changed: updRemap,
           feedback: feedback.trim(),
