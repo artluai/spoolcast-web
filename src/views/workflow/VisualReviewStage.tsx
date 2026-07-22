@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
-import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -40,6 +40,12 @@ type BaseVisual = {
   duration_s?: number
   slot_duration_s?: number
   generated_duration_s?: number
+  // Trim window (basic editing): start_from_sec is the renderer contract
+  // (OffthreadVideo startFrom); trim_out bounds the slot via timing sync.
+  start_from_sec?: number
+  trim_in_s?: number
+  trim_out_s?: number
+  clip_duration_s?: number
   first_word?: string
   last_word?: string
   summary?: string
@@ -97,6 +103,12 @@ type ReviewSegment = {
   caption: string
   selectedType: 'image' | 'video'
   generatedDuration?: number
+  /** PERMANENT shot id — what reorder and trim address. */
+  pid: string
+  /** Seconds into the source clip where playback starts (trim-in). */
+  trimIn: number
+  trimOut?: number
+  clipDuration?: number
 }
 
 type AudioChunk = {
@@ -632,6 +644,13 @@ export function VisualReviewStage({
   onToast?: (message: string) => void
 }) {
   const [shotList, setShotList] = useState<ShotList | null>(null)
+  // Timeline operations (sync-to-clips / trim / reorder) bump this to
+  // re-pull the session files; '' | 'sync' | 'trim' | 'reorder' gates the
+  // controls while one runs.
+  const [reloadTick, setReloadTick] = useState(0)
+  const [timelineBusy, setTimelineBusy] = useState('')
+  const trimInRef = useRef<HTMLInputElement>(null)
+  const trimOutRef = useRef<HTMLInputElement>(null)
   const [manifest, setManifest] = useState<SceneManifest | null>(null)
   const [promptDoc, setPromptDoc] = useState<GenerationPromptsDoc | null>(null)
   const [loading, setLoading] = useState(true)
@@ -811,7 +830,8 @@ export function VisualReviewStage({
     return () => {
       cancelled = true
     }
-  }, [])
+    // reloadTick: timeline operations (sync/trim/reorder) re-pull the files.
+  }, [reloadTick])
 
   useEffect(() => {
     if (!layoutCommand || layoutCommand.id === lastLayoutCommandIdRef.current) return
@@ -881,6 +901,10 @@ export function VisualReviewStage({
           caption: captionById.get(id) || '',
           selectedType: activeType,
           generatedDuration: Number(manifestItem?.generated_duration_s || event.generated_duration_s || 0) || undefined,
+          pid: String(event.pacing_image_id || '').trim() || id,
+          trimIn: Number(event.start_from_sec || 0) || 0,
+          trimOut: Number(event.trim_out_s || 0) || undefined,
+          clipDuration: Number(event.clip_duration_s || 0) || undefined,
         }
       })
       .filter((segment) => segment.id)
@@ -888,6 +912,73 @@ export function VisualReviewStage({
   }, [chunksById, manifest, promptsById, shotList])
 
   const totalSec = useMemo(() => Math.max(0, ...segments.map((segment) => segment.end)), [segments])
+
+  // ---- FINAL-CUT TIMELINE OPERATIONS ------------------------------------
+  // Before generation the timeline is an estimate; these snap it to reality.
+  const syncClipTiming = async () => {
+    setTimelineBusy('sync')
+    try {
+      const out = await postAction<{ events_measured?: number; total_duration_s?: number }>({ action: 'sync_clip_timing' })
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not sync the timeline.')
+      onToast?.(`Timeline synced to ${out.data?.events_measured ?? 0} real clip(s) · total ${fmtTime(out.data?.total_duration_s || 0)}`)
+      setReloadTick((t) => t + 1)
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Could not sync the timeline.')
+    } finally {
+      setTimelineBusy('')
+    }
+  }
+  const applyTrim = async (seg: ReviewSegment, clear = false) => {
+    const trimIn = clear ? 0 : Math.max(0, Number(trimInRef.current?.value) || 0)
+    const trimOut = clear ? 0 : Math.max(0, Number(trimOutRef.current?.value) || 0)
+    setTimelineBusy('trim')
+    try {
+      const out = await postAction({ action: 'set_clip_trim', shot_id: seg.pid, trim_in_s: trimIn, trim_out_s: trimOut })
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not set the trim.')
+      onToast?.(clear ? `${seg.pid}: trim cleared — the full clip plays.` : `${seg.pid}: trimmed — timeline re-synced to the real clips.`)
+      setReloadTick((t) => t + 1)
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Could not set the trim.')
+    } finally {
+      setTimelineBusy('')
+    }
+  }
+  const reorderShots = async (fromPid: string, toPid: string) => {
+    const order = segments.map((s) => s.pid)
+    const fromIdx = order.indexOf(fromPid)
+    const toIdx = order.indexOf(toPid)
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return
+    order.splice(toIdx, 0, ...order.splice(fromIdx, 1))
+    setTimelineBusy('reorder')
+    try {
+      const out = await postAction({ action: 'reorder_shots', order })
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not reorder the clips.')
+      // BOARD IS TRUTH: the plan changed; carry the new order through the
+      // existing code-first sync chain (screenplay + shot-list recompile —
+      // permanent ids keep every take attached), then snap to real clips.
+      const job = await fetch(jobsUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', kind: 'update_screenplay', from_plan: true, allow_cost: true }),
+      }).then((r) => r.json()).catch(() => null)
+      const jobId = String(job?.data?.id || '')
+      if (!jobId) throw new Error(job?.message || job?.error || 'Reordered, but the sync job did not start.')
+      for (let i = 0; i < 240; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2500))
+        const jr = await fetch(jobsUrl(jobId)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        const status = String(jr?.data?.status || '')
+        if (status === 'done') break
+        if (status === 'failed') throw new Error(jr?.data?.message || jr?.data?.error || 'Sync failed after the reorder.')
+      }
+      await postAction({ action: 'sync_clip_timing' }).catch(() => null)
+      onToast?.('Clips reordered — the board, script and timeline all follow.')
+      setReloadTick((t) => t + 1)
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Could not reorder the clips.')
+    } finally {
+      setTimelineBusy('')
+    }
+  }
 
   const audioChunks = useMemo<AudioChunk[]>(() => {
     return (shotList?.chunks ?? [])
@@ -1145,7 +1236,8 @@ export function VisualReviewStage({
     activeVideoIdRef.current = segment.id
     if (!video) return
     if (crossing) {
-      const local = Math.max(0, nextTime - segment.start)
+      // Trim-in: timeline time 0-of-segment = trimIn seconds into the file.
+      const local = segment.trimIn + Math.max(0, nextTime - segment.start)
       try { if (Math.abs(video.currentTime - local) > 0.1) video.currentTime = local } catch { /* non-seekable */ }
     }
     if (shouldPlay) { if (video.paused) void video.play().catch(() => {}) }
@@ -1228,7 +1320,7 @@ export function VisualReviewStage({
       if (video) {
         await waitForMedia(video, ['loadedmetadata', 'canplay'], () => video.readyState >= 1)
         if (seekTokenRef.current !== token) return null
-        const local = Math.max(0, bounded - segment.start)
+        const local = segment.trimIn + Math.max(0, bounded - segment.start)
         try { video.currentTime = local } catch { /* non-seekable */ }
         await waitForMedia(video, ['seeked', 'canplay'], () => !video.seeking && video.readyState >= 2, 1200)
         if (seekTokenRef.current !== token) return null
@@ -2278,7 +2370,7 @@ export function VisualReviewStage({
     pauseInactiveVideos(activeSegment.id)
     activeVideoIdRef.current = activeSegment.id
     if (!video) return
-    const local = Math.max(0, timelineTimeRef.current - activeSegment.start)
+    const local = activeSegment.trimIn + Math.max(0, timelineTimeRef.current - activeSegment.start)
     try { if (Math.abs(video.currentTime - local) > 0.25) video.currentTime = local } catch { /* non-seekable */ }
     if (playing) void video.play().catch(() => {})
     else video.pause()
@@ -2556,6 +2648,17 @@ export function VisualReviewStage({
         className={panelClassName('timeline', 'vr-timeline-panel')}
         title="Timeline"
         meta={`${segments.length} visuals · ${audioChunks.length} audio chunks · ${fmtTime(totalSec)}`}
+        actions={(
+          <button
+            type="button"
+            className="vp-undo"
+            disabled={!!timelineBusy}
+            title="Measure each generated clip and rebuild the timeline with its REAL durations (trims respected). Until then the times are pre-generation estimates."
+            onClick={() => void syncClipTiming()}
+          >
+            {timelineBusy === 'sync' ? 'Syncing…' : timelineBusy === 'reorder' ? 'Reordering…' : timelineBusy === 'trim' ? 'Trimming…' : '⟳ Sync to real clips'}
+          </button>
+        )}
       >
         <TimelineScroller
           zoom={zoom}
@@ -2574,13 +2677,22 @@ export function VisualReviewStage({
                   key={segment.id}
                   className={`vp-seg ${segment.id === activeSegment?.id ? 'on' : ''} ${segment.mediaType === 'video' ? 'video' : ''}`}
                   style={{ left: `${pct(segment.start)}%`, width: `${Math.max(0.35, pct(segment.duration))}%` }}
+                  draggable={!timelineBusy}
+                  data-no-pan
+                  onDragStart={(e) => { e.dataTransfer.setData('text/plain', segment.pid); e.dataTransfer.effectAllowed = 'move' }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const from = e.dataTransfer.getData('text/plain')
+                    if (from && from !== segment.pid && !timelineBusy) void reorderShots(from, segment.pid)
+                  }}
                   onClick={() => {
                     setSelectedId(segment.id)
                     setPlaybackTime(segment.start, false)
                   }}
-                  title={`${segment.id} · selected ${segment.selectedType} · showing ${segment.mediaType} · ${segment.duration.toFixed(1)}s`}
+                  title={`${segment.pid} · selected ${segment.selectedType} · showing ${segment.mediaType} · ${segment.duration.toFixed(1)}s${segment.trimIn || segment.trimOut ? ` · trimmed ${segment.trimIn.toFixed(1)}–${(segment.trimOut ?? segment.clipDuration ?? 0).toFixed(1)}s` : ''} — drag onto another clip to reorder`}
                 >
-                  <span>{segment.id}</span>
+                  <span>{segment.pid}</span>
                 </button>
               ))}
             </div>
@@ -2614,6 +2726,28 @@ export function VisualReviewStage({
               <span className="vp-tick end" style={{ left: '100%' }}>{fmtTime(totalSec)}</span>
             </div>
           </div>
+          {activeSegment && activeSegment.mediaType === 'video' ? (
+            // BASIC TRIM for the selected clip. key: switching clips resets
+            // the uncontrolled inputs to that clip's stored window.
+            <div key={activeSegment.id} data-no-pan style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 2px', fontSize: 12, color: 'var(--ink-2)' }}>
+              <span className="vp-tl-label" style={{ width: 'auto' }}>Trim {activeSegment.pid}</span>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                start at
+                <input ref={trimInRef} type="number" min={0} step={0.1} defaultValue={activeSegment.trimIn || undefined} placeholder="0" style={{ width: 64, background: 'transparent', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', padding: '4px 6px' }} />s
+              </label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                end at
+                <input ref={trimOutRef} type="number" min={0} step={0.1} defaultValue={activeSegment.trimOut || undefined} placeholder={activeSegment.clipDuration ? activeSegment.clipDuration.toFixed(1) : 'clip end'} style={{ width: 64, background: 'transparent', border: '1px solid var(--line-2)', borderRadius: 6, color: 'var(--ink-2)', padding: '4px 6px' }} />s
+              </label>
+              {activeSegment.clipDuration ? <span style={{ color: 'var(--ink-3)' }}>clip is {activeSegment.clipDuration.toFixed(1)}s</span> : null}
+              <button type="button" className="vp-save" disabled={!!timelineBusy} onClick={() => void applyTrim(activeSegment)}>
+                {timelineBusy === 'trim' ? 'Trimming…' : 'Apply trim'}
+              </button>
+              {activeSegment.trimIn || activeSegment.trimOut ? (
+                <button type="button" className="vp-undo" disabled={!!timelineBusy} onClick={() => void applyTrim(activeSegment, true)}>Clear trim</button>
+              ) : null}
+            </div>
+          ) : null}
         </TimelineScroller>
       </ReviewPanel>
     )
