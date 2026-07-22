@@ -312,32 +312,49 @@ function manifestContentPath(item: SceneManifestItem | undefined) {
   return contentIndex >= 0 ? value.slice(contentIndex + contentMarker.length) : value.replace(/^\/+/, '')
 }
 
-function withManifestPromptVariants(
+// THE WORKING PROMPT IS ALWAYS THE NEWEST TEXT (engine recompile or user
+// edit) — never silently shadowed by what the current take happened to be
+// generated from. An earlier build back-filled prompt_variants from the
+// manifest's as-sent prompts, which permanently hid fresh recompiles behind
+// stale text (user report 2026-07-22). Those echoes are stripped here —
+// including ones already saved into existing docs; "what was sent" lives in
+// the record fold under each row instead. Variants the user created by
+// toggling image/video don't match any as-sent prompt and survive.
+function stripManifestEchoVariants(
   doc: GenerationPromptsDoc | null,
   manifest: SceneManifest | null,
 ): { doc: GenerationPromptsDoc | null; changed: boolean } {
   if (!doc?.items?.length || !manifest?.items?.length) return { doc, changed: false }
+  // ANY as-sent prompt counts as an echo — the old overlay matched the
+  // manifest by POSITIONAL id, so an item can carry a different shot's
+  // as-sent text. A byte-identical copy of a sent prompt is never
+  // user-authored.
+  const sentPrompts = new Set(
+    (manifest.items ?? [])
+      .map((row) => String(row.prompt || '').trim())
+      .filter(Boolean),
+  )
   let changed = false
   const items = doc.items.map((item) => {
-    const id = String(item.id || item.chunk_id || '').trim()
-    if (!id) return item
-    const mid = itemMediaId(item)
-    const imagePrompt = String(mediaManifestItem(manifest, mid, 'image')?.prompt || '').trim()
-    const videoPrompt = String(mediaManifestItem(manifest, mid, 'video')?.prompt || '').trim()
-    if (!imagePrompt && !videoPrompt) return item
-    const variants = { ...(item.prompt_variants ?? {}) }
+    const variants = item.prompt_variants
+    if (!variants) return item
+    const next = { ...variants }
     let itemChanged = false
-    if (imagePrompt && !variants.image?.prompt) {
-      variants.image = { ...(variants.image ?? {}), prompt: imagePrompt }
-      itemChanged = true
-    }
-    if (videoPrompt && !variants.video?.prompt) {
-      variants.video = { ...(variants.video ?? {}), prompt: videoPrompt }
-      itemChanged = true
+    for (const type of ['image', 'video'] as const) {
+      const variantPrompt = String(next[type]?.prompt || '').trim()
+      if (!variantPrompt) continue
+      if (sentPrompts.has(variantPrompt)) {
+        delete next[type]
+        itemChanged = true
+      }
     }
     if (!itemChanged) return item
     changed = true
-    return { ...item, prompt_variants: variants }
+    if (!Object.keys(next).length) {
+      const { prompt_variants: _stripped, ...rest } = item
+      return rest
+    }
+    return { ...item, prompt_variants: next }
   })
   return changed ? { doc: { ...doc, items }, changed } : { doc, changed: false }
 }
@@ -933,7 +950,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         readJsonFile<BatchScenesStatus>(SCENE_STATUS_PATH).catch(() => null),
         readJsonFile<SceneManifest>(SCENE_MANIFEST_PATH).catch(() => null),
       ])
-      const promptVariantMigrated = withManifestPromptVariants(promptDoc, manifestDoc)
+      const promptVariantMigrated = stripManifestEchoVariants(promptDoc, manifestDoc)
       const migrated = withDefaultFirstFrameRefs(promptVariantMigrated.doc, statusDoc, manifestDoc)
       const nextPromptDoc = migrated.doc
       if ((promptVariantMigrated.changed || migrated.changed) && nextPromptDoc) void queueSavePromptDoc(nextPromptDoc).catch(() => {})
@@ -2353,12 +2370,23 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         </button>
                       )}
                     </div>
-                    {usedPrompts[row.id] ? (
-                      <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
-                        <summary>Prompt used for this video{usedPrompts[row.id].generated_at ? ` · ${usedPrompts[row.id].generated_at!.slice(5, 16).replace('T', ' ')}` : ''}</summary>
-                        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-2)', margin: '8px 0 0', fontFamily: 'var(--mono)' }}>{usedPrompts[row.id].prompt}</pre>
-                      </details>
-                    ) : null}
+                    {(() => {
+                      // THE RECORD, not the working text: sidecar first (has
+                      // the timestamp), else the manifest's as-sent prompt —
+                      // the textarea above always keeps the NEWEST prompt.
+                      const sent = usedPrompts[row.id]
+                        || (() => {
+                          const asSent = String(mediaManifestItem(sceneManifest, row.mid, row.type === 'video' ? 'video' : 'image')?.prompt || '').trim()
+                          return asSent ? { prompt: asSent } : null
+                        })()
+                      if (!sent) return null
+                      return (
+                        <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
+                          <summary>Prompt used for this take{sent.generated_at ? ` · ${sent.generated_at.slice(5, 16).replace('T', ' ')}` : ''}</summary>
+                          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-2)', margin: '8px 0 0', fontFamily: 'var(--mono)' }}>{sent.prompt}</pre>
+                        </details>
+                      )
+                    })()}
                     {(mediaHistory[row.mid] ?? []).length ? (
                       <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
                         <summary>Previous versions · {(mediaHistory[row.mid] ?? []).length}</summary>
