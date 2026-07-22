@@ -30,6 +30,9 @@ type GenerationPromptItem = {
   // The PERMANENT shot id — media files are named by this, never by the
   // positional item id (which shifts when shots are added or deleted).
   pacing_image_id?: string
+  // Past working prompts, oldest first (engine compile/AI-rewrite and user
+  // edits all append; capped engine-side).
+  prompt_history?: { prompt?: string; at?: string; by?: string }[]
   // Per-clip model override — beats the doc-level preferred model.
   video_model?: string
   image_model?: string
@@ -449,7 +452,14 @@ function updateDocItemFromDraft(doc: GenerationPromptsDoc, id: string, draftText
     ...doc,
     items: (doc.items ?? []).map((item) => {
       if (String(item.id || item.chunk_id || '') !== id) return item
-      return withPromptForType(item, activeOutputType(item, doc.default_output_type || 'image'), prompt || String(item.prompt || ''))
+      const type = activeOutputType(item, doc.default_output_type || 'image')
+      // PAST PROMPTS ARE KEPT: a user edit that replaces the working prompt
+      // records the outgoing one (same list the engine appends to).
+      const oldPrompt = itemPromptForType(item, type === 'video' ? 'video' : 'image').trim()
+      const next = withPromptForType(item, type, prompt || String(item.prompt || ''))
+      if (!prompt || !oldPrompt || oldPrompt === prompt) return next
+      const hist = Array.isArray(item.prompt_history) ? item.prompt_history : []
+      return { ...next, prompt_history: [...hist, { prompt: oldPrompt, at: new Date().toISOString().slice(0, 19), by: 'you' }].slice(-12) }
     }),
   }
 }
@@ -694,7 +704,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     const map: Record<string, string[]> = {}
     if (!md) return map
     for (const line of md.split('\n')) {
-      const m = /^\|\s*(I\d+)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
+      // Plan ids come in every generation: I3, I07b, IMG01, S06.
+      const m = /^\|\s*([A-Za-z]{1,4}\d+[a-z]?)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
       if (!m) continue
       map[m[1]] = m[2].split(',').map((x) => x.trim().replace(/^\^/, '')).filter((x) => x && x !== '—' && x !== '-')
     }
@@ -848,11 +859,25 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       })
       const out = await r.json().catch(() => null)
       if (!r.ok || out?.ok === false) throw new Error(out?.message || out?.error || 'AI update failed.')
-      await load()
+      // HEAVY ACTION: the engine returns "started … job <id>" immediately —
+      // the rewrite itself takes minutes. Track the job like every other
+      // background run (the poll effect reloads the doc when it lands);
+      // reporting success here made the button look like it did nothing.
+      const jobId = String(out?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
+      if (!jobId) throw new Error('AI update started but did not return a job id.')
+      window.localStorage.setItem(batchJobKey, jobId)
       setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n })
+      setPromptBusyIds(new Set([id]))
       setRowAiFor(null)
       setRowAiNote('')
-      setSaveNote(`${id}: prompt updated with AI.`)
+      setSaveNote(`${id}: AI is rewriting the prompt — it lands here when done.`)
+      setStageProcess(stageId, {
+        stageId,
+        jobId,
+        status: 'running',
+        label: `${id}: AI is rewriting the prompt…`,
+        updatedAt: new Date().toISOString(),
+      })
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : 'AI update failed.')
     } finally {
@@ -1297,6 +1322,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       setErrors({})
       setRegenNoteOpen(false)
       setSaveNote(`${targetIds.size} prompt${targetIds.size === 1 ? '' : 's'} regenerating by AI`)
+      window.localStorage.setItem(batchJobKey, jobId)
       setStageProcess(stageId, {
         stageId,
         jobId,
@@ -2416,6 +2442,25 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         </details>
                       )
                     })()}
+                    {(row.item.prompt_history ?? []).length ? (
+                      <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
+                        <summary>Past prompts · {(row.item.prompt_history ?? []).length}</summary>
+                        {[...(row.item.prompt_history ?? [])].reverse().map((h, i) => (
+                          <div key={`${row.id}-ph-${i}`} style={{ marginTop: 8 }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                              <span>{h.by === 'you' ? 'before your edit' : h.by === 'ai-rewrite' ? 'before AI rewrite' : 'before recompile'}{h.at ? ` · ${String(h.at).slice(5, 16).replace('T', ' ')}` : ''}</span>
+                              <button
+                                type="button"
+                                className="vp-undo"
+                                title="Put this past prompt back in the box — nothing is sent until you generate"
+                                onClick={() => setDrafts((prev) => ({ ...prev, [row.id]: String(h.prompt || '') }))}
+                              >↺ use</button>
+                            </div>
+                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.55, color: 'var(--ink-2)', margin: '4px 0 0', fontFamily: 'var(--mono)' }}>{h.prompt}</pre>
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                     {(() => {
                       // An OUTDATED active take (prompt moved on) joins the
                       // list too — first, unstamped, no restore (it is still

@@ -183,7 +183,8 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     const map: Record<string, string[]> = {}
     if (!md) return map
     for (const line of md.split('\n')) {
-      const m = /^\|\s*(I\d+)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
+      // Plan ids come in every generation: I3, I07b, IMG01, S06.
+      const m = /^\|\s*([A-Za-z]{1,4}\d+[a-z]?)\s*\|[^|]*\|([^|]*)\|/.exec(line.trim())
       if (!m) continue
       map[m[1]] = m[2].split(',').map((x) => x.trim().replace(/^\^/, '')).filter((x) => x && x !== '—' && x !== '-')
     }
