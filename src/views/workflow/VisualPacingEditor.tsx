@@ -333,8 +333,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     remapped: string[]
     runtime: { before_s: number; after_s: number } | null
     planRoute: 'code' | 'ai' | null
-    // 'sync' = the reverse chain (board → script); null = the forward chain.
-    mode: 'sync' | null
+    // 'sync' = the reverse chain (board → screenplay); 'plan_edit' = the
+    // board-only AI note; null = the legacy forward chain.
+    mode: 'sync' | 'plan_edit' | null
   }
   const [pacingDiff, setPacingDiff] = useState<CombinedDiff | null>(null)
   // Ref (not state): the diff poller's closure must see the live value.
@@ -373,7 +374,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             remapped: Array.isArray(upd.remapped_shots) ? upd.remapped_shots : [],
             runtime: upd.runtime && typeof upd.runtime.before_s === 'number' ? upd.runtime : null,
             planRoute: upd.plan_route === 'code' || upd.plan_route === 'ai' ? upd.plan_route : null,
-            mode: upd.mode === 'sync' ? ('sync' as const) : null,
+            mode: upd.mode === 'sync' ? ('sync' as const) : upd.mode === 'plan_edit' ? ('plan_edit' as const) : null,
           }
         : pac?.at
           ? { at: pac.at, script: [], plan: pac, regenerate: [], narrationStale: [], remapped: [], runtime: null, planRoute: null, mode: null }
@@ -429,6 +430,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     setUpdErr('The update is taking unusually long — check the engine.')
   }
   const runUpdate = async (feedback: string) => {
+    if (!feedback.trim()) {
+      setUpdErr('Write what to change first — an empty note changes nothing.')
+      return
+    }
     updBusyRef.current = true
     setUpdBusy(true)
     setUpdErr(null)
@@ -450,18 +455,20 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         })
       }
       clearStageDrafts(stageId)
+      // SURGICAL BOARD EDIT: the note changes the PLAN only (fenced by shot
+      // ids — untargeted shots come back byte-identical, code-verified).
+      // Screenplay and shot list stay untouched until Sync to screenplay.
       const res = await fetch(jobsUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: activeSession(),
           tenant: 'local',
-          kind: 'update_screenplay',
+          kind: 'edit_visual_pacing',
           model: updModel,
-          allow_cost: true,
           allow_all: updAllowAll,
           remap_changed: updRemap,
-          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+          feedback: feedback.trim(),
           ...(draftReasoning(updModel) ? { reasoning: draftReasoning(updModel) } : {}),
         }),
       })
@@ -2482,7 +2489,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             <p>
               {pacingDiff.mode === 'sync'
                 ? 'Your board edits were carried into the screenplay, and the shot list recompiled. Shots keep their permanent ids and attachments.'
-                : 'The screenplay is the source of truth; the plan and shot list re-derived from it. Shots keep their permanent ids and attachments.'}
+                : pacingDiff.mode === 'plan_edit'
+                  ? 'AI edited this board only — the screenplay and shot list are untouched until you press Sync to screenplay. Shots keep their permanent ids and attachments.'
+                  : 'The screenplay is the source of truth; the plan and shot list re-derived from it. Shots keep their permanent ids and attachments.'}
               {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
             {pacingDiff.planRoute ? (
@@ -2491,9 +2500,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                   ? pacingDiff.planRoute === 'ai'
                     ? 'AI wrote the missing spoken line(s); everything else was copied word-for-word.'
                     : 'Copied word-for-word by code — no AI involved.'
-                  : pacingDiff.planRoute === 'ai'
-                    ? 'Shot plan re-derived by AI (the note needed shot-level work — step rules applied).'
-                    : 'Shot plan carried by code (word edits copied into their shots; untouched shots preserved).'}
+                  : pacingDiff.mode === 'plan_edit'
+                    ? 'Only the shots your note targeted changed — every other shot came back identical, checked by code.'
+                    : pacingDiff.planRoute === 'ai'
+                      ? 'Shot plan re-derived by AI (the note needed shot-level work — step rules applied).'
+                      : 'Shot plan carried by code (word edits copied into their shots; untouched shots preserved).'}
               </p>
             ) : null}
             {pacingDiff.runtime ? (
@@ -2876,18 +2887,18 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       </details>
 
       {aiUpdate ? (
-        // THE WRITE-THROUGH CHAIN, below Overlays as a collapsed section in
-        // the house design. Your note updates the SCREENPLAY first, then the
-        // plan and shot list re-derive — one truth, three documents.
+        // THE BOARD-ONLY AI EDIT, below Overlays as a collapsed section in
+        // the house design. One visible step: the note edits THIS BOARD and
+        // nothing else — the user reviews, then presses Sync to screenplay.
         <details className="vp-section">
           <summary className="vp-section-sum">
-            <span className="vp-sec-title">Update screenplay with AI</span>
+            <span className="vp-sec-title">Update shots with AI</span>
           </summary>
           <p style={{ color: 'var(--ink-3)', fontSize: 12.5, lineHeight: 1.5, margin: '8px 0 10px' }}>
-            Your note is applied to the screenplay first, then the shot plan and shot list
-            re-derive from it. Shots keep their permanent ids and attachments; only the shots
-            your note is about may change. Afterwards you’ll see exactly what changed — and can
-            revert everything in one click. If it fails midway, nothing changes at all.
+            Your note edits this board and nothing else — only the shots your note is about may
+            change (checked by code), and every shot keeps its permanent id and attachments.
+            You’ll see exactly what changed and can revert in one click. When you’re happy,
+            press “Sync to screenplay” to carry the result into step 6 and the shot list.
           </p>
           <FeedbackButton
             alwaysOpen
@@ -2917,10 +2928,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 </label>
               </div>
             }
-            label={updBusy ? 'Updating…' : 'Update screenplay with AI'}
+            label={updBusy ? 'Updating…' : 'Update shots with AI'}
             busy={updBusy}
             busyLabel="Updating…"
-            title="Screenplay → plan → shot list, in that order (uses model credits)"
+            title="Edits this board only — sync to screenplay when you're happy (uses model credits)"
             rulesFocus="visual-pacing"
             historyKey="draft-notes-visual-pacing"
             ruleStep="visual_pacing"
