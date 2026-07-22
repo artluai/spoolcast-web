@@ -1612,6 +1612,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     return null
   }
 
+  // A TAKE BELONGS TO THE PROMPT THAT MADE IT (user rule, option A): when
+  // the working prompt no longer matches the active take's as-sent prompt,
+  // the slot PRESENTS as empty ("nothing generated for this prompt yet")
+  // and the take is listed under Previous versions. The FILE stays in place
+  // until regeneration archives it, so step 9 and the final cut keep
+  // working — merely marked stale — while the user edits.
+  const sentPromptFor = (row: PromptRow): string => (
+    usedPrompts[row.id]?.prompt
+    || String(mediaManifestItem(sceneManifest, row.mid, row.type === 'video' ? 'video' : 'image')?.prompt || '')
+  )
+  const takeOutdated = (row: PromptRow): boolean => {
+    if (row.status !== 'video_ready' && row.status !== 'image_ready') return false
+    const sent = sentPromptFor(row).trim()
+    if (!sent) return false
+    const working = String(row.draftText ?? row.prompt).trim()
+    // The engine appends (voice pins, speech guards) to the prompt before
+    // sending — a sent prompt that STARTS with the working text is the same
+    // prompt, not a newer one.
+    return !(sent === working || sent.startsWith(working))
+  }
+
   const removeReferenceAsset = async (rowId: string, refIndex: number) => {
     if (!doc) return
     // A ref that exists upstream must be detached THERE — deleting only the
@@ -1974,7 +1995,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               {saveNote ? <span className="vg-save-note">{saveNote}</span> : null}
             </div>
             {rows.map((row) => {
-              const previewMedia = rowPreviewMedia(row)
+              const outdated = takeOutdated(row)
+              const previewMedia = outdated ? null : rowPreviewMedia(row)
               const firstFrameEntries = row.references
                 .map((ref, index) => ({ ref, index }))
                 .filter(({ ref }) => ref.role === 'first_frame' && referenceValue(ref))
@@ -2086,8 +2108,11 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       Video
                     </button>
                   </span>
-                  <span className={`status-pill ${row.status === 'image_ready' || row.status === 'video_ready' ? 'done' : row.status === 'generating' || promptBusyIds.has(row.id) ? 'work' : ''}`}>
-                    {promptBusyIds.has(row.id) ? 'prompt rewrite' : row.status.replace('_', ' ')}
+                  <span
+                    className={`status-pill ${outdated ? '' : row.status === 'image_ready' || row.status === 'video_ready' ? 'done' : row.status === 'generating' || promptBusyIds.has(row.id) ? 'work' : ''}`}
+                    title={outdated ? 'The prompt changed after this take was generated — regenerate to match. The old take is under Previous versions.' : undefined}
+                  >
+                    {promptBusyIds.has(row.id) ? 'prompt rewrite' : outdated ? 'outdated' : row.status.replace('_', ' ')}
                   </span>
                 </div>
                 <div className="vg-body">
@@ -2106,7 +2131,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                       ) : previewMedia?.kind === 'image' ? (
                         <img src={previewMedia.src} alt="" onClick={() => setMediaLightbox({ kind: 'image', src: previewMedia.src })} style={{ cursor: 'zoom-in' }} />
                       ) : (
-                        <span>{row.type === 'video' ? 'video planned' : 'image preview'}</span>
+                        <span>{outdated
+                          ? 'prompt changed — nothing generated for this prompt yet'
+                          : row.type === 'video' ? 'video planned' : 'image preview'}</span>
                       )}
                     </div>
                   </div>
@@ -2387,13 +2414,27 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                         </details>
                       )
                     })()}
-                    {(mediaHistory[row.mid] ?? []).length ? (
+                    {(() => {
+                      // An OUTDATED active take (prompt moved on) joins the
+                      // list too — first, unstamped, no restore (it is still
+                      // the file in the slot until a regeneration archives it).
+                      const demoted = outdated
+                        ? (() => {
+                          const rel = manifestContentPath(mediaManifestItem(sceneManifest, row.mid, row.type === 'video' ? 'video' : 'image'))
+                            .replace(new RegExp(`^sessions/${activeSession()}/`), '')
+                          return rel ? [{ path: rel, stamp: '', kind: (row.type === 'video' ? 'video' : 'image') as 'video' | 'image' }] : []
+                        })()
+                        : []
+                      const versions = [...demoted, ...(mediaHistory[row.mid] ?? [])]
+                      return versions.length ? (
                       <details className="sl-json" style={{ margin: '10px 0 0', borderTop: 'none', paddingTop: 0 }}>
-                        <summary>Previous versions · {(mediaHistory[row.mid] ?? []).length}</summary>
+                        <summary>Previous versions · {versions.length}</summary>
                         <div className="vg-refs" style={{ marginTop: 8 }}>
-                          {(mediaHistory[row.mid] ?? []).map((v) => {
+                          {versions.map((v) => {
                             const src = contentUrl(v.path)
-                            const when = `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
+                            const when = v.stamp
+                              ? `${v.stamp.slice(4, 6)}/${v.stamp.slice(6, 8)} ${v.stamp.slice(9, 11)}:${v.stamp.slice(11, 13)}`
+                              : 'made from an older prompt'
                             return (
                               <span key={v.path} className="vg-ref-thumb">
                                 {v.kind === 'video' ? (
@@ -2403,7 +2444,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                                     playsInline
                                     preload="auto"
                                     style={{ cursor: 'zoom-in' }}
-                                    title={`Archived ${when} — hover to play, click to view full size`}
+                                    title={`${v.stamp ? `Archived ${when}` : 'Current file — made from an older prompt'} — hover to play, click to view full size`}
                                     onLoadedMetadata={(e) => {
                                       const el = e.currentTarget
                                       const r = el.videoWidth / el.videoHeight || 1
@@ -2421,23 +2462,28 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                                     src={src}
                                     alt=""
                                     style={{ cursor: 'zoom-in' }}
-                                    title={`Archived ${when} — click to view full size`}
+                                    title={`${v.stamp ? `Archived ${when}` : 'Current file — made from an older prompt'} — click to view full size`}
                                     onLoad={equalAreaThumb}
                                     onClick={() => setMediaLightbox({ kind: 'image', src })}
                                   />
                                 )}
-                                <span className="vp-map-cardacts">
-                                  <span
-                                    title={`Restore this version from ${when} (the current one is archived, not lost)`}
-                                    onClick={() => void restoreVersion(row.id, v.path)}
-                                  >↺</span>
-                                </span>
+                                {v.stamp ? (
+                                  <span className="vp-map-cardacts">
+                                    <span
+                                      title={`Restore this version from ${when} (the current one is archived, not lost)`}
+                                      onClick={() => void restoreVersion(row.id, v.path)}
+                                    >↺</span>
+                                  </span>
+                                ) : (
+                                  <small style={{ display: 'block', marginTop: 4, color: 'var(--ink-2)' }}>made from an older prompt</small>
+                                )}
                               </span>
                             )
                           })}
                         </div>
                       </details>
-                    ) : null}
+                      ) : null
+                    })()}
                   </div>
                 </div>
               </section>
@@ -2576,7 +2622,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         {hasPrompts && view === 'gallery' ? (
           <div className="vg-gallery">
             {rows.map((row) => {
-              const previewMedia = rowPreviewMedia(row)
+              const previewMedia = takeOutdated(row) ? null : rowPreviewMedia(row)
               // True proportion: the tile adopts the row's own aspect ratio.
               const tileAspect = { aspectRatio: (row.aspect || '16:9').replace(':', ' / ') }
               return (
