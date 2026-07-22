@@ -289,11 +289,15 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   }, [stageProcess?.jobId, stageProcess?.status])
 
   // Prefill from the engine's real file — never clobber an edit in progress.
+  // ONLY a dirty draft (real unsaved edits) may shadow the disk file: a clean
+  // persisted copy is just a stale mirror, and the engine rebuilds this file
+  // behind our back (Sync to screenplay recompiles it) — showing the mirror
+  // made step 8 look "not synced" after a successful sync.
   useEffect(() => {
     if (seededRef.current) return
     seededRef.current = true
     const store = useWorkflowStore.getState()
-    if ((store.stageDrafts[stageId] ?? '').length > 0) return
+    if ((store.stageDrafts[stageId] ?? '').length > 0 && store.dirtySteps[stageId]) return
     fetch(fileUrl(FILE_PATH))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
