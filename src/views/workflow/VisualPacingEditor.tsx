@@ -1784,7 +1784,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 // The shot's spoken line (beat narration, 1:1 in clip flow).
                 // Editing it re-estimates the hold from the word count — the
                 // hold field stays hand-editable afterwards. Carried into the
-                // script word-for-word by "Sync to script".
+                // screenplay word-for-word by "Sync to screenplay".
                 <label className="vp-edit-field">Spoken line (said over this shot — empty = silent)
                   <textarea
                     rows={2}
@@ -1798,7 +1798,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                           : d,
                       )
                     }}
-                    placeholder="What is said during this shot — Sync to script carries it word-for-word"
+                    placeholder="What is said during this shot — Sync to screenplay carries it word-for-word"
                   />
                 </label>
               ) : null}
@@ -1907,11 +1907,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 title={syncDelta.multiBeat
                   ? 'A beat holds more than one shot — every shot needs its own spoken line before syncing'
                   : syncDelta.changes === 0
-                    ? 'The script already matches the board'
-                    : 'Carry your board edits into the script — word-for-word, by code'}
+                    ? 'The screenplay already matches the board'
+                    : 'Carry your board edits into the screenplay (step 6) and shot list (step 8) — word-for-word, by code'}
                 onClick={() => { setSyncFill(false); setSyncOpen(true) }}
               >
-                ⇄ {syncBusy ? 'Syncing…' : `Sync to script${syncDelta.changes ? ` · ${syncDelta.changes}` : ''}`}
+                ⇄ {syncBusy ? 'Syncing…' : `Sync to screenplay${syncDelta.changes ? ` · ${syncDelta.changes}` : ''}`}
               </button>
             ) : null}
             <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
@@ -2481,7 +2481,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             <h3>What changed</h3>
             <p>
               {pacingDiff.mode === 'sync'
-                ? 'Your board edits were carried into the script, and the shot list recompiled. Shots keep their permanent ids and attachments.'
+                ? 'Your board edits were carried into the screenplay, and the shot list recompiled. Shots keep their permanent ids and attachments.'
                 : 'The screenplay is the source of truth; the plan and shot list re-derived from it. Shots keep their permanent ids and attachments.'}
               {pacingDiff.plan?.unchanged.length ? ` ${pacingDiff.plan.unchanged.length} shot(s) untouched.` : ''}
             </p>
@@ -2520,7 +2520,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                   <div key={`s-${c.clip}`} style={{ margin: '8px 0', fontSize: 13 }}>
                     <b style={{ fontFamily: 'var(--mono)' }}>clip {c.clip}</b>
                     {gone ? (
-                      <span style={{ color: 'var(--red, #e5534b)' }}> removed from the script</span>
+                      <span style={{ color: 'var(--red, #e5534b)' }}> removed from the screenplay</span>
                     ) : born ? (
                       <span style={{ color: 'var(--green, #3fb950)' }}> new</span>
                     ) : (
@@ -2644,12 +2644,12 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
         <div className="modal-scrim">
           <div className="confirm-modal" style={{ minWidth: 440 }}>
             <span className="need">CONFIRM</span>
-            <h3>Sync the script to the board?</h3>
+            <h3>Sync the screenplay to the board?</h3>
             <p style={{ fontSize: 13 }}>
-              Your board edits become the script — copied word-for-word by code, never rewritten
-              by AI. The shot list then recompiles the way it always does (that pass uses model
-              credits). Afterwards you’ll see exactly what changed and can revert everything in
-              one click.
+              Your board edits become the screenplay (step 6) — copied word-for-word by code,
+              never rewritten by AI. The shot list (step 8) then recompiles the way it always
+              does (that pass uses model credits). Afterwards you’ll see exactly what changed
+              and can revert everything in one click.
             </p>
             {syncDelta.edited ? (
               <p style={{ margin: '6px 0', fontSize: 13 }}>
@@ -2666,7 +2666,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             {syncDelta.removed ? (
               <p style={{ margin: '6px 0', fontSize: 13 }}>
                 <b style={{ fontFamily: 'var(--mono)' }}>{syncDelta.removed}</b>
-                <span style={{ color: 'var(--ink-3)' }}> clip(s) removed from the script</span>
+                <span style={{ color: 'var(--ink-3)' }}> clip(s) removed from the screenplay</span>
               </p>
             ) : null}
             {syncDelta.emptyNew ? (
@@ -2694,7 +2694,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
               <button type="button" className="vp-undo" onClick={() => setSyncOpen(false)}>Cancel</button>
               <button type="button" className="vp-save" onClick={() => void runSync(syncFill)}>
-                {syncFill ? 'Sync — AI writes the missing lines' : 'Sync to script'}
+                {syncFill ? 'Sync — AI writes the missing lines' : 'Sync to screenplay'}
               </button>
             </div>
           </div>
