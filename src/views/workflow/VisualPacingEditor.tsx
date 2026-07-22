@@ -777,7 +777,9 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'rewrite_generation_prompts', allow_cost: true, optimize: true, output_type: 'current' }),
           }).then((r) => r.json()).catch(() => null)
           const optJob = String(opt?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
-          if (optJob) window.localStorage.setItem(`spoolcast-batch-job:${activeSession()}`, optJob)
+          // PROMPT lane (OpenRouter) — step 8 must not queue kie generation
+          // behind this rewrite.
+          if (optJob) window.localStorage.setItem(`spoolcast-prompt-job:${activeSession()}`, optJob)
         }
         setCompileDone(true)
         void loadCompiled() // the embedded prompt folds refresh in place

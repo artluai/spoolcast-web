@@ -835,34 +835,67 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const activeProcess = !!stageProcess && ['queued', 'running'].includes(stageProcess.status)
   useEffect(() => { if (!activeProcess) void loadMediaHistory() }, [activeProcess])
 
-  // A RUNNING BATCH SURVIVES NAVIGATION AND RELOADS (same pattern as step
-  // 7's compile job): the job id persists in localStorage; on mount, if the
-  // engine says it is still running, the watch resumes — without this a
-  // reload orphaned the batch and finished videos never populated the rows.
+  // TWO LANES, TWO QUEUES: video generation (kie) and prompt rewrites
+  // (OpenRouter) are different backends — one must never block the other.
+  // The MEDIA lane lives in stageProcess/batchJobKey; the PROMPT lane in
+  // promptJob/promptJobKey. Both persist in localStorage and resume after
+  // navigation or reload.
   const batchJobKey = `spoolcast-batch-job:${activeSession()}`
+  const promptJobKey = `spoolcast-prompt-job:${activeSession()}`
+  const [promptJob, setPromptJob] = useState<string | null>(null)
   useEffect(() => {
-    if (stageProcess) return
-    const jobId = window.localStorage.getItem(batchJobKey)
-    if (!jobId) return
-    void readJsonFile<{ state?: string; job?: string; command?: string[] }>(`working/jobs/${jobId}.json`)
-      .then((job) => {
-        if (['created', 'running'].includes(String(job?.state || ''))) {
-          // Prompt rewrites carry their target rows in the job command
-          // (--ids S04,…) — restore the per-row busy marks too, so a
-          // reload mid-rewrite still shows which prompt is cooking.
-          if (job?.job === 'rewrite_generation_prompts' && Array.isArray(job.command)) {
-            const idx = job.command.indexOf('--ids')
-            const ids = idx >= 0 ? String(job.command[idx + 1] || '').split(',').filter(Boolean) : []
-            if (ids.length) setPromptBusyIds(new Set(ids))
-          }
-          setStageProcess(stageId, { stageId, jobId, status: 'running', label: 'Resuming background work…', updatedAt: new Date().toISOString() })
-        } else {
-          window.localStorage.removeItem(batchJobKey)
+    const resume = async (key: string) => {
+      const jobId = window.localStorage.getItem(key)
+      if (!jobId) return
+      const job = await readJsonFile<{ state?: string; job?: string; command?: string[] }>(`working/jobs/${jobId}.json`).catch(() => null)
+      if (!['created', 'running'].includes(String(job?.state || ''))) {
+        window.localStorage.removeItem(key)
+        return
+      }
+      if (job?.job === 'rewrite_generation_prompts') {
+        // Restore the per-row busy marks from the job command (--ids S04,…).
+        if (Array.isArray(job.command)) {
+          const idx = job.command.indexOf('--ids')
+          const ids = idx >= 0 ? String(job.command[idx + 1] || '').split(',').filter(Boolean) : []
+          if (ids.length) setPromptBusyIds(new Set(ids))
         }
-      })
-      .catch(() => undefined)
+        window.localStorage.setItem(promptJobKey, jobId)
+        if (key !== promptJobKey) window.localStorage.removeItem(key)
+        setPromptJob(jobId)
+      } else if (!stageProcess) {
+        setStageProcess(stageId, { stageId, jobId, status: 'running', label: 'Resuming generation…', updatedAt: new Date().toISOString() })
+      }
+    }
+    void resume(batchJobKey)
+    void resume(promptJobKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // Prompt-lane watcher: independent of the media poll — a rewrite landing
+  // never touches batch state, and vice versa.
+  useEffect(() => {
+    if (!promptJob) return
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void readJsonFile<{ state?: string; error?: string }>(`working/jobs/${promptJob}.json`)
+        .then(async (job) => {
+          if (cancelled) return
+          const state = String(job?.state || '')
+          if (!['succeeded', 'failed', 'stopped', 'lost'].includes(state)) return
+          window.localStorage.removeItem(promptJobKey)
+          setPromptJob(null)
+          setPromptBusyIds(new Set())
+          if (state === 'succeeded') {
+            setSaveNote('Prompt rewrite completed')
+            await load()
+          } else {
+            setBuildError(job?.error || `Prompt rewrite ${state}`)
+          }
+        })
+        .catch(() => undefined)
+    }, 2500)
+    return () => { cancelled = true; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptJob])
 
   // CLICK EACH ROW, THEY ALL RUN: clicks during a running batch queue up and
   // flush together the moment the job ends (the batch parallelizes inside).
@@ -892,19 +925,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       // reporting success here made the button look like it did nothing.
       const jobId = String(out?.data?.stdout || '').match(/started\s+\S+\s+job\s+([^\s]+)/)?.[1]
       if (!jobId) throw new Error('AI update started but did not return a job id.')
-      window.localStorage.setItem(batchJobKey, jobId)
+      // PROMPT LANE (OpenRouter) — deliberately NOT stageProcess: a rewrite
+      // must never queue video generation (kie), or vice versa.
+      window.localStorage.setItem(promptJobKey, jobId)
+      setPromptJob(jobId)
       setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n })
       setPromptBusyIds(new Set([id]))
       setRowAiFor(null)
       setRowAiNote('')
       setSaveNote(`${id}: AI is rewriting the prompt — it lands here when done.`)
-      setStageProcess(stageId, {
-        stageId,
-        jobId,
-        status: 'running',
-        label: `${id}: AI is rewriting the prompt…`,
-        updatedAt: new Date().toISOString(),
-      })
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : 'AI update failed.')
     } finally {
@@ -1321,12 +1350,6 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     setBuildError('')
     setPromptBusyIds(targetIds)
     snapshotDoc()
-    setStageProcess(stageId, {
-      stageId,
-      status: 'running',
-      label: `Regenerating ${scopeLabel} prompt${targetIds.size === 1 ? '' : 's'}…`,
-      updatedAt: new Date().toISOString(),
-    })
     try {
       const res = await fetch(actionUrl(), {
         method: 'POST',
@@ -1348,20 +1371,14 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       setDrafts({})
       setErrors({})
       setRegenNoteOpen(false)
-      setSaveNote(`${targetIds.size} prompt${targetIds.size === 1 ? '' : 's'} regenerating by AI`)
-      window.localStorage.setItem(batchJobKey, jobId)
-      setStageProcess(stageId, {
-        stageId,
-        jobId,
-        status: 'running',
-        label: `Regenerating ${scopeLabel} prompt${targetIds.size === 1 ? '' : 's'}…`,
-        updatedAt: new Date().toISOString(),
-      })
+      setSaveNote(`${targetIds.size} prompt${targetIds.size === 1 ? '' : 's'} regenerating by AI (${scopeLabel})`)
+      // PROMPT LANE — see rowAiUpdate: rewrites never block generation.
+      window.localStorage.setItem(promptJobKey, jobId)
+      setPromptJob(jobId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not regenerate prompts.'
       setPromptBusyIds(new Set())
       setBuildError(message)
-      setStageProcess(stageId, { stageId, status: 'failed', label: 'Regenerate prompts', error: message })
     }
   }
 
