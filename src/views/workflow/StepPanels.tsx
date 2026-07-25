@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -1510,6 +1510,19 @@ export function TemplatePickerBar() {
   const [choice, setChoice] = useState('')
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
+  // The creator the AI cast for this idea, if it decided the video needs a
+  // real person on camera. A PROPOSAL — applying the template does not add it;
+  // the user clicks through to the kit, or picks their own at step 5.
+  const [cast, setCast] = useState<{
+    id: string
+    name?: string
+    description?: string
+    age?: number | null
+    nationality?: string | null
+    content_path?: string | null
+    image_url?: string | null
+    why?: string
+  } | null>(null)
   useEffect(() => {
     let live = true
     Promise.all([
@@ -1543,6 +1556,12 @@ export function TemplatePickerBar() {
     setBusy('apply')
     setNote('')
     const out = await post({ action: 'apply_template', template: id })
+    if (out?.ok && cast?.id) {
+      // The suggested creator rides along with the template so "apply" means
+      // what the card says. Best-effort: the kit may not exist yet this early,
+      // in which case the user picks at step 5 — never block the template.
+      await post({ action: 'use_global_asset', slug: cast.id })
+    }
     if (out?.ok) {
       // The template changes the contract and the step list wholesale — a
       // full reload is the honest refresh.
@@ -1559,6 +1578,12 @@ export function TemplatePickerBar() {
     if (out?.ok && out?.data?.template) {
       setChoice(out.data.template)
       setNote(`AI suggests ${out.data.template}${out.data.reason ? ` — ${out.data.reason}` : ''}`)
+      const meta = out.data.character_meta
+      setCast(
+        meta?.id
+          ? { ...meta, why: String(out.data.character_reason || '') }
+          : null,
+      )
     } else {
       setNote(out?.message || out?.error || 'Could not get a suggestion — is the idea written yet?')
     }
@@ -1594,6 +1619,39 @@ export function TemplatePickerBar() {
         </button>
       </div>
       {note ? <p className="vp-hint" style={{ margin: '10px 0 0' }}>{note}</p> : null}
+      {cast ? (
+        <div
+          style={{
+            marginTop: 12,
+            border: '1px solid var(--line, #2a3142)',
+            borderRadius: 10,
+            padding: 10,
+          }}
+        >
+          <p className="vp-menu-h" style={{ margin: '0 0 8px' }}>
+            SUGGESTED CREATOR — FROM THE CHARACTER LIBRARY
+          </p>
+          {cast.image_url || cast.content_path ? (
+            <img
+              src={cast.image_url || globalContentUrl(cast.content_path || '')}
+              alt={`${cast.name ?? cast.id} character sheet`}
+              style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 6 }}
+            />
+          ) : null}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
+            <b style={{ fontSize: 14 }}>{cast.name ?? cast.id}</b>
+            <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
+              {[cast.age ? `${cast.age}` : '', cast.nationality ?? ''].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+          {cast.why ? (
+            <p className="vp-hint" style={{ margin: '6px 0 0' }}>{cast.why}</p>
+          ) : null}
+          <p className="vp-hint" style={{ margin: '6px 0 0', color: 'var(--ink-3)' }}>
+            Applied with the template — you can swap or edit them at the World Kit step.
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }

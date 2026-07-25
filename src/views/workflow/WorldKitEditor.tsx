@@ -3,6 +3,7 @@ import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
 import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
+import GlobalCharacterPicker from './GlobalCharacterPicker'
 import { useWorkflowStore } from '../../store/workflow'
 
 // Scope tokens (stored in the md) ↔ human labels shown in the per-item picker.
@@ -78,6 +79,9 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     setExpandedState(v)
   }
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  // Which section has an AI fill in flight (only one at a time).
+  const [aiSection, setAiSection] = useState('')
   // Active reference image per kit item (ref id -> session-rel path): chip
   // thumbnails. Refreshed when an item closes (generate/pick may change it).
   const [activeRefImages, setActiveRefImages] = useState<Record<string, string>>({})
@@ -266,6 +270,103 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     apply(d)
   }
 
+  // PER-SECTION AI: fill one section instead of redrafting the whole kit, so a
+  // hand-built Cast survives while Environments gets proposed. Paid (a text
+  // model call) — gated by confirmation like every other paid action.
+  const fillSectionWithAI = async (heading: string) => {
+    if (aiSection) return
+    if (
+      !window.confirm(
+        `Let AI propose items for “${heading}” from the story so far?\n\n` +
+          'This uses text-model credits. Existing items are kept — proposals are added alongside them.',
+      )
+    )
+      return
+    setAiSection(heading)
+    try {
+      // The engine drafts against the file on disk and returns the merged
+      // result, so any unsaved draft must land first or it would be lost.
+      await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          action: 'set_stage_output',
+          stage_id: 'world_kit',
+          path: 'working/world-kit.md',
+          content: draftRef.current,
+        }),
+      })
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          action: 'draft_world_kit_section',
+          section: heading,
+          allow_cost: true,
+        }),
+      })
+      const out = await r.json().catch(() => null)
+      if (out?.ok && typeof out.data?.content === 'string') {
+        snapshot()
+        setStageDraft(stageId, out.data.content)
+        const n = Number(out.data.added ?? 0)
+        toast(n ? `AI added ${n} item${n === 1 ? '' : 's'} to ${heading}` : `No new ${heading} items proposed`)
+      } else {
+        toast(out?.message || out?.error || `Could not fill ${heading}`)
+      }
+    } catch {
+      toast('The engine is not responding — is it running?')
+    } finally {
+      setAiSection('')
+    }
+  }
+
+  // The engine's add/variation actions edit the kit FILE, so an unsaved draft
+  // has to land first — otherwise the engine appends to a stale kit and the
+  // user's pending edits are lost on the next save.
+  const openLibrary = async () => {
+    try {
+      await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          action: 'set_stage_output',
+          stage_id: 'world_kit',
+          path: 'working/world-kit.md',
+          content: draftRef.current,
+        }),
+      })
+    } catch {
+      /* engine offline — the picker will surface the failure on add */
+    }
+    setLibraryOpen(true)
+  }
+
+  // A library pick / variation writes the FILE via the engine; mirror the row
+  // into the unsaved draft too, exactly like variants and audio above, so a
+  // pending edit isn't erased on the next save.
+  const onLibraryAdded = (ref: string, variation: boolean, description: string) => {
+    const isGlobal = !variation
+    appendRowToTable(
+      'Cast',
+      ['Ref', 'Kind', 'Scope', 'Notes'],
+      // A global row deliberately carries NO description — it resolves from
+      // the library at read time. A variation owns its text.
+      [ref, 'character', isGlobal ? 'global' : 'episode-only', isGlobal ? '' : description],
+    )
+    toast(
+      isGlobal
+        ? `Added ${ref} from the character library`
+        : `Made your own version: ${ref} — edit it freely`,
+    )
+  }
+
   // Cast reference images from the show data, matched by ref id.
   const castImages: Record<string, string> = {}
   for (const show of Object.values(castByShow)) {
@@ -368,6 +469,23 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                 <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{SECTION_BLURBS[section.heading]}</span>
               )}
               <span style={{ flex: 1 }} />
+              {!isStyleAnchor && (
+                <button
+                  style={{ ...btn, padding: '5px 12px' }}
+                  disabled={aiSection === section.heading}
+                  title={`Let AI fill in ${section.heading} from the story so far`}
+                  onClick={() => void fillSectionWithAI(section.heading)}
+                >
+                  {aiSection === section.heading ? 'Thinking…' : '✦ Let AI fill this'}
+                </button>
+              )}
+              {/* Cast picks from the GLOBAL library — real-looking creators
+                  beat anything the image model invents from scratch. */}
+              {!isStyleAnchor && /^cast$/i.test(section.heading) && (
+                <button style={{ ...btn, padding: '5px 12px' }} onClick={() => void openLibrary()}>
+                  ⧉ From library…
+                </button>
+              )}
               {!isStyleAnchor && (
                 <button style={{ ...btn, padding: '5px 12px' }} onClick={addItem}>
                   + Add
@@ -822,6 +940,13 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
       <span style={{ display: 'block', marginTop: 4, color: 'var(--ink-3)', fontSize: 12 }}>
         ⬡ = shared with the show/template · saved to the engine on “Approve &amp; continue”
       </span>
+      {libraryOpen && (
+        <GlobalCharacterPicker
+          existing={Object.keys(kitIndex)}
+          onClose={() => setLibraryOpen(false)}
+          onAdded={onLibraryAdded}
+        />
+      )}
     </div>
   )
 }

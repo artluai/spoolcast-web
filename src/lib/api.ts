@@ -93,6 +93,15 @@ export const contentUrl = (sessionRelPath: string, variant: MediaVariant = 'full
   })
 }
 
+/** URL for a GLOBAL library asset (content-root relative, e.g.
+ *  `global/characters/mika/portrait.png`). Global assets live outside any
+ *  session, so unlike `contentUrl` the path is NOT session-prefixed. */
+export const globalContentUrl = (contentRelPath: string) => {
+  const clean = contentRelPath.trim().replace(/^\/+/, '')
+  if (!clean) return ''
+  return apiUrl('content', { path: clean })
+}
+
 /** Narration audio for a chunk. */
 export const audioUrl = (chunkId: string) => downloadUrl(`source/audio/${chunkId}.mp3`)
 
