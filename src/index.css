@@ -568,6 +568,15 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .wk-style span { font-size: 13px; color: var(--ink-2); }
 @media (max-width: 760px) { .wk-style { flex-direction: column; align-items: flex-start; gap: 10px; } .wk-style img { width: 100%; } }
 .wk-empty { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+/* Global character library: the portraits are 4-view sheets (front/side/back/
+   face), so they run full card width and are never cropped — a square thumb
+   would throw away the angles that make the sheet a usable reference. */
+.gcp-sheet { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-4); }
+.gcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; align-items: start; }
+/* No shared text-input style existed when this landed — borrows the select
+   treatment from .wk-scope so it reads as the same family. */
+.gcp-search { width: 100%; margin-top: 12px; background: var(--bg-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+@media (max-width: 900px) { .gcp-grid { grid-template-columns: 1fr; } }
 .wk-items { display: flex; flex-wrap: wrap; gap: 7px; }
 .wk-item { font-size: 11.5px; color: var(--ink-2); background: var(--bg-3); border-radius: 7px; padding: 6px 10px; }
 .wk-manage { align-self: flex-start; background: transparent; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }

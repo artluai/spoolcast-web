@@ -139,16 +139,7 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search — try “korean skincare”, “fitness”, “luxury”, “25”…"
           autoFocus
-          style={{
-            width: '100%',
-            marginTop: 12,
-            background: 'transparent',
-            color: 'var(--ink-1)',
-            border: '1px solid var(--line, #2a3142)',
-            borderRadius: 8,
-            padding: '8px 10px',
-            fontSize: 13,
-          }}
+          className="gcp-search"
         />
 
         {error ? (
@@ -170,61 +161,39 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
             {/* Two per row: the sheet still reads at this size (it is four
                 panels wide) and 30 creators stay browsable instead of one
                 screen-height card each. */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))',
-                gap: 14,
-                alignItems: 'start',
-              }}
-            >
+            <div className="gcp-grid">
               {shown.map((c) => {
                 const isIn = added.has(c.id.toLowerCase())
                 const src = c.image_url || (c.content_path ? globalContentUrl(c.content_path) : '')
+                // Same card as the World Kit's own items (wk-card) — this IS a
+                // kit item, just one that lives in the library.
                 return (
-                  <div
-                    key={c.id}
-                    style={{
-                      border: '1px solid var(--line, #2a3142)',
-                      borderRadius: 10,
-                      padding: 10,
-                      background: 'var(--panel-2, transparent)',
-                    }}
-                  >
+                  <div key={c.id} className="wk-card">
                     {/* The sheet is the point — full width, never cropped. */}
                     {src ? (
                       <img
                         src={src}
                         alt={`${c.name} character sheet`}
                         loading="lazy"
-                        style={{
-                          width: '100%',
-                          height: 'auto',
-                          display: 'block',
-                          borderRadius: 6,
-                          background: 'var(--panel, #11151f)',
-                        }}
+                        className="gcp-sheet"
                       />
                     ) : null}
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-                      <b style={{ fontSize: 14 }}>{c.name}</b>
-                      <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
-                        {[c.age ? `${c.age}` : '', c.nationality ?? ''].filter(Boolean).join(' · ')}
-                      </span>
+                    <div className="wk-card-head">
+                      <div className="wk-card-meta">
+                        <h3>{c.name}</h3>
+                        <p>
+                          {[c.age ? `${c.age}` : '', c.nationality ?? ''].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                      {/* The kit's existing read-only badge. */}
+                      <span className="wk-locked-tag">Global</span>
                     </div>
-                    {/* Actions on their own row — a long name must never push
-                        the buttons into a ragged second line. */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginTop: 8,
-                        flexWrap: 'wrap',
-                      }}
-                    >
+                    <p style={{ color: 'var(--ink-2)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+                      {c.description}
+                    </p>
+                    <div className="wk-items" style={{ alignItems: 'center' }}>
                       {isIn ? (
-                        <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>✓ in this project</span>
+                        <span className="wk-empty">✓ in this project</span>
                       ) : (
                         <button
                           type="button"
@@ -245,16 +214,6 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
                         {busy === `${c.id}:var` ? 'Copying…' : '⧉ Make my own version'}
                       </button>
                     </div>
-                    <p
-                      style={{
-                        color: 'var(--ink-2)',
-                        fontSize: 12,
-                        margin: '6px 0 0',
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {c.description}
-                    </p>
                   </div>
                 )
               })}
