@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
-import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import GlobalCharacterPicker from './GlobalCharacterPicker'
 import { useWorkflowStore } from '../../store/workflow'
@@ -85,6 +85,10 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // Active reference image per kit item (ref id -> session-rel path): chip
   // thumbnails. Refreshed when an item closes (generate/pick may change it).
   const [activeRefImages, setActiveRefImages] = useState<Record<string, string>>({})
+  // A GLOBAL row's Notes cell is deliberately empty — its description lives in
+  // the library and the engine resolves it. Keep the resolved text (and the
+  // content-root image path) so the panel can show what the row actually means.
+  const [globalMeta, setGlobalMeta] = useState<Record<string, { notes: string; image: string }>>({})
   useEffect(() => {
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
@@ -95,6 +99,13 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
           if (img.ref) map[img.ref] = img.path
         }
         setActiveRefImages(map)
+        const meta: Record<string, { notes: string; image: string }> = {}
+        for (const k of out.data?.kit ?? []) {
+          if (k?.read_only && k?.name) {
+            meta[k.name] = { notes: String(k.notes || ''), image: String(k.global_path || '') }
+          }
+        }
+        setGlobalMeta(meta)
       })
       .catch(() => {})
   }, [expanded])
@@ -605,7 +616,15 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     const descIdx = section.columns.length - 1
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
-                    const img = castImages[row[refIdx]] ?? (activeRefImages[row[refIdx]] ? contentUrl(activeRefImages[row[refIdx]]) : undefined)
+                    // A global item's sheet lives OUTSIDE the session, at a
+                    // content-root path — globalContentUrl, not contentUrl.
+                    const img =
+                      castImages[row[refIdx]] ??
+                      (activeRefImages[row[refIdx]]
+                        ? contentUrl(activeRefImages[row[refIdx]])
+                        : globalMeta[row[refIdx]]?.image
+                          ? globalContentUrl(globalMeta[row[refIdx]].image)
+                          : undefined)
                     if (img && !(expanded ?? '').startsWith(`${si}:`)) {
                       // CHARACTER SHEET CARD — same law as the mapping wall:
                       // visuals first. Every image gets the SAME square
@@ -918,7 +937,21 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                               setCell(li, v)
                             }
                           }}
-                          notes={descIdx !== refIdx ? row[descIdx] : ''}
+                          // Scope `global` = a shared library item: read-only,
+                          // so the panel forces "save as a new variant".
+                          readOnly={scopeIdx >= 0 && /^global$/i.test((row[scopeIdx] || '').trim())}
+                          readOnlyImage={
+                            globalMeta[row[refIdx]]?.image
+                              ? globalContentUrl(globalMeta[row[refIdx]].image)
+                              : ''
+                          }
+                          // Global rows carry no text of their own — show the
+                          // library's resolved description instead of a blank.
+                          notes={
+                            descIdx !== refIdx
+                              ? row[descIdx] || globalMeta[row[refIdx]]?.notes || ''
+                              : ''
+                          }
                           notesLabel={descIdx !== refIdx ? section.columns[descIdx].toUpperCase() : ''}
                           fields={fieldRows}
                           kitIndex={kitIndex}

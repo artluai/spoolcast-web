@@ -84,9 +84,18 @@ export function RefImagePanel({
   linkedTo = '',
   onLinkedToChange,
   onApprove,
+  readOnly = false,
+  readOnlyImage = '',
 }: {
   refId: string
   notes: string
+  // A GLOBAL library item: shared by every project, editable by nobody. Its
+  // image cannot be replaced, so "save as a new variant" is forced on and
+  // locked rather than letting the user hit a 403 after writing a prompt.
+  readOnly?: boolean
+  // Ready-to-use URL for a global item's sheet. It lives outside the session,
+  // so there is no ref manifest to resolve it from.
+  readOnlyImage?: string
   // Column name for the prompt box label (the panel owns the textarea so it
   // can toggle between the generation prompt and the character prompt).
   notesLabel?: string
@@ -161,13 +170,31 @@ export function RefImagePanel({
   // grow the box to its full text — the ref callback only fires on mount, and
   // a long description otherwise sits behind a scrollbar exactly when it
   // matters most.
-  useEffect(() => {
-    if (!createOpen) return
-    const el = promptBoxRef.current
+  // Size the prompt box to its text. Clearing the inline height FIRST is what
+  // makes it shrink as well as grow — measuring scrollHeight while a tall
+  // height is still applied just returns that height and compounds it.
+  const fitPromptBox = (el: HTMLTextAreaElement | null) => {
     if (!el) return
+    // The panel can be measured while its column is still collapsed (the kit
+    // wall lays out horizontally). At ~0 width the text wraps one character
+    // per line and scrollHeight reports thousands of px — leave the height
+    // alone until there is a real width to measure against.
+    if (el.clientWidth < 80) return
     el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight + 4}px`
-  }, [createOpen])
+    el.style.height = `${Math.min(el.scrollHeight + 4, 600)}px`
+  }
+  // Re-fit on open AND whenever the item or its text changes: React reuses the
+  // textarea node between items, so a height set for a long prompt otherwise
+  // survives onto a short one as a wall of empty box.
+  useEffect(() => {
+    // Two passes: now, and after layout settles — on the first render inside
+    // the kit wall the column can still be 0-wide, which makes the measurement
+    // meaningless (see fitPromptBox).
+    fitPromptBox(promptBoxRef.current)
+    const t = window.setTimeout(() => fitPromptBox(promptBoxRef.current), 80)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createOpen, refId, notes])
   const [improveOpen, setImproveOpen] = useState(false)
   // The two generation toggles live in one menu — see "⚙ Options".
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -744,7 +771,22 @@ export function RefImagePanel({
       {/* IMAGE LEFT · FIELDS RIGHT — audio has no image, so no image column */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {!(isAudio && !active) && <div style={{ width: 210, flex: 'none' }}>
-          {active ? (
+          {/* A global item has no session manifest — its sheet comes in ready
+              as a URL. Shown without the version controls below: there are no
+              versions to pick, and nothing here can be edited. */}
+          {!active && readOnlyImage ? (
+            <>
+              <img
+                src={readOnlyImage}
+                alt={refId}
+                onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
+                style={{ width: 210, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--line, #2a3142)' }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+                from the library{dims ? ` · ${dims}` : ''}
+              </div>
+            </>
+          ) : active ? (
             <>
               <img
                 src={versionUrl(active)}
@@ -849,11 +891,10 @@ export function RefImagePanel({
                 }}
                 rows={5}
                 ref={(el) => {
-                  // Auto-grow to fit — attach/improve write lines in here and
-                  // they must be visible, not hidden behind a scrollbar.
                   promptBoxRef.current = el
-                  if (el && el.scrollHeight > el.clientHeight) el.style.height = `${el.scrollHeight + 4}px`
                 }}
+                // Re-fit as the text changes, so deleting lines shrinks it back.
+                onInput={(e) => fitPromptBox(e.currentTarget)}
                 style={{
                   display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
                   color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
@@ -889,30 +930,28 @@ export function RefImagePanel({
                   <ModelPicker model={visionModel} onChange={setVisionModel} disabled={describing} models={VISION_MODELS} primary={VISION_MODELS} />
                 </div>
               ) : (
+              // ONE flow. "New variant" is not a separate mode any more — it's
+              // a checkbox on the same panel, because both do the same thing
+              // (make an image from this item) and differed only in where the
+              // result lands.
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-                {(['version', 'variant'] as const).map((m) => {
-                  const on = createOpen && createMode === m
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      className="vp-undo"
-                      title={m === 'version'
-                        ? 'Another take of THIS item — lands in its history, click a thumbnail to pick the active one'
-                        : 'A NEW kit item derived from this one — one deliberate change, gets its own history. (Unrelated item? + Add on the section.)'}
-                      style={on ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
-                      onClick={() => {
-                        if (on) setCreateOpen(false)
-                        else {
-                          setCreateMode(m)
-                          setCreateOpen(true)
-                        }
-                      }}
-                    >
-                      {m === 'version' ? `${on ? '▾' : '▸'} Update existing` : `${on ? '▾' : '▸'} New variant`}
-                    </button>
-                  )
-                })}
+                <button
+                  type="button"
+                  className="vp-undo"
+                  title="Make an image for this item"
+                  style={createOpen ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+                  onClick={() => {
+                    if (createOpen) setCreateOpen(false)
+                    else {
+                      // A read-only library item can never replace its own
+                      // image — open straight into variant mode.
+                      setCreateMode(readOnly ? 'variant' : 'version')
+                      setCreateOpen(true)
+                    }
+                  }}
+                >
+                  {createOpen ? '▾' : '▸'} {readOnly ? 'Make my own version' : 'Update existing'}
+                </button>
                 <span
                   title="Prompt length vs. the selected model's limit"
                   style={{
@@ -973,12 +1012,40 @@ export function RefImagePanel({
             </div>
       {createOpen && !isAudio && (
         <div style={{ position: 'relative', marginTop: 8 }}>
+          {/* THE ONE CHOICE that used to be two buttons. Locked on for a
+              global library item — its image belongs to every project, so the
+              only legal outcome is a copy of your own. Saying so here beats a
+              403 after the user has written a prompt. */}
+          <label
+            className="vp-undo"
+            style={{
+              display: 'inline-flex', gap: 8, alignItems: 'center', marginBottom: 8,
+              cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.75 : 1,
+            }}
+            title={readOnly
+              ? 'Library characters are shared and read-only — your changes are saved as your own variant'
+              : 'Save the result as a NEW kit item instead of replacing this one'}
+          >
+            <input
+              type="checkbox"
+              // DERIVED, not just set on open: a read-only item is always a
+              // variant, whatever createMode happens to hold (it can be reset
+              // by an inner close, or be stale from a previous item).
+              checked={readOnly || createMode === 'variant'}
+              disabled={readOnly}
+              style={{ margin: 0, accentColor: 'var(--accent)' }}
+              onChange={(e) => setCreateMode(e.target.checked ? 'variant' : 'version')}
+            />
+            Save as a new variant
+          </label>
           <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-            {createMode === 'version'
-              ? `Another take of ${refId} — lands in its history above; click a thumbnail to pick the active one.`
-              : `A NEW linked item — one deliberate change, its own history. Unrelated item? Use + Add on the section.`}
+            {readOnly
+              ? `${refId} is a library character — shared by every project and read-only. Your change is saved as your own variant, linked to the original.`
+              : createMode === 'version'
+                ? `Another take of ${refId} — lands in its history above; click a thumbnail to pick the active one.`
+                : `A NEW linked item — one deliberate change, its own history. Unrelated item? Use + Add on the section.`}
           </p>
-          {createMode === 'variant' ? (
+          {readOnly || createMode === 'variant' ? (
             <VariantModule
               inline
               base={{
@@ -990,11 +1057,13 @@ export function RefImagePanel({
                 active_model: activeVersion?.model || '',
               }}
               kit={[]}
-              onClose={() => setCreateMode('version')}
+              // A read-only library item has no legal "version" mode to fall
+              // back to — leave the checkbox where it is.
+              onClose={() => !readOnly && setCreateMode('version')}
               onCreated={(name, instruction) => {
                 onToast(`Variant ${name} created.`)
                 onVariantCreated?.(name, instruction)
-                setCreateMode('version')
+                if (!readOnly) setCreateMode('version')
               }}
             />
           ) : (
