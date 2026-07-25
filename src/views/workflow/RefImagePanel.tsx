@@ -153,10 +153,24 @@ export function RefImagePanel({
   const [attachPool, setAttachPool] = useState<PoolImage[] | null>(null)
   const [attached, setAttached] = useState<string[]>([])
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const promptBoxRef = useRef<HTMLTextAreaElement | null>(null)
   const timerRef = useRef<number | null>(null)
 
   const [createOpen, setCreateOpen] = useState(false)
+  // Opening the generate panel means you are about to WORK on the prompt, so
+  // grow the box to its full text — the ref callback only fires on mount, and
+  // a long description otherwise sits behind a scrollbar exactly when it
+  // matters most.
+  useEffect(() => {
+    if (!createOpen) return
+    const el = promptBoxRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + 4}px`
+  }, [createOpen])
   const [improveOpen, setImproveOpen] = useState(false)
+  // The two generation toggles live in one menu — see "⚙ Options".
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [guidance, setGuidance] = useState('')
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
@@ -201,6 +215,9 @@ export function RefImagePanel({
   const [promptView, setPromptView] = useState<'prompt' | 'character'>('prompt')
   const [sheetMode, setSheetMode] = useState(false)
   const dualImprove = !isMaster && (sheetMode || charPrompt !== null)
+  // Shown on the ⚙ Options button so an active toggle stays visible while the
+  // menu is shut — a hidden checkbox that changes the output must not be silent.
+  const optionCount = (sheetMode ? 1 : 0) + (lessMode ? 1 : 0)
 
   const savedSubjectRef = useRef<string | null>(null)
   const saveSubject = (text: string) => {
@@ -834,6 +851,7 @@ export function RefImagePanel({
                 ref={(el) => {
                   // Auto-grow to fit — attach/improve write lines in here and
                   // they must be visible, not hidden behind a scrollbar.
+                  promptBoxRef.current = el
                   if (el && el.scrollHeight > el.clientHeight) el.style.height = `${el.scrollHeight + 4}px`
                 }}
                 style={{
@@ -981,6 +999,13 @@ export function RefImagePanel({
             />
           ) : (
             <>
+          {/* MAKE THE IMAGE — everything in this row feeds the image model, so
+              it is labelled and kept apart from the text-model controls that
+              rewrite the prompt. Two pickers with no labels was the confusion. */}
+          <p className="vp-menu-h" style={{ border: 0, padding: 0, margin: '0 0 6px' }}>MAKE THE IMAGE</p>
+          {/* Count on the Options button so an active toggle is visible while
+              the menu is shut — a hidden checkbox that changes the output
+              must never be silent. */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
             <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
             <select
@@ -995,33 +1020,69 @@ export function RefImagePanel({
               ))}
             </select>
             {!isMaster && (
-              <>
-                <label className="vp-undo" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={sheetMode}
-                    style={{ margin: 0, accentColor: 'var(--accent)' }}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSheetMode(true)
-                        setImproveOpen(true)
-                        // Sheets are wide (multiple angles side by side) —
-                        // default the canvas to 16:9; still changeable above.
-                        setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
-                      } else {
-                        setSheetMode(false)
-                      }
-                    }}
-                  />
-                  Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
-                </label>
-                {/* The description lives NEXT TO the control it explains. */}
-                <span style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>
-                  {sheetMode
-                    ? 'Improve writes 2 prompts: character (imported when referenced elsewhere) + sheet (what Generate uses).'
-                    : 'multi-angle views of the same subject on a blank background'}
-                </span>
-              </>
+              /* The two generation toggles live in one menu instead of two
+                 loose buttons competing with the model pickers. */
+              <span className="vg-select-wrap" style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="vp-menu-btn vg-select-btn"
+                  onClick={() => setOptionsOpen((v) => !v)}
+                >
+                  ⚙ Options{optionCount ? ` · ${optionCount}` : ''} ▾
+                </button>
+                {optionsOpen ? (
+                  <>
+                    <span className="vp-menu-backdrop" onClick={() => setOptionsOpen(false)} />
+                    <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 5px)', left: 0, minWidth: 300 }}>
+                      <span className="vp-menu-h">GENERATION OPTIONS</span>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={sheetMode}
+                        className={sheetMode ? 'on' : ''}
+                        onClick={() => {
+                          if (!sheetMode) {
+                            setSheetMode(true)
+                            setImproveOpen(true)
+                            // Sheets are wide (multiple angles side by side) —
+                            // default the canvas to 16:9; still changeable above.
+                            setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
+                          } else {
+                            setSheetMode(false)
+                          }
+                        }}
+                      >
+                        <span className="vg-select-choice">
+                          <i className={`vg-menu-check ${sheetMode ? 'on' : ''}`} />
+                          Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
+                        </span>
+                        <small>
+                          {sheetMode
+                            ? 'Improve writes 2 prompts: character + sheet (what Generate uses)'
+                            : 'multi-angle views of the same subject on a blank background'}
+                        </small>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={lessMode}
+                        className={lessMode ? 'on' : ''}
+                        onClick={() => {
+                          if (lessMode) setLessMode(false)
+                          else void openLessMode()
+                          setOptionsOpen(false)
+                        }}
+                      >
+                        <span className="vg-select-choice">
+                          <i className={`vg-menu-check ${lessMode ? 'on' : ''}`} />
+                          Reduce AI aesthetic
+                        </span>
+                        <small>rewrites the prompt to read like a casual phone snapshot</small>
+                      </button>
+                    </span>
+                  </>
+                ) : null}
+              </span>
             )}
           </div>
           {genError !== '' && (
@@ -1029,18 +1090,12 @@ export function RefImagePanel({
               ⚠ {genError}
             </div>
           )}
+          {/* REWRITE THE PROMPT — a different model doing a different job. Its
+              picker lives INSIDE the fold it belongs to, so the two model
+              pickers are never on screen together unlabelled. */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
             <button type="button" className="vp-undo" onClick={() => setImproveOpen((v) => !v)}>
               ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
-            </button>
-            <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
-            <button
-              type="button"
-              className="vp-undo"
-              title="Opens Improve with the saved instruction pre-filled — the AI rewrites the prompt to read like a casual phone snapshot instead of a clean AI render"
-              onClick={openLessMode}
-            >
-              ◎ Reduce AI aesthetic
             </button>
             <button type="button" className="vp-undo" onClick={openAttach}>
               ⧉ Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
@@ -1060,6 +1115,10 @@ export function RefImagePanel({
                 }}
               />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* The TEXT model — only ever visible here, where the only
+                    thing it does is rewrite the prompt above. */}
+                <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>rewrite with:</span>
+                <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
                 {lessMode && (
                   <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                     save this instruction:
@@ -1095,37 +1154,69 @@ export function RefImagePanel({
             </div>
           )}
           {attachOpen && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div style={{ marginBottom: 8 }}>
               {attachPool === null ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
               ) : attachPool.length === 0 ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
               ) : (
-                attachPool.filter((img) => !img.path.includes(`world-kit-refs/${refId}/`)).map((img) => (
-                  <button
-                    key={img.path}
-                    type="button"
-                    title={img.name}
-                    onClick={() =>
-                      applyAttached(
-                        attached.includes(img.path)
-                          ? attached.filter((x) => x !== img.path)
-                          : attached.length < 4
-                            ? [...attached, img.path]
-                            : attached,
-                      )
-                    }
-                    style={{
-                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', position: 'relative',
-                      border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
-                    }}
-                  >
-                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
-                    <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 10.5, lineHeight: '16px', background: 'rgba(5,6,8,.78)', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>
-                      {img.ref ?? img.name}
-                    </span>
-                  </button>
-                ))
+                (() => {
+                  // ONE PICKER, SOURCES LABELLED. The pool already spans the
+                  // World Kit, generated shots and session uploads — it was
+                  // just one undifferentiated wall, so you could not tell a
+                  // cast member from a stray intake photo.
+                  const usable = attachPool.filter((img) => !img.path.includes(`world-kit-refs/${refId}/`))
+                  const groups: { label: string; note: string; items: PoolImage[] }[] = [
+                    {
+                      label: 'WORLD KIT',
+                      note: 'cast, environments and props from this project',
+                      items: usable.filter((i) => i.ref),
+                    },
+                    {
+                      label: 'GENERATED SHOTS',
+                      note: 'stills already made in this project',
+                      items: usable.filter((i) => !i.ref && /generated-assets/.test(i.path)),
+                    },
+                    {
+                      label: 'UPLOADS & SOURCE MATERIAL',
+                      note: 'what you brought into the project',
+                      items: usable.filter((i) => !i.ref && !/generated-assets/.test(i.path)),
+                    },
+                  ].filter((g) => g.items.length)
+                  const tile = (img: PoolImage) => (
+                    <button
+                      key={img.path}
+                      type="button"
+                      title={img.name}
+                      onClick={() =>
+                        applyAttached(
+                          attached.includes(img.path)
+                            ? attached.filter((x) => x !== img.path)
+                            : attached.length < 4
+                              ? [...attached, img.path]
+                              : attached,
+                        )
+                      }
+                      style={{
+                        padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', position: 'relative',
+                        border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
+                      }}
+                    >
+                      <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
+                      <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 10.5, lineHeight: '16px', background: 'rgba(5,6,8,.78)', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>
+                        {img.ref ?? img.name}
+                      </span>
+                    </button>
+                  )
+                  return groups.map((g) => (
+                    <div key={g.label} style={{ marginBottom: 10 }}>
+                      <p className="vp-menu-h" style={{ border: 0, padding: 0, margin: '0 0 6px' }}>
+                        {g.label} <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {g.note}</span>
+                      </p>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{g.items.map(tile)}</div>
+                    </div>
+                  ))
+                })()
               )}
             </div>
           )}

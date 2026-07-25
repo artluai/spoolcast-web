@@ -35,8 +35,9 @@ type Props = {
   onClose: () => void
   /** Fired after a successful add. `description` is the row's Notes text —
    *  empty for a global row (it resolves from the library), the copied text
-   *  for a variation — so the caller can mirror the row into its draft. */
-  onAdded: (ref: string, variation: boolean, description: string) => void
+   *  for a variation. `parent` is the library slug the row came from, so a
+   *  variation's provenance is passed, never guessed from its name. */
+  onAdded: (ref: string, variation: boolean, description: string, parent: string) => void
 }
 
 export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Props) {
@@ -106,12 +107,15 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
       return
     }
     const character = (chars ?? []).find((c) => c.id === slug)
+    // The PARENT closes the modal — for both actions — and expands a new
+    // variation so the user lands in its editor. Closing here too would fight
+    // it, and leaving it open reads as "nothing happened".
     onAdded(
       String(res.data?.ref || res.data?.slug || slug),
       variation,
       variation ? String(character?.description ?? '') : '',
+      slug,
     )
-    if (!variation) onClose()
   }
 
   return (

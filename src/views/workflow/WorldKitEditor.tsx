@@ -253,8 +253,10 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // section when missing). Variant/audio creations write the FILE via the
   // engine; mirroring them here keeps the unsaved draft from erasing them
   // on the next save.
-  const appendRowToTable = (heading: string, columns: string[], row: string[]) => {
-    if (!doc) return
+  // Returns the `${sectionIndex}:${rowIndex}` key of the row it wrote, so a
+  // caller can expand the item it just created.
+  const appendRowToTable = (heading: string, columns: string[], row: string[]): string | null => {
+    if (!doc) return null
     snapshot()
     const d = JSON.parse(JSON.stringify(doc)) as WKDoc
     let sec = d.sections.find(
@@ -263,11 +265,19 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     if (!sec) {
       sec = { heading, kind: 'table', columns, rows: [] }
       d.sections.push(sec)
+    } else if (columns.length > sec.columns.length) {
+      // The caller widened the table (e.g. adding `Variant of`). Adopt the new
+      // header and pad every existing row so the cells stay under the right
+      // columns — a mismatch silently shifts values into neighbouring fields.
+      const at = Math.max(0, columns.length - 2)
+      sec.columns = columns
+      for (const r of sec.rows) while (r.length < columns.length) r.splice(at, 0, '')
     }
     const out = row.slice(0, sec.columns.length)
     while (out.length < sec.columns.length) out.push('')
     sec.rows.push(out)
     apply(d)
+    return `${d.sections.indexOf(sec)}:${sec.rows.length - 1}`
   }
 
   // PER-SECTION AI: fill one section instead of redrafting the whole kit, so a
@@ -351,19 +361,74 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // A library pick / variation writes the FILE via the engine; mirror the row
   // into the unsaved draft too, exactly like variants and audio above, so a
   // pending edit isn't erased on the next save.
-  const onLibraryAdded = (ref: string, variation: boolean, description: string) => {
+  const onLibraryAdded = (ref: string, variation: boolean, description: string, parent: string) => {
     const isGlobal = !variation
-    appendRowToTable(
-      'Cast',
-      ['Ref', 'Kind', 'Scope', 'Notes'],
+    // BY COLUMN NAME, never by position: the engine adds a `Variant of` column
+    // to Cast the first time a variation is made, so a fixed 4-cell row lands
+    // the description under the wrong header (it showed up in Variant of, with
+    // an empty prompt).
+    const castSec = doc?.sections.find(
+      (s): s is Extract<WKSection, { kind: 'table' }> =>
+        s.kind === 'table' && /^cast$/i.test(s.heading.trim()),
+    )
+    const cols = [...(castSec?.columns ?? ['Ref', 'Kind', 'Scope', 'Notes'])]
+    // The engine adds `Variant of` to the FILE on the first variation; the
+    // in-memory draft here predates that write, so mirror the column too —
+    // otherwise the link is dropped on the next save.
+    if (variation && !cols.some((c) => /^variant of$/i.test(c.trim().replace(/_/g, ' ')))) {
+      cols.splice(Math.max(0, cols.length - 1), 0, 'Variant of')
+    }
+    const row = cols.map((c) => {
+      const k = c.trim().toLowerCase().replace(/_/g, ' ')
+      if (/^ref$/.test(k)) return ref
+      if (/^kind$/.test(k)) return 'character'
+      if (/^scope$/.test(k)) return isGlobal ? 'global' : 'episode-only'
+      if (/^variant of$/.test(k)) return isGlobal ? '' : `global:${parent}`
       // A global row deliberately carries NO description — it resolves from
       // the library at read time. A variation owns its text.
-      [ref, 'character', isGlobal ? 'global' : 'episode-only', isGlobal ? '' : description],
-    )
+      if (/^(notes|beats)$/.test(k)) return isGlobal ? '' : description
+      return ''
+    })
+    const key = appendRowToTable('Cast', cols, row)
+    // ALWAYS close: leaving the picker open reads as "nothing happened". The
+    // proof of the add is seeing the item land in the kit behind it.
+    setLibraryOpen(false)
+    // A variation exists to be CHANGED, so open it — the user lands directly
+    // in its editor with the copied description ready to edit. A global pick
+    // is read-only, so there is nothing to expand into.
+    if (key && variation) setExpanded(key)
+    // Scroll the new item into view. Closing the modal drops you back at
+    // whatever you were looking at, so without this the thing you just added
+    // is off-screen and the add still reads as "nothing happened".
+    // Retried: the row renders a frame or two after the draft updates, so a
+    // single timeout races it.
+    // The step panel scrolls INSIDE `.workflow-view`, not the window, and it
+    // re-renders after the draft change — so drive that container directly,
+    // and keep re-checking until the row is actually on screen.
+    let tries = 0
+    const reveal = () => {
+      const el = document.querySelector(`[data-wk-ref="${ref}"]`)
+      const box = document.querySelector('.workflow-view')
+      if (el && box) {
+        const elTop = el.getBoundingClientRect().top
+        const boxTop = box.getBoundingClientRect().top
+        const boxBottom = boxTop + box.clientHeight
+        // Already on screen? Leave the scroll alone — re-running would fight
+        // the user if they have started scrolling themselves.
+        if (elTop >= boxTop && elTop <= boxBottom - 40) return
+        const target = box.scrollTop + (elTop - boxTop) - box.clientHeight / 2 + el.clientHeight / 2
+        box.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+        // Re-check: a re-render right after can reset scrollTop.
+        if (tries++ < 6) window.setTimeout(reveal, 140)
+      } else if (tries++ < 20) {
+        window.setTimeout(reveal, 50)
+      }
+    }
+    window.setTimeout(reveal, 50)
     toast(
       isGlobal
         ? `Added ${ref} from the character library`
-        : `Made your own version: ${ref} — edit it freely`,
+        : `Made your own version: ${ref} — edit its description below`,
     )
   }
 
@@ -553,6 +618,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                       return (
                         <button
                           key={key}
+                          data-wk-ref={row[refIdx]}
                           onClick={() => setExpanded(expanded === key ? null : key)}
                           title={shared ? 'Shared with the show/template' : 'This episode only'}
                           style={{
@@ -632,6 +698,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                       return (
                         <button
                           key={key}
+                          data-wk-ref={row[refIdx]}
                           onClick={() => setExpanded(expanded === key ? null : key)}
                           title={shared ? 'Shared with the show/template' : 'This episode only'}
                           style={{
@@ -662,6 +729,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     return (
                       <button
                         key={key}
+                        data-wk-ref={row[refIdx]}
                         style={{
                           ...chip,
                           borderColor: expanded === key ? 'var(--ink-2)' : 'var(--line, #2a3142)',
