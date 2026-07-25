@@ -60,6 +60,8 @@ export const fileUrl = (path: string, session = activeSession()) => apiUrl('file
 
 /** Session status. */
 export const statusUrl = (session = activeSession()) => apiUrl('status', { session, tenant: TENANT })
+/** Current/previous audited render receipts for this session. */
+export const renderInfoUrl = (session = activeSession()) => apiUrl('render-info', { session })
 
 /** Short work goes here; long or paid work goes through {@link jobsUrl}. */
 export const actionUrl = () => apiUrl('action')
@@ -126,6 +128,33 @@ export async function uploadTake(
       body: file,
     })
     return (await res.json()) as { ok?: boolean; data?: { path?: string; kind?: string }; error?: string }
+  } catch {
+    return null
+  }
+}
+
+/** Add a local image/video to the Final Cut Workspace without placing it. */
+export async function uploadFinalCutAsset(
+  file: File,
+): Promise<{
+  ok?: boolean
+  data?: { final_cut?: unknown; asset?: { id?: string } }
+  error?: string
+} | null> {
+  try {
+    const res = await fetch(apiUrl('upload-final-cut-asset', {
+      session: activeSession(),
+      filename: file.name,
+    }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    })
+    return (await res.json()) as {
+      ok?: boolean
+      data?: { final_cut?: unknown; asset?: { id?: string } }
+      error?: string
+    }
   } catch {
     return null
   }

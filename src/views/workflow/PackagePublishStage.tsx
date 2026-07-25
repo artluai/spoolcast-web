@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Pill } from '../../components/common/Pill'
 import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
-import { FeedbackButton } from './FeedbackButton'
-import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 // Word-timed upload captions produced by the engine's build_timepoints job
@@ -40,7 +38,14 @@ type ThumbState = {
   bust: number // cache-buster for candidate images after a re-generate
 }
 
-export function PackagePublishStage({ onToast }: { onToast: (message: string) => void }) {
+export function PackagePublishStage({
+  stageId,
+  onToast,
+}: {
+  stageId: string
+  onToast: (message: string) => void
+}) {
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   // The compiled master from Final cut (real download once a compile is done —
   // step gating means users normally can't reach here before one exists).
   const finalRender = useWorkflowStore((s) => s.finalRender)
@@ -118,7 +123,7 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
   // from the script + core message + series rules) writes working/video-meta.json;
   // fields are editable after. The ▾ carries optional guidance to the model.
   const [metaGen, setMetaGen] = useState<GenState>('idle')
-  const [metaModel, setMetaModel] = useState(DEFAULT_MODEL_ID)
+  const [metaModel] = useState(DEFAULT_MODEL_ID)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [thumb, setThumb] = useState<ThumbState>({ gen: 'idle', versions: [], chosen: null, cover: false, finalizing: null, bust: 0 })
@@ -157,11 +162,11 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
     })
     return () => { alive = false }
   }, [])
-  const generateMeta = (guidance: string) => {
+  const generateMeta = (guidance: string, requestedModel = metaModel) => {
     setMetaGen('working')
     const extra = [
-      '--model', metaModel,
-      ...(draftReasoning(metaModel) ? ['--reasoning', draftReasoning(metaModel)!] : []),
+      '--model', requestedModel,
+      ...(draftReasoning(requestedModel) ? ['--reasoning', draftReasoning(requestedModel)!] : []),
       ...(guidance.trim() ? ['--guidance', guidance.trim()] : []),
     ]
     void runEngineJob({ action: 'draft_video_meta', extra_args: extra }, (succeeded) => {
@@ -218,6 +223,41 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
     })
   }
 
+  useEffect(() => {
+    const hasMeta = Boolean(title.trim())
+    const hasThumbs = thumb.versions.length > 0
+    registerStepAIAction(stageId, {
+      stageId,
+      label: !hasMeta
+        ? 'Complete step with AI'
+        : !hasThumbs
+          ? 'Generate thumbnails with AI'
+          : 'Publishing assets ready',
+      busy: metaGen === 'working' || thumb.gen === 'working',
+      disabled: hasThumbs,
+      disabledReason: hasThumbs
+        ? 'Review the generated details and choose a cover'
+        : undefined,
+      usesTextModel: !hasMeta,
+      acceptsInstructions: true,
+      run: ({ instructions, model }) => {
+        if (!hasMeta) generateMeta(instructions, model)
+        else generateThumbs(instructions)
+      },
+    })
+    return () => registerStepAIAction(stageId, null)
+    // The shared action advances the package in order: metadata first, then
+    // cover candidates. Captions remain their explicit local utility.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    metaGen,
+    registerStepAIAction,
+    stageId,
+    thumb.gen,
+    thumb.versions.length,
+    title,
+  ])
+
   return (
     <div className="pkg-stage">
       <section className="pkg-section">
@@ -251,18 +291,11 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
       <section className="pkg-section">
         <span className="eyebrow">Title &amp; description</span>
         <div className="pkg-gen-row">
-          <FeedbackButton
-            label={metaGen === 'ready' ? 'Re-generate title & description' : 'Generate title & description'}
-            busy={metaGen === 'working'}
-            busyLabel="Drafting…"
-            title="Drafts from the script and series rules"
-            placeholder="Optional guidance — e.g. “lead with the failure story”, “no jargon in the title”…"
-            onRun={generateMeta}
-          />
-          <ModelPicker model={metaModel} onChange={setMetaModel} disabled={metaGen === 'working'} />
-          {metaGen === 'idle' ? (
-            <span className="pkg-meta">drafted from the script &amp; series rules · ▾ adds guidance</span>
-          ) : null}
+          <span className="pkg-meta">
+            {metaGen === 'working'
+              ? (<><span className="spin" /> Drafting title and description…</>)
+              : 'Use the step AI control above to draft or revise these fields from the script and series rules.'}
+          </span>
         </div>
         {metaGen === 'ready' ? (
           <div className="pkg-fields">
@@ -281,14 +314,6 @@ export function PackagePublishStage({ onToast }: { onToast: (message: string) =>
       <section className="pkg-section">
         <span className="eyebrow">Thumbnail</span>
         <div className="pkg-gen-row">
-          <FeedbackButton
-            label={thumb.versions.length ? 'Re-generate thumbnails' : 'Generate thumbnails'}
-            busy={thumb.gen === 'working'}
-            busyLabel="Generating…"
-            title="Renders one cover candidate per drafted concept — uses image-model credits"
-            placeholder="Optional guidance applied to every candidate — e.g. “use the whiteboard scene”, “big readable text”…"
-            onRun={generateThumbs}
-          />
           <label className="pkg-count">
             <select value={thumbCount} onChange={(e) => setThumbCount(Number(e.target.value))} disabled={thumb.gen === 'working'}>
               {Array.from({ length: MAX_THUMBS }, (_, i) => i + 1).map((n) => (

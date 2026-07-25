@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
 import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
@@ -36,17 +36,34 @@ const SECTION_BLURBS: Record<string, string> = {
 // Survives unmounts (step hops) within the app session; keyed session:stage.
 const EXPANDED_MEMORY: Record<string, string | null> = {}
 
-export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; path: string; onToast?: (m: string) => void }) {
+export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?: (m: string) => void }) {
   // Toast plumbing is optional here (StageDraftEditor doesn't thread it yet) —
   // fall back to a console note rather than swallowing feedback.
   const toast = onToast ?? ((m: string) => console.info('[world-kit]', m))
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
-  const historyRef = useRef<string[]>([])
-  const redoRef = useRef<string[]>([])
-  const [historyLen, setHistoryLen] = useState(0)
-  const [redoLen, setRedoLen] = useState(0)
+  const historyKey = `${activeSession()}:${stageId}`
+  const storedHistory = useWorkflowStore((s) => s.stepHistories[historyKey])
+  const setStepHistory = useWorkflowStore((s) => s.setStepHistory)
+  const setStepUndo = useWorkflowStore((s) => s.setStepUndo)
+  const setStepMenu = useWorkflowStore((s) => s.setStepMenu)
+  const initialUndoHistory = (storedHistory?.undo as string[] | undefined) ?? []
+  const initialRedoHistory = (storedHistory?.redo as string[] | undefined) ?? []
+  const historyRef = useRef<string[]>(initialUndoHistory)
+  const redoRef = useRef<string[]>(initialRedoHistory)
+  const [historyLen, setHistoryLen] = useState(initialUndoHistory.length)
+  const [redoLen, setRedoLen] = useState(initialRedoHistory.length)
+  const draftRef = useRef(draft)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+  const rememberHistory = useCallback(() => {
+    setStepHistory(historyKey, {
+      undo: historyRef.current,
+      redo: redoRef.current,
+    })
+  }, [historyKey, setStepHistory])
   const [raw, setRaw] = useState(false)
   const [rawEditable, setRawEditable] = useState(false)
   // Descriptions under image cards — OFF by default: the wall is visual,
@@ -102,10 +119,6 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
       .catch(() => {})
   }, [draft, stageId, seedStageDraft])
 
-  if (!draft.trim()) {
-    return <span className="label">Loading the inherited kit from the engine…</span>
-  }
-
   let doc: WKDoc | null = null
   try {
     doc = parseWorldKit(draft)
@@ -133,34 +146,37 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
     }
   }
 
-  const snapshot = () => {
-    historyRef.current.push(draft)
+  const snapshot = useCallback(() => {
+    historyRef.current.push(draftRef.current)
     if (historyRef.current.length > 50) historyRef.current.shift()
     redoRef.current = []
+    rememberHistory()
     setHistoryLen(historyRef.current.length)
     setRedoLen(0)
-  }
-  const undo = () => {
+  }, [rememberHistory])
+  const undo = useCallback(() => {
     const prev = historyRef.current.pop()
     if (prev != null) {
-      redoRef.current.push(draft)
+      redoRef.current.push(draftRef.current)
       if (redoRef.current.length > 50) redoRef.current.shift()
       setStageDraft(stageId, prev)
     }
+    rememberHistory()
     setHistoryLen(historyRef.current.length)
     setRedoLen(redoRef.current.length)
-  }
-  const redo = () => {
+  }, [rememberHistory, setStageDraft, stageId])
+  const redo = useCallback(() => {
     const next = redoRef.current.pop()
     if (next != null) {
-      historyRef.current.push(draft)
+      historyRef.current.push(draftRef.current)
       if (historyRef.current.length > 50) historyRef.current.shift()
       setStageDraft(stageId, next)
     }
+    rememberHistory()
     setHistoryLen(historyRef.current.length)
     setRedoLen(redoRef.current.length)
-  }
-  const reset = async () => {
+  }, [rememberHistory, setStageDraft, stageId])
+  const reset = useCallback(async () => {
     // Reset to default = re-import the inherited kit (shared items only),
     // discarding every local edit and episode-only addition. DESTRUCTIVE:
     // confirm first; the engine snapshots the old file into save-points.
@@ -177,7 +193,56 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
     } catch {
       /* engine offline — keep current draft */
     }
+  }, [setStageDraft, snapshot, stageId])
+  useEffect(() => {
+    setStepUndo({
+      stepId: stageId,
+      count: historyLen,
+      run: undo,
+      redoCount: redoLen,
+      redo,
+    })
+    return () => {
+      if (useWorkflowStore.getState().stepUndo?.stepId === stageId) setStepUndo(null)
+    }
+  }, [historyLen, redo, redoLen, setStepUndo, stageId, undo])
+  useEffect(() => {
+    setStepMenu({
+      stepId: stageId,
+      actions: [
+        {
+          id: 'world-kit-reset',
+          label: 'Reset World Kit to default',
+          title: 'Discard episode-only changes and restore the inherited World Kit',
+          danger: true,
+          run: reset,
+        },
+        {
+          id: 'world-kit-descriptions',
+          label: showDesc ? 'Hide card descriptions' : 'Show card descriptions',
+          active: showDesc,
+          run: () => setShowDesc((value) => !value),
+        },
+        {
+          id: 'world-kit-raw',
+          label: raw ? 'Show formatted World Kit' : 'View raw Markdown',
+          active: raw,
+          run: () => {
+            setRawEditable(false)
+            setRaw((value) => !value)
+          },
+        },
+      ],
+    })
+    return () => {
+      if (useWorkflowStore.getState().stepMenu?.stepId === stageId) setStepMenu(null)
+    }
+  }, [raw, reset, setStepMenu, showDesc, stageId])
+
+  if (!draft.trim()) {
+    return <span className="label">Loading the inherited kit from the engine…</span>
   }
+
   const apply = (d: WKDoc) => setStageDraft(stageId, serializeWorldKit(d))
 
   // Append a row into a named table section of the DRAFT (creating the
@@ -209,7 +274,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
 
   const btn: React.CSSProperties = {
     background: 'none',
-    border: '1px solid var(--line, #2a3142)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'var(--line, #2a3142)',
     borderRadius: 6,
     color: 'var(--ink-2)',
     padding: '6px 12px',
@@ -218,7 +285,9 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
   }
   const chip: React.CSSProperties = {
     background: 'rgba(255,255,255,.04)',
-    border: '1px solid var(--line, #2a3142)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'var(--line, #2a3142)',
     borderRadius: 8,
     color: 'var(--ink-1)',
     padding: '8px 14px',
@@ -228,31 +297,6 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
 
   return (
     <div style={{ marginTop: 4 }}>
-      {/* HEADER: undo / reset to default / raw */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span className="label">{path}</span>
-        <span style={{ flex: 1 }} />
-        <button style={{ ...btn, opacity: historyLen ? 1 : 0.4 }} disabled={!historyLen} onClick={undo}>
-          ↩ Undo
-        </button>
-        <button style={{ ...btn, opacity: redoLen ? 1 : 0.4 }} disabled={!redoLen} onClick={redo}>
-          ↪ Redo
-        </button>
-        <button style={btn} onClick={reset} title="Discard all edits and re-import the show's shared items">
-          Reset to default
-        </button>
-        <button
-          style={{ ...btn, color: showDesc ? 'var(--accent-2)' : undefined }}
-          title="Show or hide the description text under image cards"
-          onClick={() => setShowDesc((v) => !v)}
-        >
-          Descriptions {showDesc ? 'on' : 'off'}
-        </button>
-        <button style={btn} onClick={() => { setRawEditable(false); setRaw((v) => !v) }}>
-          {raw ? 'Formatted' : 'Raw .md'}
-        </button>
-      </div>
-
       {raw || parseFailed ? (
         <>
           {/* READ-ONLY BY DEFAULT: this file is the registry behind every
@@ -266,6 +310,7 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
             </div>
           )}
           <textarea
+            className="raw-source-textarea"
             value={draft}
             readOnly={!parseFailed && !rawEditable}
             onFocus={parseFailed || rawEditable ? snapshot : undefined}
@@ -342,7 +387,6 @@ export function WorldKitEditor({ stageId, path, onToast }: { stageId: string; pa
                   if (sec.kind === 'text') sec.text = e.target.value
                   apply(d)
                 }}
-                rows={Math.max(2, section.text.split('\n').length)}
                 style={{
                   width: '100%', resize: 'vertical', background: 'transparent', color: 'var(--ink-2)',
                   border: '1px solid var(--line, #2a3142)', borderRadius: 8, padding: 10, fontSize: 13, lineHeight: 1.5, marginTop: 8,

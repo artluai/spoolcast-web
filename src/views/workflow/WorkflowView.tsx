@@ -6,6 +6,9 @@ import { useWorkflowStore } from '../../store/workflow'
 import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
 import { StepContent } from './StepContent'
 import type { VisualReviewLayoutCommand } from './VisualReviewStage'
+import { FeedbackButton } from './FeedbackButton'
+import { ModelPicker } from './ModelPicker'
+import { DEFAULT_MODEL_ID } from '../../lib/draft-models'
 
 type WorkflowArtifact = {
   required?: boolean
@@ -105,9 +108,15 @@ export function WorkflowView({
   // Kit with what the new structure needs. On by default; the checkbox is the
   // user's spend consent.
   const [updateKitAfter, setUpdateKitAfter] = useState(true)
+  // Step 08 → 09 hand-off: hashes/permanent shot ids let the engine bring
+  // over only changed/new clips while preserving every matching Final cut
+  // position, trim, mute, exclusion, and added layer.
+  const [updateFinalCutAfter, setUpdateFinalCutAfter] = useState(true)
+  const finalCutSyncDefaultedRef = useRef(false)
   // While the engine records a save/approval (a couple of seconds), the button
   // shows it's working instead of sitting silent.
   const [advancing, setAdvancing] = useState(false)
+  const [stepAIModels, setStepAIModels] = useState<Record<string, string>>({})
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -165,11 +174,46 @@ export function WorkflowView({
     return step
   })
   const activeStep = steps.find((step) => step.id === selected) ?? rawActiveStep
+  const activeStepId = activeStep.sourceId ?? activeStep.id
+  const activeStepAI = useWorkflowStore((state) => state.stepAIActions[activeStepId] ?? null)
+  const activeStepAIModel = stepAIModels[activeStepId] ?? DEFAULT_MODEL_ID
+
+  // A blank Final Cut should receive Step 08 automatically. Once the user has
+  // any timeline at all, syncing becomes an explicit opt-in so approval never
+  // surprises them by changing an edited cut.
+  useEffect(() => {
+    if (activeStep.id !== 'pics' || finalCutSyncDefaultedRef.current) return
+    finalCutSyncDefaultedRef.current = true
+    fetch(fileUrl('working/final-cut.json'))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((out) => {
+        if (!out?.ok || !out.data?.exists || typeof out.data.content !== 'string') {
+          setUpdateFinalCutAfter(true)
+          return
+        }
+        try {
+          const document = JSON.parse(out.data.content)
+          const hasTimelineItems = Array.isArray(document?.layers)
+            && document.layers.some((layer: { items?: unknown[] }) => Array.isArray(layer.items) && layer.items.length > 0)
+          setUpdateFinalCutAfter(!hasTimelineItems)
+        } catch {
+          setUpdateFinalCutAfter(false)
+        }
+      })
+      .catch(() => setUpdateFinalCutAfter(false))
+  }, [activeStep.id])
 
   // DIRTY STATE TRACKING: per-step dirty flags live in the zustand workflow store,
   // keyed by the engine node id (activeStep.sourceId) the approval logic compares against.
   const s1 = useWorkflowStore((s) => s.s1)
   const stepUndo = useWorkflowStore((s) => s.stepUndo)
+  const activeStepUndo = stepUndo?.stepId === (activeStep.sourceId ?? activeStep.id)
+    ? stepUndo
+    : null
+  const stepMenu = useWorkflowStore((s) => s.stepMenu)
+  const activeStepMenu = stepMenu?.stepId === (activeStep.sourceId ?? activeStep.id)
+    ? stepMenu
+    : null
   const ideaBrief = useWorkflowStore((s) => s.ideaBrief)
   const goal = useWorkflowStore((s) => s.goal)
   const seedDrafts = useWorkflowStore((s) => s.seedDrafts)
@@ -180,6 +224,8 @@ export function WorkflowView({
   // clear produced files from a step onward. Deliberately two clicks deep
   // (menu → confirm) so it can't be hit by accident.
   const [resetMenu, setResetMenu] = useState(false)
+  const [finalCutLayoutMenu, setFinalCutLayoutMenu] = useState(false)
+  const [stepHelpOpen, setStepHelpOpen] = useState(false)
   const [resetConfirm, setResetConfirm] = useState<{ stageId: string; name: string; whole: boolean } | null>(null)
   const [resetting, setResetting] = useState(false)
   // keepFiles: revoke the approvals (steps re-approve in order) but keep every
@@ -430,11 +476,17 @@ export function WorkflowView({
     Boolean(activeStep.progress)
     && Number(activeStep.progress?.total || 0) > 0
     && Number(activeStep.progress?.done || 0) < Number(activeStep.progress?.total || 0)
+  const activeProgressComplete =
+    Boolean(activeStep.progress)
+    && Number(activeStep.progress?.total || 0) > 0
+    && Number(activeStep.progress?.done || 0) >= Number(activeStep.progress?.total || 0)
 
   const rawStatusLabel =
     isCurrentlyEditing ? 'In progress' :
     hasActiveStageProcess ? 'In progress' :
     activeProgressIncomplete ? 'In progress' :
+    activeProgressComplete && engineNode?.requires_approval === true && engineStatus !== 'passed' && engineStatus !== 'approved'
+      ? 'Ready for approval' :
     // Final cut is only Complete when the compiled video actually exists.
     activeStep.id === 'check' && finalRender !== 'done' ? (finalRender === 'failed' ? 'Blocked' : 'In progress') :
     engineStatus === 'passed' || engineStatus === 'approved' ? 'Complete' :
@@ -450,6 +502,12 @@ export function WorkflowView({
     rawStatusLabel === 'In progress' && !hasActiveStageProcess && isGatedStage(activeStep.sourceId)
       ? 'Blocked'
       : rawStatusLabel
+  const statusTone =
+    statusLabel === 'Complete'
+      ? 'done'
+      : statusLabel === 'In progress' || statusLabel === 'Blocked' || statusLabel === 'Ready for approval'
+        ? 'work'
+        : activeStep.status
   // Width should serve the content: wide is for big editors, grids, tables
   // and timelines. Steps that are reading columns or rows/options (setup)
   // stay at normal width. The screenplay is wide since it became the
@@ -817,6 +875,16 @@ export function WorkflowView({
             Boolean(step.progress)
             && Number(step.progress?.total || 0) > 0
             && Number(step.progress?.done || 0) < Number(step.progress?.total || 0)
+          const progressComplete =
+            Boolean(step.progress)
+            && Number(step.progress?.total || 0) > 0
+            && Number(step.progress?.done || 0) >= Number(step.progress?.total || 0)
+          const stepNode = workflowNodes.find((node) => node.id === (step.sourceId ?? step.id))
+          const readyForApproval =
+            progressComplete
+            && stepNode?.requires_approval === true
+            && stepNode.status !== 'passed'
+            && stepNode.status !== 'approved'
           const displayStatus = progressIncomplete && step.status === 'done' ? 'work' : step.status
           return (
             <button
@@ -848,7 +916,11 @@ export function WorkflowView({
                   {displayStatus === 'done'
                     ? 'Complete'
                     : displayStatus === 'work'
-                      ? isGatedStage(step.sourceId ?? step.id) ? 'Blocked' : 'In progress'
+                      ? isGatedStage(step.sourceId ?? step.id)
+                        ? 'Blocked'
+                        : readyForApproval
+                          ? 'Ready for approval'
+                          : 'In progress'
                       : 'Pending'}
                 </b>
                 {step.progress ? <small>{step.progress.done}/{step.progress.total}</small> : null}
@@ -918,9 +990,9 @@ export function WorkflowView({
             </>
           ) : null}
           <div
-            className={`detail-head ${activeStep.description ? 'has-desc' : ''}`}
+            className="detail-head"
             onMouseDown={(event) => {
-              if (fullView || (event.target as HTMLElement).closest('button')) return
+              if (fullView || (event.target as HTMLElement).closest('button, input, textarea, select, [role="menu"]')) return
               const card = cardRef.current
               const canvas = card?.parentElement
               if (!card || !canvas) return
@@ -945,121 +1017,212 @@ export function WorkflowView({
               event.preventDefault()
             }}
           >
-            <span className="label">
-              STEP {activeStep.num}
-              {activeStep.optional ? ' · OPTIONAL' : ''}
-            </span>
-            <h2>{activeStep.name}</h2>
-            {apiLoading ? (
-              <span className="status-pill work">Checking engine...</span>
-            ) : (
-              // PER-STEP STATUS: always show this step's own status (statusLabel already
-              // turns "In progress" while the user is editing), never the session-wide one.
-              <span className={`status-pill ${statusLabel === 'Complete' ? 'done' : statusLabel === 'In progress' || statusLabel === 'Blocked' ? 'work' : activeStep.status}`}>
-                {statusLabel.toUpperCase()}
-              </span>
-            )}
-            {activeStep.status === 'done' ? <button>View output</button> : null}
-            {activeStep.progress ? (
-              <>
-                <span className="head-meter">
-                  {activeStep.progress.done} / {activeStep.progress.total} ·{' '}
-                  {Math.round((activeStep.progress.done / activeStep.progress.total) * 100)}%
+            <span className="detail-title-line">
+              <span className="detail-title-meta">
+                <span className="label">
+                  STEP {activeStep.num}
+                  {activeStep.optional ? ' · OPTIONAL' : ''}
                 </span>
-                <button>Watch live</button>
-              </>
-            ) : null}
-            <span className="spacer" />
-            {/* Step-level history, when the active step's editor offers it. */}
-            {stepUndo ? (
-              <>
-                <button disabled={stepUndo.count === 0} onClick={() => stepUndo.run()} title="Undo the last edit on this step">
-                  ↶ Undo{stepUndo.count ? ` (${stepUndo.count})` : ''}
-                </button>
-                {stepUndo.redo ? (
-                  <button disabled={(stepUndo.redoCount ?? 0) === 0} onClick={() => stepUndo.redo?.()} title="Redo the last undone edit on this step">
-                    ↷ Redo{stepUndo.redoCount ? ` (${stepUndo.redoCount})` : ''}
+                {activeStep.moreInfo || activeStep.description ? (
+                  <button
+                    type="button"
+                    className="detail-more-info"
+                    onClick={() => setStepHelpOpen(true)}
+                    title={`About ${activeStep.name}`}
+                  >
+                    INFO
                   </button>
                 ) : null}
-              </>
-            ) : null}
-            <button disabled={selectableIndex <= 0} onClick={() => setSelected(orderedSteps[selectableIndex - 1].id)}>
-              ‹ Previous
-            </button>
-            {/* Next is pure NAVIGATION — the sidebar lets you open any step,
-                so a blocked current step must not freeze this button. */}
-            <button
-              disabled={selectableIndex >= orderedSteps.length - 1}
-              onClick={() => setSelected(orderedSteps[selectableIndex + 1].id)}
-            >
-              Next ›
-            </button>
-            <span style={{ position: 'relative' }}>
-              <button
-                className="icon-btn"
-                title="Start over — deletes work (asks first)"
-                style={{ color: 'var(--amber)' }}
-                onClick={() => setResetMenu((v) => !v)}
-              >
-                ⚠
+                {apiLoading ? (
+                  <span className="detail-status-text work">CHECKING ENGINE</span>
+                ) : (
+                  <span className={`detail-status-text ${statusTone}`}>{statusLabel.toUpperCase()}</span>
+                )}
+                {activeStep.progress ? (
+                  <span className="detail-progress-text">
+                    {activeStep.progress.done} / {activeStep.progress.total} ·{' '}
+                    {Math.round((activeStep.progress.done / activeStep.progress.total) * 100)}%
+                  </span>
+                ) : null}
+              </span>
+              <h2>{activeStep.name}</h2>
+            </span>
+            <span className="detail-nav-pair">
+              <button disabled={selectableIndex <= 0} onClick={() => setSelected(orderedSteps[selectableIndex - 1].id)}>
+                ‹ Previous
               </button>
-              {resetMenu ? (
+              {/* Next is pure NAVIGATION — the sidebar lets you open any step,
+                  so a blocked current step must not freeze this button. */}
+              <button
+                disabled={selectableIndex >= orderedSteps.length - 1}
+                onClick={() => setSelected(orderedSteps[selectableIndex + 1].id)}
+              >
+                Next ›
+              </button>
+            </span>
+            <button
+              className="icon-btn expand-btn"
+              title={fullView ? 'Exit expanded view' : 'Expand this step'}
+              onClick={() => setFull((value) => !value)}
+            >
+              {fullView ? '⤡' : '⤢'}
+            </button>
+          </div>
+          <div className="detail-command-section">
+            <div className="detail-command-bar">
+              <span className="step-ai-control">
+                <FeedbackButton
+                  label={activeStepAI?.label || 'Complete step with AI'}
+                  busy={Boolean(activeStepAI?.busy)}
+                  busyLabel="Working…"
+                  disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
+                  title={
+                    isBeyondBlocked
+                      ? 'Complete the earlier steps first'
+                      : activeStepAI?.disabledReason
+                        || (activeStepAI ? 'Complete only this step with AI; you still review and approve the result' : 'This step still needs a registered AI completion action')
+                  }
+                  placeholder={`Optional instructions for ${activeStep.name}…`}
+                  historyKey={`complete-step-${activeStepId.replace(/_/g, '-')}`}
+                  ruleStep={activeStepId}
+                  allowFeedback={Boolean(activeStepAI) && activeStepAI.acceptsInstructions !== false}
+                  runExtras={activeStepAI?.usesTextModel !== false ? (
+                    <ModelPicker
+                      model={activeStepAIModel}
+                      onChange={(model) => setStepAIModels((current) => ({ ...current, [activeStepId]: model }))}
+                      disabled={Boolean(activeStepAI?.busy)}
+                    />
+                  ) : undefined}
+                  onRun={(instructions) => {
+                    if (!activeStepAI || activeStepAI.disabled || isBeyondBlocked) return
+                    void activeStepAI.run({ instructions, model: activeStepAIModel })
+                  }}
+                />
+              </span>
+              {activeStep.id === 'check' ? (
                 <>
-                  <span className="vp-menu-backdrop" onClick={() => setResetMenu(false)} />
-                  <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 290 }}>
-                    <span className="vp-menu-h">START OVER</span>
+                  <button
+                    type="button"
+                    title="Bring in only new or changed Step 08 clips; matching clips and Final Cut edits stay untouched"
+                    onClick={() => sendVisualReviewLayoutCommand('sync')}
+                  >
+                    ⟳ Update from Step 08
+                  </button>
+                  <span className="detail-layout-actions detail-menu-anchor">
                     <button
                       type="button"
-                      onClick={() => {
-                        setResetMenu(false)
-                        setResetConfirm({ stageId: activeStep.sourceId ?? activeStep.id, name: activeStep.name, whole: false })
-                      }}
+                      className="layout-mini-btn"
+                      title="Save or reset the Final Cut panel layout"
+                      onClick={() => setFinalCutLayoutMenu((open) => !open)}
                     >
-                      Start over from this step
+                      Layout ▾
                     </button>
-                    <button
-                      type="button"
-                      className="danger"
-                      onClick={() => {
-                        setResetMenu(false)
-                        const first = orderedSteps[0]
-                        setResetConfirm({ stageId: first.sourceId ?? first.id, name: first.name, whole: true })
-                      }}
-                    >
-                      Start over from the beginning
-                    </button>
+                    {finalCutLayoutMenu ? (
+                      <>
+                        <span className="vp-menu-backdrop" onClick={() => setFinalCutLayoutMenu(false)} />
+                        <span className="vp-menu detail-action-menu">
+                          <span className="vp-menu-h">FINAL CUT LAYOUT</span>
+                          <button type="button" onClick={() => { setFinalCutLayoutMenu(false); sendVisualReviewLayoutCommand('save') }}>Save current layout</button>
+                          <button type="button" onClick={() => { setFinalCutLayoutMenu(false); sendVisualReviewLayoutCommand('reset') }}>Reset to saved layout</button>
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                 </>
               ) : null}
-            </span>
-            {activeStep.id === 'check' ? (
-              <span className="detail-layout-actions">
+              {/* Step-level history, when the active step's editor offers it. */}
+              {activeStepUndo ? (
+                <span className="detail-history-actions">
+                  <button disabled={activeStepUndo.busy || activeStepUndo.count === 0} onClick={() => activeStepUndo.run()} title="Undo the last edit on this step">
+                    ↶ Undo{activeStepUndo.count ? ` (${activeStepUndo.count})` : ''}
+                  </button>
+                  {activeStepUndo.redo ? (
+                    <button disabled={activeStepUndo.busy || (activeStepUndo.redoCount ?? 0) === 0} onClick={() => activeStepUndo.redo?.()} title="Redo the last undone edit on this step">
+                      ↷ Redo{activeStepUndo.redoCount ? ` (${activeStepUndo.redoCount})` : ''}
+                    </button>
+                  ) : null}
+                </span>
+              ) : null}
+              <span className="detail-menu-anchor detail-command-overflow">
                 <button
-                  type="button"
-                  className="layout-mini-btn"
-                  title="Save the current Step 11 layout"
-                  onClick={() => sendVisualReviewLayoutCommand('save')}
+                  className="icon-btn detail-more-btn"
+                  title="More step actions"
+                  onClick={() => setResetMenu((v) => !v)}
                 >
-                  Save layout
+                  ⋯
                 </button>
-                <button
-                  type="button"
-                  className="layout-mini-btn"
-                  title="Reset to saved layout"
-                  onClick={() => sendVisualReviewLayoutCommand('reset')}
-                >
-                  Reset
-                </button>
+                {resetMenu ? (
+                  <>
+                    <span className="vp-menu-backdrop" onClick={() => setResetMenu(false)} />
+                    <span className="vp-menu detail-action-menu detail-action-menu-end">
+                      <span className="vp-menu-h">STEP ACTIONS</span>
+                      {activeStepMenu?.actions.map((action) => (
+                        <button
+                          key={action.id}
+                          type="button"
+                          className={`${action.active ? 'on' : ''}${action.danger ? ' danger' : ''}`.trim()}
+                          title={action.title}
+                          disabled={action.disabled}
+                          aria-pressed={action.active || undefined}
+                          onClick={() => {
+                            setResetMenu(false)
+                            void action.run()
+                          }}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                      {activeStepMenu?.actions.length ? <span className="vp-menu-div" /> : null}
+                      {activeProgressIncomplete ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetMenu(false)
+                            setFull(true)
+                          }}
+                        >
+                          Open live progress
+                        </button>
+                      ) : null}
+                      {activeProgressIncomplete ? <span className="vp-menu-div" /> : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetMenu(false)
+                          setResetConfirm({ stageId: activeStep.sourceId ?? activeStep.id, name: activeStep.name, whole: false })
+                        }}
+                      >
+                        Start over from this step
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          setResetMenu(false)
+                          const first = orderedSteps[0]
+                          setResetConfirm({ stageId: first.sourceId ?? first.id, name: first.name, whole: true })
+                        }}
+                      >
+                        Start over from the beginning
+                      </button>
+                    </span>
+                  </>
+                ) : null}
               </span>
-            ) : null}
-            <button className="icon-btn expand-btn" onClick={() => setFull((value) => !value)}>
-              {fullView ? '⤡' : '⤢'}
-            </button>
-            {/* Template-provided description (contract ui.description): a
-                full-width second line under the whole header row — title and
-                buttons keep the default single-row layout untouched. */}
-            {activeStep.description ? <span className="head-desc">{activeStep.description}</span> : null}
+            </div>
           </div>
+          {stepHelpOpen ? (
+            <div className="modal-scrim" onMouseDown={() => setStepHelpOpen(false)}>
+              <div className="confirm-modal step-info-modal" onMouseDown={(event) => event.stopPropagation()}>
+                <span className="need">STEP {activeStep.num} · MORE INFO</span>
+                <h3>{activeStep.name}</h3>
+                <p>{activeStep.moreInfo || activeStep.description}</p>
+                <div className="actions">
+                  <button className="primary" onClick={() => setStepHelpOpen(false)}>Got it</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {resetConfirm ? (
             <div className="modal-scrim">
               <div className="confirm-modal">
@@ -1242,6 +1405,23 @@ export function WorkflowView({
                       : 'after approval, AI builds the storyboard from this plan — checked by the validator before you see it'}
               </label>
             )}
+            {activeStep.id === 'pics' ? (
+              <label
+                title="When you continue, bring only new or changed clips into Final cut. Matching clips and existing Final cut edits stay untouched."
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
+                  marginTop: 16, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={updateFinalCutAfter}
+                  onChange={(event) => setUpdateFinalCutAfter(event.target.checked)}
+                  style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+                />
+                update Final cut with new or changed clips when I continue
+              </label>
+            ) : null}
 
             <div className="detail-foot">
               {(() => {
@@ -1305,7 +1485,8 @@ export function WorkflowView({
                 
                 // PROGRESSION RULE: complete approved stages can still move to
                 // the next card. Dirty approved stages re-run approval first.
-                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !handoffHere
+                const approvedAndClean = isAlreadyApproved && !dirty
+                const canProceed = !autopilot && stepComplete && !isBeyondBlocked && !handoffHere && !approvedAndClean
                 
                 const goalIndex = orderedSteps.findIndex((s) => s.id === 'goal')
                 const isLast = selectableIndex >= orderedSteps.length - 1
@@ -1348,20 +1529,24 @@ export function WorkflowView({
                         disabled={!canProceed}
                         onClick={async () => {
                           if (!canProceed || advancing) return
-                          // Approved-and-clean is a TERMINAL click state: navigate on,
-                          // or (on the last step) do nothing. It must NEVER fall
-                          // through to onAdvance — that path starts with the
-                          // invalidation rewind and would revoke a good approval.
-                          if (isAlreadyApproved && !dirty) {
-                            if (!isLast) setSelected(orderedSteps[selectableIndex + 1].id)
-                            return
-                          }
                           // ENGINE-FIRST RULE: only advance and clear the dirty flag if the
                           // engine actually accepted the save/approval. If it refused, stay
                           // put — the step keeps its "in progress" state and the refreshed
                           // blockers explain what's missing.
                           setAdvancing(true)
                           try {
+                            let finalCutSyncNotice = ''
+                            if (activeStep.id === 'pics' && updateFinalCutAfter) {
+                              const sync = await postAction<{ summary?: { updated?: number; new?: number; conflicts?: number } }>({ action: 'reconcile_final_cut' })
+                              if (!sync || sync.ok === false) {
+                                onToast(sync?.error || 'Final cut could not be updated. Stay here and try again.')
+                                return
+                              }
+                              const updated = Number(sync.data?.summary?.updated || 0)
+                              const added = Number(sync.data?.summary?.new || 0)
+                              const conflicts = Number(sync.data?.summary?.conflicts || 0)
+                              finalCutSyncNotice = ` Final cut: ${updated} updated, ${added} added${conflicts ? `, ${conflicts} locked conflict${conflicts === 1 ? '' : 's'}` : ''}. Undo is available in Step 09.`
+                            }
                             const ok = await onAdvance(activeStep.id, {
                               aiHandoff: (activeStep.id === 'plan' || activeStep.id === 'worldkit' || activeStep.id === 'script' || activeStep.id === 'pacing') && updateKitAfter,
                             })
@@ -1374,7 +1559,7 @@ export function WorkflowView({
                             if (isLast) onToast('Approved and finished.')
                             else {
                               setSelected(orderedSteps[selectableIndex + 1].id)
-                              onToast(isAlreadyApproved ? 'Stage re-approved.' : (needsApproval ? 'Stage approved.' : 'Saved.'))
+                              onToast(`${isAlreadyApproved ? 'Stage re-approved.' : (needsApproval ? 'Stage approved.' : 'Saved.')}${finalCutSyncNotice}`)
                             }
                           } finally {
                             setAdvancing(false)
@@ -1383,8 +1568,8 @@ export function WorkflowView({
                       >
                         {advancing
                           ? 'Working…'
-                          : isAlreadyApproved && !dirty && stepComplete
-                            ? (isLast ? 'Completed' : 'Save and continue →')
+                          : approvedAndClean && stepComplete
+                            ? 'Approved'
                             : needsApproval
                               ? (isLast ? 'Approve & finish' : 'Approve & continue →')
                               : (isLast ? 'Save and finish' : 'Save and continue →')
@@ -1393,8 +1578,8 @@ export function WorkflowView({
                       <span className="foot-sub">
                         {autopilot
                           ? 'Autopilot is running — stop it to edit by hand'
-                          : isAlreadyApproved && !dirty && stepComplete
-                            ? (isLast ? 'Step is complete.' : 'Step is complete. Go to the next step.')
+                          : approvedAndClean && stepComplete
+                            ? (isLast ? 'Step is complete.' : 'Approved. Use Next above to continue.')
                             : !stepComplete
                               ? !priorsComplete || currentNode?.status === 'not_started'
                                 ? 'Approve the earlier steps first — this one unlocks after them'

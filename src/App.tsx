@@ -16,7 +16,7 @@ import {
   stageToStepMap,
   type WorkflowContract,
 } from './lib/workflow-graph'
-import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
+import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
 import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
@@ -45,7 +45,12 @@ type ApiArtifact = {
 
 type ShotListBeat = { narration?: string }
 type ShotListChunk = { beats?: ShotListBeat[]; id?: string; image_source?: string; boundary_kind?: string }
-type ShotListBaseLayerEvent = { id?: string; role?: string; image_source?: string }
+type ShotListBaseLayerEvent = {
+  id?: string
+  pacing_image_id?: string
+  role?: string
+  image_source?: string
+}
 type ShotListData = { chunks?: ShotListChunk[]; base_layer?: ShotListBaseLayerEvent[] }
 type SceneManifestData = {
   items?: {
@@ -64,6 +69,14 @@ type ApiStatusPayload = {
     [key: string]: unknown
   }
   [key: string]: unknown
+}
+type RenderStatusPayload = {
+  data?: {
+    current?: {
+      exists?: boolean
+      matches_timeline?: boolean
+    } | null
+  }
 }
 
 const countNarratedChunks = (shotList: ShotListData | null) =>
@@ -101,7 +114,10 @@ const countVisualCoverage = (shotList: ShotListData | null, manifest: SceneManif
   if (!shotList?.base_layer?.length || !coveredIds.size) return fallback
   return shotList.base_layer.filter((event) => {
     if ((event?.role || 'base_visual') !== 'base_visual') return false
-    const id = String(event.id || '').trim()
+    // pacing_image_id is the permanent storyboard identity. event.id is only
+    // the current positional label and can diverge after shots are reordered,
+    // restored, or removed.
+    const id = String(event.pacing_image_id || event.id || '').trim()
     return id && coveredIds.has(id)
   }).length
 }
@@ -342,7 +358,10 @@ function SpoolcastApp() {
     }
     const fetchStatus = async () => {
       try {
-        const response = await fetch(statusUrl())
+        const [response, renderReceipt] = await Promise.all([
+          fetch(statusUrl()),
+          getJson<RenderStatusPayload>(renderInfoUrl()),
+        ])
         if (response.ok) {
           const data = await withUiProgress(await response.json())
           setApiStatus(data)
@@ -360,8 +379,12 @@ function SpoolcastApp() {
           )
           const prevRenderPassed = renderSentinelRef.current
           renderSentinelRef.current = renderPassed
-          if (renderPassed) {
-            const fr = useWorkflowStore.getState().finalRender
+          const fr = useWorkflowStore.getState().finalRender
+          const currentMatches = Boolean(
+            renderReceipt?.data?.current?.exists
+            && renderReceipt?.data?.current?.matches_timeline,
+          )
+          if (renderPassed && currentMatches) {
             // 'idle'/'failed' with the sentinel present can only mean the store
             // missed (or lost) the truth: a REAL render deletes the sentinel at
             // start and only a passing audit rewrites it, so its presence IS a
@@ -369,9 +392,14 @@ function SpoolcastApp() {
             // just on first load. 'rendering' flips only on the absent→present
             // edge (plain presence would race a fresh compile against the
             // previous render's sentinel); 'stale' is never overridden.
-            const missedTruth = fr === 'idle' || fr === 'failed'
-            const completionEdge = prevRenderPassed === false && fr === 'rendering'
-            if (missedTruth || completionEdge) useWorkflowStore.getState().setFinalRender('done')
+            const missedTruth = fr === 'idle'
+            const completedWhileOpen = fr === 'rendering'
+            const completionEdge = prevRenderPassed === false && completedWhileOpen
+            if (missedTruth || completionEdge || completedWhileOpen) {
+              useWorkflowStore.getState().setFinalRender('done')
+            }
+          } else if (renderReceipt?.data?.current?.exists && fr === 'done') {
+            useWorkflowStore.getState().setFinalRender('stale')
           }
         }
       } catch (error) {

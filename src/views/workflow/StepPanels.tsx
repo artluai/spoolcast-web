@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, statusUrl, templatesUrl } from '../../lib/api'
-import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -447,6 +446,7 @@ export function NarrationContent() {
   const session = activeSession()
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   const audioDemo = (path: string) => `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/${path}`
   const defaultProvider = 'edge'
   const defaultVoice = 'edge-andrew'
@@ -899,6 +899,24 @@ export function NarrationContent() {
       setStageProcess(stageId, null)
     }
   }
+  useEffect(() => {
+    registerStepAIAction(stageId, {
+      stageId,
+      label: audioComplete ? 'Narration audio ready' : 'Complete step with AI',
+      busy: activeProcess,
+      disabled: progress.total === 0 || audioComplete,
+      disabledReason: progress.total === 0
+        ? 'Complete the shot list first'
+        : 'Narration audio is already complete',
+      usesTextModel: false,
+      acceptsInstructions: false,
+      run: () => generateAudio(),
+    })
+    return () => registerStepAIAction(stageId, null)
+    // generateAudio deliberately stays local to this panel; re-register when
+    // the durable progress/busy state changes so the header remains accurate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProcess, audioComplete, progress.total, registerStepAIAction, stageId])
   const addPronunciationRule = async () => {
     const word = pronWord.trim()
     const alias = pronAlias.trim()
@@ -1108,9 +1126,6 @@ export function NarrationContent() {
         {pronMessage ? <p className="voice-error">{pronMessage}</p> : null}
       </div>
       <div className="voice-runbar">
-        <button className="save-continue" type="button" onClick={() => generateAudio()} disabled={activeProcess}>
-          {activeProcess ? (<><span className="spin" /> Generating audio…</>) : 'Generate narration audio'}
-        </button>
         <span className="voice-run-progress">
           <span className="voice-run-status">
             {progress.total ? `${progress.done}/${progress.total} audio chunks generated` : 'Waiting for shot-list chunks'}
@@ -1755,9 +1770,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
-  const [feedback, setFeedback] = useState('')
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [model, setModel] = useState(DEFAULT_MODEL_ID)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
 
   // CANDIDATES CONVENTION: working/core-message-candidates.json is THE
   // candidates artifact for every template's lock stage (the drafter writes
@@ -1804,7 +1817,11 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
 
   // REAL AI SUGGESTION: runs the engine's metered propose_core_message draft
   // (writes working/core-message-candidates.json), then loads the candidates.
-  const suggest = async () => {
+  const suggest = async (
+    requestedFeedback: string | unknown = '',
+    requestedModel = DEFAULT_MODEL_ID,
+  ) => {
+    const instruction = typeof requestedFeedback === 'string' ? requestedFeedback : ''
     setGenerating(true)
     setAiError(null)
     try {
@@ -1817,9 +1834,9 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           action: 'draft_stage',
           stage_id: stepId,
           allow_cost: true,
-          model,
-          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
-          ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+          model: requestedModel,
+          ...(draftReasoning(requestedModel) ? { reasoning: draftReasoning(requestedModel) } : {}),
+          ...(instruction.trim() ? { feedback: instruction.trim() } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -1870,6 +1887,17 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
       setAiError('Could not reach the engine.')
     }
   }
+
+  useEffect(() => {
+    registerStepAIAction(stepId, {
+      stageId: stepId,
+      label: candidates?.length ? 'Update with AI' : 'Complete step with AI',
+      busy: generating,
+      usesTextModel: true,
+      run: ({ instructions, model: requestedModel }) => suggest(instructions, requestedModel),
+    })
+    return () => registerStepAIAction(stepId, null)
+  }, [candidates?.length, generating, registerStepAIAction, stepId])
 
   // ONLY the selected option wears a stroke (the app's accent selection
   // treatment, same family as .core-opt.sel / .node.selected) — unselected
@@ -1925,14 +1953,6 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             <span className="nm" style={{ display: 'block' }}>Let AI suggest</span>
             <span className="ds">3 candidates drafted from your idea &amp; source material — pick one, then edit it</span>
           </span>
-          {!candidates && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <ModelPicker model={model} onChange={setModel} disabled={generating} />
-              <button type="button" className="core-create" disabled={generating} onClick={suggest}>
-                {generating ? (<><span className="spin" /> Generating…</>) : 'Suggest'}
-              </button>
-            </span>
-          )}
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
         {candidates && candidates.length > 0 && (
@@ -1966,78 +1986,6 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
                 title="Edit your pick — refining a candidate keeps the AI option selected"
                 style={{ width: '100%', boxSizing: 'border-box' }}
               />
-            )}
-            {/* RE-SUGGEST: plain button by default; the expand toggle opens a
-                multi-line feedback box with the button inside it. */}
-            {!feedbackOpen ? (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <ModelPicker model={model} onChange={setModel} disabled={generating} />
-                {/* SPLIT BUTTON: one pill, two zones — ▾ opens the feedback box,
-                    the main zone re-suggests. */}
-                <span style={{ display: 'inline-flex' }}>
-                  <button
-                    type="button"
-                    className="core-create"
-                    title="Add feedback for the next suggestions"
-                    onClick={() => setFeedbackOpen(true)}
-                    style={{ borderRadius: '8px 0 0 8px', padding: '8px 11px', borderRight: '1px solid rgba(0,0,0,.3)' }}
-                  >
-                    ▾
-                  </button>
-                  <button
-                    type="button"
-                    className="core-create"
-                    disabled={generating}
-                    onClick={suggest}
-                    style={{ borderRadius: '0 8px 8px 0' }}
-                  >
-                    {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
-                  </button>
-                </span>
-              </div>
-            ) : (
-              <div style={{ position: 'relative', marginTop: 4 }}>
-                <textarea
-                  autoFocus
-                  rows={3}
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Tell the AI what to change — e.g. “easier to understand”, “more dramatic”, “focus on the cost angle”…"
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    resize: 'vertical',
-                    background: 'rgba(255,255,255,.02)',
-                    color: 'var(--ink-1)',
-                    border: '1px dashed var(--line, #2a3142)',
-                    borderRadius: 8,
-                    padding: '11px 12px 46px',
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                  }}
-                />
-                <button
-                  type="button"
-                  title="Collapse"
-                  onClick={() => setFeedbackOpen(false)}
-                  style={{
-                    position: 'absolute', right: 8, top: 8,
-                    background: 'none', border: 'none', color: 'var(--ink-3)',
-                    cursor: 'pointer', fontSize: 12, padding: 2,
-                  }}
-                >
-                  ▴
-                </button>
-                <button
-                  type="button"
-                  className="core-create"
-                  disabled={generating}
-                  onClick={suggest}
-                  style={{ position: 'absolute', right: 8, bottom: 12, padding: '6px 14px', fontSize: 12 }}
-                >
-                  {generating ? (<><span className="spin" /> Generating…</>) : 'Re-suggest'}
-                </button>
-              </div>
             )}
           </div>
         )}

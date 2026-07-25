@@ -86,12 +86,12 @@ export function StepContent({
     return <ShotListStage stageId={stepId} />
   }
   if (step.id === 'pics') return <VisualGenerationStage stageId={stepId} />
-  if (step.id === 'check') return <VisualReviewStage layoutCommand={visualReviewLayoutCommand} onToast={onToast} />
+  if (step.id === 'check') return <VisualReviewStage stageId={stepId} layoutCommand={visualReviewLayoutCommand} onToast={onToast} />
   if (step.id === 'build') {
     // Package & publish — the collapsed tail (captions, cover, editor export).
     // The save-as-template card is HIDDEN for now: its save was pure mock and
     // the engine has no template storage yet (bring back with that backend).
-    return <PackagePublishStage onToast={onToast} />
+    return <PackagePublishStage stageId={stepId} onToast={onToast} />
   }
   return (
     <div className="stub">

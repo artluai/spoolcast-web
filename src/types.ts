@@ -27,6 +27,7 @@ export type StageContract = {
     step?: string
     blurb?: string
     description?: string
+    more_info?: string
     fold_into?: string
   }
 }
@@ -43,6 +44,9 @@ export type Step = {
   // Template-provided long description, shown at the top of the expanded
   // step panel (from ui.description). Absent = no description line.
   description?: string
+  // Plain-language help shown from the shared "More info" control. Contracts
+  // can tailor it to their format; canonical step copy is the fallback.
+  moreInfo?: string
   status: Status
   x: number
   y: number

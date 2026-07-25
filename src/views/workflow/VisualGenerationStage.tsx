@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useWorkflowStore } from '../../store/workflow'
-import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, templatesUrl, uploadTake } from '../../lib/api'
+import { API_BASE, activeSession, actionUrl, contentUrl, downloadUrl, fileUrl, postAction, templatesUrl, uploadTake } from '../../lib/api'
 import { appendDraftVariantRow, mergeKitWithDraft, patchDraftShotRefs, useWorldKitDraft } from '../../lib/kit-draft'
 import { VariantModule, type VariantBase } from './VariantModule'
 import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL_ID } from '../../lib/image-models'
@@ -146,6 +146,14 @@ type LibraryGroup = {
   id: string
   on_board: boolean
   takes: LibraryTake[]
+}
+
+type ReferenceAudioSample = {
+  id: string
+  path: string
+  source_clip?: string
+  start_s?: number
+  duration_s?: number
 }
 
 const imageModels = [
@@ -496,6 +504,10 @@ async function savePromptDoc(doc: GenerationPromptsDoc) {
 }
 
 export function VisualGenerationStage({ stageId }: { stageId: string }) {
+  const historyKey = `${activeSession()}:${stageId}`
+  const storedHistory = useWorkflowStore((s) => s.stepHistories[historyKey])
+  const setStepHistory = useWorkflowStore((s) => s.setStepHistory)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   const [doc, setDoc] = useState<GenerationPromptsDoc | null>(null)
   const [batchStatus, setBatchStatus] = useState<BatchScenesStatus | null>(null)
   const [sceneManifest, setSceneManifest] = useState<SceneManifest | null>(null)
@@ -511,7 +523,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saveNote, setSaveNote] = useState('')
   const [advancedMenu, setAdvancedMenu] = useState(false)
-  const [advancedSelectMenu, setAdvancedSelectMenu] = useState<'generate' | 'image' | 'video' | null>(null)
+  const [advancedSelectMenu, setAdvancedSelectMenu] = useState<'selection' | 'generate' | 'image' | 'video' | null>(null)
   const [generateMode, setGenerateMode] = useState<'image' | 'video'>('image')
   const [generateModeTouched, setGenerateModeTouched] = useState(false)
   const [regenNoteOpen, setRegenNoteOpen] = useState(false)
@@ -520,15 +532,34 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [timingSyncing, setTimingSyncing] = useState(false)
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL)
   const [videoModel, setVideoModel] = useState(DEFAULT_VIDEO_MODEL)
-  const [history, setHistory] = useState<GenerationPromptsDoc[]>([])
-  const [redoHistory, setRedoHistory] = useState<GenerationPromptsDoc[]>([])
+  const [history, setHistory] = useState<GenerationPromptsDoc[]>(
+    () => (storedHistory?.undo as GenerationPromptsDoc[] | undefined) ?? [],
+  )
+  const [redoHistory, setRedoHistory] = useState<GenerationPromptsDoc[]>(
+    () => (storedHistory?.redo as GenerationPromptsDoc[] | undefined) ?? [],
+  )
+  useEffect(() => {
+    setStepHistory(historyKey, {
+      undo: history,
+      redo: redoHistory,
+    })
+  }, [history, historyKey, redoHistory, setStepHistory])
   const [previewRef, setPreviewRef] = useState<{ src: string; name: string; rowId: string; refIndex: number; role: 'first_frame' | 'reference' } | null>(null)
   // Full-screen view of a row's generated media.
   const [mediaLightbox, setMediaLightbox] = useState<{ kind: 'image' | 'video'; src: string } | null>(null)
   // The World Kit — so every association shows for what it IS: image refs
   // attach as reference images (1st frame flagged), prompt-only objects join
   // the prompt as text, audio rides as sound (attached or via object link).
-  type KitLite = { name: string; kind: string; notes: string; image_path: string; linked_to?: string; variant_of?: string }
+  type KitLite = {
+    name: string
+    kind: string
+    notes: string
+    image_path: string
+    linked_to?: string
+    variant_of?: string
+    audio_samples?: ReferenceAudioSample[]
+    primary_audio?: string
+  }
   const [rawKitObjs, setKitObjs] = useState<KitLite[]>([])
   const wkDraft = useWorldKitDraft()
   const kitObjs = useMemo(() => mergeKitWithDraft(rawKitObjs, wkDraft), [rawKitObjs, wkDraft])
@@ -540,6 +571,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const [shotEvents, setShotEvents] = useState<Record<string, { refs: string[]; pid: string }>>({})
   const [refSyncing, setRefSyncing] = useState(false)
   const [kitPickFor, setKitPickFor] = useState<string | null>(null)
+  const [audioSampleFor, setAudioSampleFor] = useState<PromptRow | null>(null)
+  const [audioSampleRef, setAudioSampleRef] = useState('')
+  const [audioSampleStart, setAudioSampleStart] = useState(0)
+  const [audioSampleDuration, setAudioSampleDuration] = useState(5)
+  const [audioSamplePrimary, setAudioSamplePrimary] = useState(false)
+  const [audioSampleBusy, setAudioSampleBusy] = useState(false)
   // Which text-reference cards are expanded to full content (`rowId:name`).
   const [openTxtCards, setOpenTxtCards] = useState<Set<string>>(new Set())
   // EDIT THE OBJECT ITSELF from step 9 — one source of truth, so a variant
@@ -552,6 +589,79 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const loadKit = async () => {
     const out = await fetch(`${API}/source-images?session=${encodeURIComponent(activeSession())}&include_refs=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     if (out?.ok && Array.isArray(out.data?.kit)) setKitObjs(out.data.kit as KitLite[])
+  }
+  const openAudioSamplePicker = (row: PromptRow) => {
+    setAudioSampleFor(row)
+    setAudioSampleRef('')
+    setAudioSampleStart(0)
+    setAudioSampleDuration(Math.max(2, Math.min(5, rowDurationSeconds(row) || 5)))
+    setAudioSamplePrimary(false)
+  }
+  const closeAudioSamplePicker = () => {
+    if (audioSampleBusy) return
+    setAudioSampleFor(null)
+    setAudioSampleRef('')
+  }
+  const selectAudioSampleRef = (name: string) => {
+    const target = kitObjs.find((item) => item.name === name)
+    setAudioSampleRef(name)
+    setAudioSamplePrimary(!(target?.audio_samples?.length))
+  }
+  const saveReferenceAudioSample = async () => {
+    if (!audioSampleFor || !audioSampleRef) return
+    setAudioSampleBusy(true)
+    try {
+      const out = await postAction<{
+        reference?: string
+        sample?: ReferenceAudioSample
+        primary_audio?: string
+        audio_samples?: ReferenceAudioSample[]
+      }>({
+        action: 'attach_reference_audio',
+        shot_id: audioSampleFor.mid,
+        ref_id: audioSampleRef,
+        start_s: audioSampleStart,
+        duration_s: audioSampleDuration,
+        primary: audioSamplePrimary,
+      })
+      if (!out || out.ok === false || !out.data?.sample) {
+        throw new Error(out?.error || 'Could not save the clip audio sample.')
+      }
+      await loadKit()
+      setSaveNote(
+        `${audioSampleFor.mid}: ${out.data.sample.duration_s?.toFixed(1) || audioSampleDuration.toFixed(1)}s of audio attached to ${audioSampleRef}`
+        + `${out.data.primary_audio === out.data.sample.id ? ' as its primary sample.' : ' as an alternate sample.'}`,
+      )
+      setAudioSampleFor(null)
+      setAudioSampleRef('')
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : 'Could not save the clip audio sample.')
+    } finally {
+      setAudioSampleBusy(false)
+    }
+  }
+  const updateReferenceAudioSample = async (
+    refId: string,
+    sampleId: string,
+    action: 'set_primary_reference_audio' | 'remove_reference_audio',
+  ) => {
+    setAudioSampleBusy(true)
+    try {
+      const out = await postAction({
+        action,
+        ref_id: refId,
+        sample_id: sampleId,
+      })
+      if (!out || out.ok === false) throw new Error(out?.error || 'Could not update the audio sample.')
+      await loadKit()
+      setSaveNote(action === 'remove_reference_audio'
+        ? `${refId}: audio sample removed.`
+        : `${refId}: primary audio sample updated.`)
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : 'Could not update the audio sample.')
+    } finally {
+      setAudioSampleBusy(false)
+    }
   }
   // A generated new take lands as the object's ACTIVE image (new file path).
   // Poll the kit until the path flips, then every thumbnail is the new take.
@@ -614,11 +724,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   // Previous generated versions per clip — regeneration archives what it
   // replaces; nothing is ever silently overwritten.
   const [mediaHistory, setMediaHistory] = useState<Record<string, { path: string; stamp: string; kind: 'image' | 'video'; prompt?: string }[]>>({})
+  // Restores and manual/library attachments deliberately keep the stable active
+  // slot path (for example S02.mp4). Bump this key after a replacement so the
+  // browser fetches the new bytes instead of replaying its cached former take.
+  const [mediaRevision, setMediaRevision] = useState(0)
   // THE PROMPT EACH CLIP WAS ACTUALLY MADE FROM — frozen at submit time by
   // the engine, never edited by anyone. The textarea above is the WORKING
   // prompt for the NEXT generation; this is the record of the current one.
   const [usedPrompts, setUsedPrompts] = useState<Record<string, { prompt: string; model?: string; generated_at?: string }>>({})
-  const loadUsedPrompts = async (pairs: { id: string; mid: string }[]) => {
+  const loadUsedPrompts = async (pairs: { id: string; mid: string }[], merge = false) => {
     // Sidecars live next to the media → named by the PERMANENT shot id;
     // stored under the row id, which is what the render below looks up.
     const entries = await Promise.all(pairs.map(async ({ id, mid }) => {
@@ -629,7 +743,15 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       } catch { /* no sidecar for this clip (pre-provenance generation) */ }
       return null
     }))
-    setUsedPrompts(Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => !!e)))
+    const next = Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => !!e))
+    setUsedPrompts((current) => {
+      if (!merge) return next
+      const merged = { ...current }
+      // A restored image has no video sidecar; clear any former video
+      // provenance for just that row before applying what was found.
+      for (const { id } of pairs) delete merged[id]
+      return { ...merged, ...next }
+    })
   }
   const loadMediaHistory = async () => {
     const out = await fetch(`${API}/media-history?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
@@ -649,6 +771,25 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     setMediaHistory(history)
   }
   useEffect(() => { void loadMediaHistory() }, [])
+  // THE ASSET LIBRARY: every take on disk grouped by its permanent owner.
+  // Deleting a shot orphans its takes — they stay here, attachable to any
+  // shot. Attaching COPIES (the same asset may serve several shots).
+  const [library, setLibrary] = useState<LibraryGroup[] | null>(null)
+  const [attachPickFor, setAttachPickFor] = useState<string | null>(null)
+  const [attachBusy, setAttachBusy] = useState(false)
+  const loadLibrary = async () => {
+    const out = await fetch(`${API}/asset-library?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    if (out?.ok && Array.isArray(out.data?.library)) setLibrary(out.data.library as LibraryGroup[])
+  }
+  const refreshAfterTakeChange = async (promptPairs: { id: string; mid: string }[] = []) => {
+    setMediaRevision((revision) => revision + 1)
+    await load()
+    await Promise.all([
+      loadMediaHistory(),
+      loadLibrary(),
+      promptPairs.length ? loadUsedPrompts(promptPairs, true) : Promise.resolve(),
+    ])
+  }
   const restoreVersion = async (rowId: string, path: string) => {
     const r = await fetch(actionUrl(), {
       method: 'POST',
@@ -660,22 +801,9 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       setBuildError(out?.error || 'Could not restore the version.')
       return
     }
+    const restoredId = String(out?.data?.restored || rowId)
     setSaveNote(`${rowId}: previous version restored (the replaced one is archived too).`)
-    await loadMediaHistory()
-  }
-  // THE ASSET LIBRARY: every take on disk grouped by its permanent owner.
-  // Deleting a shot orphans its takes — they stay here, attachable to any
-  // shot. Attaching COPIES (the same asset may serve several shots).
-  const [library, setLibrary] = useState<LibraryGroup[] | null>(null)
-  const [attachPickFor, setAttachPickFor] = useState<string | null>(null)
-  const [attachBusy, setAttachBusy] = useState(false)
-  const loadLibrary = async () => {
-    const out = await fetch(`${API}/asset-library?session=${encodeURIComponent(activeSession())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-    if (out?.ok && Array.isArray(out.data?.library)) setLibrary(out.data.library as LibraryGroup[])
-  }
-  const refreshAfterTakeChange = async () => {
-    await load()
-    await Promise.all([loadMediaHistory(), loadLibrary()])
+    await refreshAfterTakeChange([{ id: rowId, mid: restoredId }])
   }
   const attachTake = async (row: PromptRow, take: LibraryTake) => {
     setAttachBusy(true)
@@ -692,7 +820,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       if (take.kind === 'video' && row.type !== 'video') changeRowType(row.id, 'video')
       else if (take.kind === 'image' && row.type === 'video') changeRowType(row.id, 'image')
       setSaveNote(`${row.mid}: take attached from the library — anything it replaced moved to previous versions.`)
-      await refreshAfterTakeChange()
+      await refreshAfterTakeChange([{ id: row.id, mid: row.mid }])
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : 'Could not attach the take.')
     } finally {
@@ -711,7 +839,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
       if (kind === 'video' && row.type !== 'video') changeRowType(row.id, 'video')
       else if (kind === 'image' && row.type === 'video') changeRowType(row.id, 'image')
       setSaveNote(`${row.mid}: your own ${kind || 'file'} is now this shot's take — anything it replaced moved to previous versions.`)
-      await refreshAfterTakeChange()
+      await refreshAfterTakeChange([{ id: row.id, mid: row.mid }])
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : 'Could not upload the file.')
     } finally {
@@ -961,9 +1089,13 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     if (activeProcess || !genQueue.length) return
     const vids = genQueue.filter((e) => e.type === 'video').map((e) => e.id)
     const imgs = genQueue.filter((e) => e.type === 'image').map((e) => e.id)
-    setGenQueue([])
-    if (vids.length) void generateVideos(vids)
-    else if (imgs.length) void generateImages(imgs)
+    if (vids.length) {
+      setGenQueue((queue) => queue.filter((entry) => entry.type !== 'video'))
+      void generateVideos(vids)
+    } else if (imgs.length) {
+      setGenQueue((queue) => queue.filter((entry) => entry.type !== 'image'))
+      void generateImages(imgs)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProcess, genQueue.length])
 
@@ -1015,13 +1147,16 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   useEffect(() => {
     setStepUndo({
+      stepId: stageId,
       count: history.length,
       run: () => undoRef.current(),
       redoCount: redoHistory.length,
       redo: () => redoRef.current(),
     })
-    return () => setStepUndo(null)
-  }, [history.length, redoHistory.length, setStepUndo])
+    return () => {
+      if (useWorkflowStore.getState().stepUndo?.stepId === stageId) setStepUndo(null)
+    }
+  }, [history.length, redoHistory.length, setStepUndo, stageId])
 
   const load = async () => {
     setLoading(true)
@@ -1207,6 +1342,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const selectedRows = rows.filter((row) => selected.has(row.id))
   const selectedImageRows = selectedRows.filter((row) => row.type !== 'video')
   const selectedVideoRows = selectedRows.filter((row) => row.type === 'video')
+  const remainingRows = rows.filter((row) => row.status !== 'image_ready' && row.status !== 'video_ready')
+  const allRowsSelected = rows.length > 0 && selected.size === rows.length
+  const remainingRowsSelected =
+    remainingRows.length > 0
+    && selected.size === remainingRows.length
+    && remainingRows.every((row) => selected.has(row.id))
   const failedRows = rows.filter((row) => row.status === 'failed')
   const videoMaxSeconds = selectedVideoModelLimit(videoModel)
   const videoTooLong = (row: PromptRow) => rowDurationSeconds(row) > videoMaxSeconds
@@ -1338,6 +1479,12 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
 
   const toggleAllSelection = () => {
     setSelected((prev) => (prev.size === rows.length ? new Set() : new Set(rows.map((row) => row.id))))
+    setAdvancedSelectMenu(null)
+  }
+
+  const selectRemainingRows = () => {
+    setSelected(new Set(remainingRows.map((row) => row.id)))
+    setAdvancedSelectMenu(null)
   }
 
   const regeneratePromptRows = async (outputType: 'image' | 'video' | 'current') => {
@@ -1579,6 +1726,78 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
     else void generateVideos()
   }
 
+  const runCompleteStepAI = () => {
+    if (!hasPrompts) {
+      void buildPrompts()
+      return
+    }
+    const pending = rows.filter((row) => row.status !== 'image_ready' && row.status !== 'video_ready')
+    const videos = pending.filter((row) => row.type === 'video').map((row) => row.id)
+    const images = pending.filter((row) => row.type !== 'video').map((row) => row.id)
+    if (!videos.length && !images.length) return
+    if (activeProcess) {
+      setGenQueue((queue) => {
+        const have = new Set(queue.map((entry) => entry.id))
+        return [
+          ...queue,
+          ...pending
+            .filter((row) => !have.has(row.id))
+            .map((row) => ({ id: row.id, type: row.type === 'video' ? 'video' as const : 'image' as const })),
+        ]
+      })
+      return
+    }
+    if (videos.length) {
+      if (images.length) {
+        setGenQueue(images.map((id) => ({ id, type: 'image' as const })))
+      }
+      void generateVideos(videos)
+    } else {
+      void generateImages(images)
+    }
+  }
+
+  const pendingGenerationRows = rows.filter(
+    (row) => row.status !== 'image_ready' && row.status !== 'video_ready',
+  )
+  const pendingVideoTooLong = pendingGenerationRows.some(
+    (row) => row.type === 'video' && videoTooLong(row),
+  )
+  useEffect(() => {
+    registerStepAIAction(stageId, {
+      stageId,
+      label: !hasPrompts
+        ? 'Build prompts with AI'
+        : pendingGenerationRows.length
+          ? 'Complete step with AI'
+          : 'All visuals generated',
+      busy: activeProcess,
+      disabled: loading || (hasPrompts && (pendingGenerationRows.length === 0 || pendingVideoTooLong)),
+      disabledReason: loading
+        ? 'Loading this step'
+        : pendingVideoTooLong
+          ? 'One planned video exceeds the selected model duration limit'
+          : hasPrompts && pendingGenerationRows.length === 0
+            ? 'All planned visuals are already generated'
+            : undefined,
+      usesTextModel: false,
+      acceptsInstructions: false,
+      run: runCompleteStepAI,
+    })
+    return () => registerStepAIAction(stageId, null)
+    // The registered action either builds the prompt document or drains all
+    // missing media through the same durable generation queue used below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeProcess,
+    hasPrompts,
+    loading,
+    pendingGenerationRows.length,
+    pendingVideoTooLong,
+    registerStepAIAction,
+    stageId,
+  ])
+
   const updateRowTypes = (ids: string[], type: OutputType) => {
     if (!doc || !ids.length) return { changed: 0, skipped: 0 }
     const idSet = new Set(ids)
@@ -1657,14 +1876,14 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
   const sceneImageSrc = (id: string) => {
     const manifestPath = manifestContentPath(mediaManifestItem(sceneManifest, id, 'image'))
     const path = manifestPath || `sessions/${activeSession()}/source/generated-assets/scenes/${id}.png`
-    const version = encodeURIComponent(batchStatus?.updated_at || '')
+    const version = encodeURIComponent(`${batchStatus?.updated_at || 'media'}-${mediaRevision}`)
     return `${API}/content?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ''}`
   }
 
   const sceneVideoSrc = (id: string) => {
     const manifestPath = manifestContentPath(mediaManifestItem(sceneManifest, id, 'video'))
     if (!manifestPath) return ''
-    const version = encodeURIComponent(batchStatus?.updated_at || '')
+    const version = encodeURIComponent(`${batchStatus?.updated_at || 'media'}-${mediaRevision}`)
     return `${API}/content?path=${encodeURIComponent(manifestPath)}${version ? `&v=${version}` : ''}`
   }
 
@@ -1769,7 +1988,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
           first_frame_removed: true,
           references: (item.references ?? []).map((ref, index) => {
             if (index !== refIndex) return ref
-            const { role, ...rest } = ref
+            const rest = { ...ref }
+            delete rest.role
             return rest
           }),
         }
@@ -1864,16 +2084,51 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               <button type="button" className={defaultType === 'video' ? 'on' : ''} onClick={() => setDefaultType('video')}>Videos</button>
               <button type="button" className={defaultType === 'auto' ? 'on' : ''} onClick={() => setDefaultType('auto')}>Let AI choose</button>
             </div>
-            <button type="button" className="save-continue" onClick={buildPrompts}>
-              Build generation prompts
-            </button>
-            <p className="vp-hint">This reads the approved shot-list JSON and composes the exact request text for each image/video slot. It does not generate paid media yet.</p>
+            <p className="vp-hint">Choose the default output type, then use “Build prompts with AI” above. It reads the approved shot list and prepares each image/video request without generating paid media yet.</p>
           </div>
         ) : null}
 
         {hasPrompts ? (
           <>
             <div className="vg-actions">
+              <span className="vg-select-wrap vg-bulk-select">
+                <button
+                  type="button"
+                  className="vp-menu-btn vg-select-btn"
+                  onClick={() => setAdvancedSelectMenu((menu) => (menu === 'selection' ? null : 'selection'))}
+                >
+                  Select · {selected.size} ▾
+                </button>
+                {advancedSelectMenu === 'selection' ? (
+                  <>
+                    <span className="vp-menu-backdrop" onClick={() => setAdvancedSelectMenu(null)} />
+                    <span className="vp-menu">
+                      <span className="vp-menu-h">SELECT CLIPS</span>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={allRowsSelected}
+                        className={allRowsSelected ? 'on' : ''}
+                        onClick={toggleAllSelection}
+                      >
+                        <span className="vg-select-choice"><i className={`vg-menu-check ${allRowsSelected ? 'on' : ''}`} /> Select all</span>
+                        <small>{rows.length} clips</small>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={remainingRowsSelected}
+                        className={remainingRowsSelected ? 'on' : ''}
+                        disabled={remainingRows.length === 0}
+                        onClick={selectRemainingRows}
+                      >
+                        <span className="vg-select-choice"><i className={`vg-menu-check ${remainingRowsSelected ? 'on' : ''}`} /> Select remaining</span>
+                        <small>{remainingRows.length} clips without a generated file</small>
+                      </button>
+                    </span>
+                  </>
+                ) : null}
+              </span>
               <button
                 type="button"
                 className="save-continue"
@@ -1887,6 +2142,23 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               <button type="button" className="vg-advanced-toggle" onClick={() => setAdvancedMenu((v) => !v)}>
                 Advanced {advancedMenu ? '▴' : '▾'}
               </button>
+              <span className="vg-toolbar-progress">
+                <span className="vg-toolbar-progress-meta">
+                  <span>{rows.length} prompts from shot list</span>
+                  <span>
+                    {progress.total ? `${progress.done}/${progress.total} generated` : 'Waiting for generation'}
+                    {' · '}
+                    {generateMode === 'image'
+                      ? `${modelLabel(imageModels, imageModel)} · ${imageModelDefaultNote}`
+                      : `${modelLabel(videoModels, videoModel)} · ${videoModelDefaultNote}`}
+                  </span>
+                </span>
+                {showProgressBar ? (
+                  <span className={`progress ${progress.total && progress.done >= progress.total ? 'done' : ''}`}>
+                    <i style={{ width: `${progress.pct}%` }} />
+                  </span>
+                ) : null}
+              </span>
               <div className="vp-viewtoggle vg-viewtoggle">
                 <button type="button" className={view === 'prompts' ? 'on' : ''} onClick={() => setView('prompts')}>Prompts</button>
                 <button type="button" className={view === 'gallery' ? 'on' : ''} onClick={() => setView('gallery')}>Gallery</button>
@@ -2037,22 +2309,6 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
               </div>
             ) : null}
 
-            <div className="vg-modelbar">
-              <span className="vg-prompt-count">{rows.length} generation prompts from shot-list JSON</span>
-              <span className="vg-progress-group">
-                {showProgressBar ? (
-                  <span className={`progress ${progress.total && progress.done >= progress.total ? 'done' : ''}`}>
-                    <i style={{ width: `${progress.pct}%` }} />
-                  </span>
-                ) : null}
-                <span className="vg-progress-count">{progress.total ? `${progress.done}/${progress.total} generated` : 'waiting for generation'}</span>
-              </span>
-              <span className="vg-model-summary">
-                {generateMode === 'image'
-                  ? `${modelLabel(imageModels, imageModel)} · ${imageModelDefaultNote}`
-                  : `${modelLabel(videoModels, videoModel)} · ${videoModelDefaultNote}`}
-              </span>
-            </div>
           </>
         ) : null}
 
@@ -2060,22 +2316,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
         {buildError ? <p className="run-error">{buildError}</p> : null}
         {hasPrompts && view === 'prompts' ? (
           <div className="vg-list">
-            <div className="vg-selectionbar">
-              <button type="button" className="vp-undo" onClick={toggleAllSelection}>
-                {selected.size === rows.length ? 'Deselect all' : 'Select all'}
-              </button>
-              <button
-                type="button"
-                className="vp-undo"
-                disabled={!rows.some((row) => row.status !== 'image_ready' && row.status !== 'video_ready')}
-                title="Select only the clips with no generated file yet"
-                onClick={() => setSelected(new Set(rows.filter((row) => row.status !== 'image_ready' && row.status !== 'video_ready').map((row) => row.id)))}
-              >
-                Select remaining
-              </button>
-              <span className="vg-note">{selected.size} selected</span>
-              {saveNote ? <span className="vg-save-note">{saveNote}</span> : null}
-            </div>
+            {saveNote ? <div className="vg-selectionbar"><span className="vg-save-note">{saveNote}</span></div> : null}
             {rows.map((row) => {
               const outdated = takeOutdated(row)
               // PROMPT AND VIDEO TRAVEL TOGETHER: "outdated" only means the
@@ -2480,6 +2721,17 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                     {/* THE row action, bottom right — above the collapsed
                         history sections, same spot as every other module. */}
                     <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                      {previewMedia?.kind === 'video' ? (
+                        <button
+                          type="button"
+                          className="vp-undo"
+                          disabled={audioSampleBusy}
+                          title="Extract 2–15 seconds from this generated clip and attach it to any World Kit reference as reusable generation audio."
+                          onClick={() => openAudioSamplePicker(row)}
+                        >
+                          ♪ Save audio to World Kit…
+                        </button>
+                      ) : null}
                       <label
                         className="vp-undo"
                         title="Use your own video or image as this shot's take. The current take moves to previous versions — nothing is ever deleted."
@@ -2818,6 +3070,104 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 </button>
               )
             })}
+          </div>
+        ) : null}
+
+        {audioSampleFor ? (
+          <div className="modal-scrim" onClick={closeAudioSamplePicker}>
+            <div className="confirm-modal vg-ref-modal vg-audio-sample-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="vg-ref-modal-head">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <b>Save {audioSampleFor.mid} audio to World Kit</b>
+                  <p className="vp-hint" style={{ marginTop: 4 }}>
+                    Choose any reference. Its primary sample will automatically anchor later generations that use it.
+                  </p>
+                </div>
+                <button type="button" className="vp-undo" disabled={audioSampleBusy} onClick={closeAudioSamplePicker}>Close</button>
+              </div>
+              <div className="vr-strip vg-audio-ref-grid">
+                {kitObjs.map((item) => (
+                  <button
+                    type="button"
+                    key={`audio-target-${item.name}`}
+                    className={audioSampleRef === item.name ? 'on' : ''}
+                    title={`${item.name} · ${item.kind}${item.audio_samples?.length ? ` · ${item.audio_samples.length} audio sample(s)` : ''}`}
+                    onClick={() => selectAudioSampleRef(item.name)}
+                  >
+                    {item.image_path ? (
+                      <img src={contentUrl(item.image_path, 'preview')} alt="" />
+                    ) : (
+                      <span>♪</span>
+                    )}
+                    <b>{item.name}</b>
+                    <small>{item.kind}{item.audio_samples?.length ? ` · ${item.audio_samples.length} sample${item.audio_samples.length === 1 ? '' : 's'}` : ''}</small>
+                  </button>
+                ))}
+              </div>
+              {audioSampleRef ? (() => {
+                const target = kitObjs.find((item) => item.name === audioSampleRef)
+                const samples = target?.audio_samples ?? []
+                return (
+                  <div className="vg-audio-sample-settings">
+                    <div className="vp-edit-grid">
+                      <label>
+                        Start in clip (seconds)
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={audioSampleStart}
+                          onChange={(event) => setAudioSampleStart(Math.max(0, Number(event.target.value) || 0))}
+                        />
+                      </label>
+                      <label>
+                        Sample length (2–15 seconds)
+                        <input
+                          type="number"
+                          min={2}
+                          max={15}
+                          step={0.1}
+                          value={audioSampleDuration}
+                          onChange={(event) => setAudioSampleDuration(Math.min(15, Math.max(2, Number(event.target.value) || 2)))}
+                        />
+                      </label>
+                    </div>
+                    <label className="vg-audio-primary">
+                      <input
+                        type="checkbox"
+                        checked={audioSamplePrimary}
+                        onChange={(event) => setAudioSamplePrimary(event.target.checked)}
+                      />
+                      Make this the primary sample
+                    </label>
+                    {samples.length ? (
+                      <div className="vg-audio-sample-list">
+                        <span className="vp-menu-h">ATTACHED AUDIO · {samples.length}</span>
+                        {samples.map((sample) => (
+                          <div key={`${audioSampleRef}-${sample.id}`}>
+                            <audio controls preload="metadata" src={contentUrl(sample.path, 'preview')} />
+                            <span>{sample.source_clip || sample.id} · {(sample.duration_s || 0).toFixed(1)}s</span>
+                            {target?.primary_audio === sample.id ? (
+                              <b>PRIMARY</b>
+                            ) : (
+                              <button type="button" className="vp-undo" disabled={audioSampleBusy} onClick={() => void updateReferenceAudioSample(audioSampleRef, sample.id, 'set_primary_reference_audio')}>Make primary</button>
+                            )}
+                            <button type="button" className="vp-undo danger" disabled={audioSampleBusy} onClick={() => void updateReferenceAudioSample(audioSampleRef, sample.id, 'remove_reference_audio')}>Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })() : null}
+              <div className="vg-ref-modal-actions">
+                <span className="vp-hint">MP3 · mono · up to three samples per generation, 15 seconds combined</span>
+                <button type="button" className="vp-undo" disabled={audioSampleBusy} onClick={closeAudioSamplePicker}>Cancel</button>
+                <button type="button" className="vp-undo vg-generate-main" disabled={!audioSampleRef || audioSampleBusy} onClick={() => void saveReferenceAudioSample()}>
+                  {audioSampleBusy ? <><span className="spin" /> Extracting…</> : 'Save audio sample'}
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 

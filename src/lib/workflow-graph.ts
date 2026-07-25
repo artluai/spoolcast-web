@@ -55,9 +55,10 @@ const presentStage = (stage: StageContract) => {
   return {
     id,
     name: CANONICAL_STEP_NAME[id] ?? alias?.name ?? stage.label,
-    blurb: stage.ui?.description ?? stage.ui?.blurb ?? alias?.blurb ?? stage.gate ?? '',
+    blurb: stage.ui?.description ?? alias?.description ?? stage.ui?.blurb ?? alias?.blurb ?? stage.gate ?? '',
     subtitle: stage.ui?.blurb,
-    description: stage.ui?.description,
+    description: stage.ui?.description ?? alias?.description,
+    moreInfo: stage.ui?.more_info ?? alias?.moreInfo,
   }
 }
 
@@ -186,6 +187,7 @@ export function buildStepsFromContract(
       blurb: alias.blurb,
       ...(alias.subtitle && !fog ? { subtitle: alias.subtitle } : {}),
       ...(alias.description && !fog ? { description: alias.description } : {}),
+      ...(alias.moreInfo && !fog ? { moreInfo: alias.moreInfo } : {}),
       status,
       progress,
       optional: false,

@@ -139,61 +139,89 @@ export const sceneFiles = [
 
 export const outline: [string, string, string][] = []
 
-export const stepAlias: Record<string, { id: string; name: string; blurb: string }> = {
+export const stepAlias: Record<string, {
+  id: string
+  name: string
+  blurb: string
+  description: string
+  moreInfo: string
+}> = {
   format_setup: {
     id: 'setup',
     name: 'Project setup',
     blurb: 'Project name, visual style, and budget.',
+    description: 'Choose the video format, visual style, length, and budget.',
+    moreInfo: 'Set the basic rules for this video before any creative work begins. These choices guide every later step, including what gets generated and how much it may cost.',
   },
   input_intake: {
     id: 'idea',
     name: 'Video idea',
     blurb: 'What the video is about, plus notes and references.',
+    description: 'Describe what you want to make and add any source material.',
+    moreInfo: 'Explain the video you want in your own words and attach anything the project should use, such as a product page, notes, images, or examples. Later steps use this as their starting point.',
   },
   story_lock: {
     id: 'goal',
     name: 'Core message',
     blurb: 'Lock the single-sentence angle before scripting.',
+    description: 'Choose the one idea or promise viewers should remember.',
+    moreInfo: 'Pick the main point the whole video needs to communicate. Keeping one clear message here helps the script, visuals, and ending all support the same goal.',
   },
   structure: {
     id: 'plan',
     name: 'Structure outline',
     blurb: 'High-level structural arc.',
+    description: 'Put the video’s main parts in the order viewers will see them.',
+    moreInfo: 'Plan the beginning, middle, and ending before writing every line. This gives the video a clear flow and makes sure the important moments have enough time.',
   },
   world_kit: {
     id: 'worldkit',
     name: 'World Kit',
     blurb: 'Plan the visual references — style anchor, cast, environments, props, and beat-specific refs.',
+    description: 'Choose the people, places, objects, and visual style to keep consistent.',
+    moreInfo: 'Add or review the references the AI should follow in later shots. This helps characters, locations, products, and the overall look stay consistent throughout the video.',
   },
   screenplay_plan: {
     id: 'script',
     name: 'Screenplay',
     blurb: 'First narration draft.',
+    description: 'Write what happens in each shot and the exact words that are spoken.',
+    moreInfo: 'Turn the outline into the actual content of the video. Review what viewers will see and hear so each shot has a clear purpose before generation begins.',
   },
   visual_pacing: {
     id: 'pacing',
     name: 'Visual pacing',
     blurb: 'Plan per-chunk visual moments, image count, and b-roll/meme/reaction candidates.',
+    description: 'Choose how long each shot lasts and where the visuals change.',
+    moreInfo: 'Set the rhythm of the video by deciding when each visual begins and ends. Good pacing keeps the pictures aligned with the spoken content without feeling rushed or slow.',
   },
   shot_list_json: {
     id: 'shots',
     name: 'Compile Shot List',
     blurb: 'Compile the pacing plan into the structured JSON render contract.',
+    description: 'Turn the approved plan into shot-by-shot generation instructions.',
+    moreInfo: 'Combine the script, timing, and references into one checked list of shots. This is the work order the generation step follows, so you can catch missing or conflicting instructions first.',
   },
   narration_audio: {
     id: 'voice',
     name: 'Narration audio',
     blurb: 'Synthesized narration from the script.',
+    description: 'Create and review the spoken narration for the video.',
+    moreInfo: 'Generate the voice track from the approved script and listen for wording, timing, and pronunciation problems. This recording becomes the timing guide in audio-first videos.',
   },
   visual_assets: {
     id: 'pics',
     name: 'Visual generation',
     blurb: 'AI-rendered visuals for each shot.',
+    description: 'Create one visual clip for each planned shot.',
+    moreInfo: 'Generate the images or video clips described by the shot list, then review the results. You can replace individual shots without starting the whole project over.',
   },
   asset_audit: {
     id: 'check',
     name: 'Final cut',
     blurb: 'Review the generated visuals and compile the final video.',
+    description: 'Arrange, trim, and combine your clips into the finished video.',
+    moreInfo: 'Use the timeline to control clip order, timing, layers, sound, and anything excluded from the final render. Compile a preview when you are ready to check the complete edit.',
   },
   // The engine's package_widescreen / mobile_variant / publish stages are folded
   // into this one UI step (see HIDDEN_STAGES in workflow-graph.ts).
@@ -201,5 +229,7 @@ export const stepAlias: Record<string, { id: string; name: string; blurb: string
     id: 'build',
     name: 'Package & publish',
     blurb: 'Captions, title & description, thumbnail, and upload.',
+    description: 'Prepare the final files, captions, thumbnail, and publishing details.',
+    moreInfo: 'Create the versions and supporting assets needed for each platform. Review the package, download what you need, or continue to publishing when everything is ready.',
   },
 }

@@ -67,6 +67,29 @@ export type StageProcess = {
   message?: string | null
   updatedAt?: string
 }
+export type StepAIRequest = {
+  instructions: string
+  model: string
+}
+export type StepAIAction = {
+  stageId: string
+  label: string
+  busy: boolean
+  disabled?: boolean
+  disabledReason?: string
+  usesTextModel?: boolean
+  acceptsInstructions?: boolean
+  run: (request: StepAIRequest) => void | Promise<void>
+}
+export type StepMenuAction = {
+  id: string
+  label: string
+  title?: string
+  disabled?: boolean
+  active?: boolean
+  danger?: boolean
+  run: () => void | Promise<void>
+}
 
 interface WorkflowStore extends Drafts {
   dirtySteps: Record<string, boolean>
@@ -104,12 +127,41 @@ interface WorkflowStore extends Drafts {
   // visuals, re-synced audio timing): a finished compile becomes stale.
   staleFinalRender: () => void
   setStageProcess: (stageId: string, process: StageProcess | null) => void
+  // The mounted editor for a step registers its real AI/generation action.
+  // WorkflowView renders one consistent header control over that action;
+  // editors never need to invent a second button or duplicate engine logic.
+  stepAIActions: Record<string, StepAIAction>
+  registerStepAIAction: (stageId: string, action: StepAIAction | null) => void
   // Drop cached drafts for a stage so the editor reloads fresh engine content.
   clearStageDrafts: (stageId: string) => void
+  // In-memory edit stacks survive step navigation, keyed by session + stage.
+  stepHistories: Record<string, { undo: unknown[]; redo: unknown[] }>
+  setStepHistory: (stepId: string, history: { undo: unknown[]; redo: unknown[] }) => void
   // A step editor can expose its undo/redo to the step header. null = no
   // history available on the active step.
-  stepUndo: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null
-  setStepUndo: (u: { count: number; run: () => void; redoCount?: number; redo?: () => void } | null) => void
+  stepUndo: {
+    stepId: string
+    count: number
+    run: () => void
+    redoCount?: number
+    redo?: () => void
+    busy?: boolean
+  } | null
+  setStepUndo: (u: {
+    stepId: string
+    count: number
+    run: () => void
+    redoCount?: number
+    redo?: () => void
+    busy?: boolean
+  } | null) => void
+  // Step-specific secondary controls live in the shared header overflow
+  // instead of creating a second toolbar inside an editor.
+  stepMenu: {
+    stepId: string
+    actions: StepMenuAction[]
+  } | null
+  setStepMenu: (menu: { stepId: string; actions: StepMenuAction[] } | null) => void
   // A step can register work that rides on "Save and continue" (e.g. step 7
   // compiles the shot list + builds generation prompts on the way out).
   advanceHook: (() => void) | null
@@ -194,8 +246,26 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       else delete next[stageId]
       return { stageProcesses: next }
     }),
+  stepAIActions: {},
+  registerStepAIAction: (stageId, action) =>
+    set((state) => {
+      const next = { ...state.stepAIActions }
+      if (action) next[stageId] = action
+      else delete next[stageId]
+      return { stepAIActions: next }
+    }),
+  stepHistories: {},
+  setStepHistory: (stepId, history) =>
+    set((state) => ({
+      stepHistories: {
+        ...state.stepHistories,
+        [stepId]: history,
+      },
+    })),
   stepUndo: null,
   setStepUndo: (u) => set(() => ({ stepUndo: u })),
+  stepMenu: null,
+  setStepMenu: (stepMenu) => set(() => ({ stepMenu })),
   advanceHook: null,
   setAdvanceHook: (fn) => set(() => ({ advanceHook: fn })),
   resetSession: () => {
@@ -207,10 +277,13 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       dirtySteps: {},
       stageDrafts: {},
       stageProcesses: {},
+      stepAIActions: {},
+      stepHistories: {},
       handoff: null,
       finalRender: 'idle' as const,
       finalRenderError: null,
       stepUndo: null,
+      stepMenu: null,
     }))
   },
   clearStageDrafts: (stageId) =>

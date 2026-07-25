@@ -30,6 +30,7 @@ export function FeedbackButton({
   ruleStep,
   alwaysOpen = false,
   historyRideAlong = true,
+  allowFeedback = true,
   aboveActions,
   runExtras,
   onRun,
@@ -56,6 +57,9 @@ export function FeedbackButton({
   // (incremental updates): each run sends ONLY the textarea; past notes are a
   // click-to-reuse reference, never silent passengers.
   historyRideAlong?: boolean
+  // Deterministic AI/engine actions (render, TTS, media generation) use the
+  // same house button but do not pretend a text note can affect the result.
+  allowFeedback?: boolean
   // Extra controls rendered on their own row between the textarea and the
   // action row (e.g. a host-owned checkbox).
   aboveActions?: ReactNode
@@ -132,6 +136,21 @@ export function FeedbackButton({
     }
     wasBusy.current = busy
   }, [alwaysOpen, busy])
+
+  if (!allowFeedback) {
+    return (
+      <button
+        type="button"
+        className="save-continue"
+        disabled={disabled || busy}
+        title={title}
+        onClick={() => onRun('')}
+        style={{ width: 'auto', padding: '8px 16px' }}
+      >
+        ✦ {busy ? busyLabel : label}
+      </button>
+    )
+  }
 
   if (!open) {
     return (

@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FeedbackButton } from './FeedbackButton'
 import { RulesPanel } from './RulesPanel'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 import { activeSession, actionUrl, apiUrl, downloadUrl, fileUrl, jobsUrl, statusUrl, templatesUrl } from '../../lib/api'
-import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { mergeKitWithDraft, useWorldKitDraft } from '../../lib/kit-draft'
 import { useWorkflowStore as useWfStore } from '../../store/workflow'
@@ -137,11 +135,12 @@ export function ShotListStage({ stageId }: { stageId: string }) {
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   const seededRef = useRef(false)
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
   const [building, setBuilding] = useState(false)
-  const [model, setModel] = useState(DEFAULT_MODEL_ID)
+  const [model] = useState(DEFAULT_MODEL_ID)
   const [buildJob, setBuildJob] = useState<DraftJob | null>(null)
   const [checking, setChecking] = useState(false)
   const [audit, setAudit] = useState<Audit>(null)
@@ -494,7 +493,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
     pollingJobRef.current = null
   }
 
-  const build = async (feedback = '') => {
+  const build = async (feedback = '', requestedModel = model) => {
     setBuilding(true)
     setBuildJob(null)
     setError(null)
@@ -505,8 +504,8 @@ export function ShotListStage({ stageId }: { stageId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: activeSession(), tenant: 'local', kind: 'draft_stage', stage_id: stageId,
-          allow_cost: true, model,
-          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
+          allow_cost: true, model: requestedModel,
+          ...(draftReasoning(requestedModel) ? { reasoning: draftReasoning(requestedModel) } : {}),
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
         }),
       })
@@ -533,6 +532,21 @@ export function ShotListStage({ stageId }: { stageId: string }) {
       setBuilding(false)
     }
   }
+
+  useEffect(() => {
+    registerStepAIAction(stageId, {
+      stageId,
+      label: chunks.length ? 'Update with AI' : 'Complete step with AI',
+      busy: isBusy,
+      disabled: !(stageCurrent || chunks.length > 0),
+      disabledReason: 'Complete and approve the pacing step first',
+      usesTextModel: true,
+      run: ({ instructions, model: requestedModel }) => build(instructions, requestedModel),
+    })
+    return () => registerStepAIAction(stageId, null)
+    // build is the durable worker-backed compile transaction for this step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chunks.length, isBusy, registerStepAIAction, stageCurrent, stageId])
 
   const exportXlsx = async ({ silent = false }: { silent?: boolean } = {}) => {
     setXlsxExporting(true)
@@ -662,20 +676,10 @@ export function ShotListStage({ stageId }: { stageId: string }) {
 
   return (
     <div className="vp panel-flat">
-      {/* Build / re-build (paid, validated in the same operation). The button
-          only appears when the engine says this stage is actually buildable —
-          a paid action must never look ready on a blocked step. */}
+      {/* The shared step header owns the paid AI compile action. Contextual,
+          free validation/export controls remain here beside their results. */}
       {stageCurrent || chunks.length > 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-          <FeedbackButton
-            label={chunks.length ? 'Re-compile shot list' : 'Compile shot list'}
-            busyLabel={(buildJob?.status || stageProcess?.status) === 'queued' ? 'Queued…' : 'Building…'}
-            busy={building || activeProcess}
-            title="Compiles the approved pacing plan — structure copied by code, AI writes the picture directions, the validator certifies it before you see it. Uses model credits."
-            rulesFocus="visual-pacing"
-            onRun={(fb) => build(fb)}
-          />
-          <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
           {chunks.length > 0 ? (
             <button type="button" className="vp-undo" disabled={isBusy} onClick={recheck} title="Free — saves your edits and reruns the validator">
               {checking ? 'Checking…' : edited ? 'Save & re-check' : 'Re-check'}
@@ -993,7 +997,7 @@ export function ShotListStage({ stageId }: { stageId: string }) {
                 }}
                 rows={18}
                 spellCheck={false}
-                className="sl-json-editor"
+                className="sl-json-editor raw-source-textarea"
               />
               <div className="vp-edit-actions" style={{ marginTop: 10 }}>
                 <span className="vp-edit-note">Manual edits require “Save & re-check” before approval.</span>

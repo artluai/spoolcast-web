@@ -68,6 +68,7 @@ type TriageFinding = { label: string; detail: string; locateDetail?: string }
 export function ScreenplayStage({ stageId }: { stageId: string }) {
   const setStageFileDraft = useWorkflowStore((s) => s.setStageFileDraft)
   const seedStageFileDraft = useWorkflowStore((s) => s.seedStageFileDraft)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   // THE REVISION CHAIN LIVES IN THE STORE — the component only reads it.
   // One home, no copy, nothing to lose when you switch steps and come back.
   const CHAIN_KEY = `${stageId}:revchain`
@@ -329,7 +330,10 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
 
   // PIPELINE STEP 1 — write the next revision (no grading here; the caller
   // runs whichever checkers are configured afterwards).
-  const draftRevision = async (feedback = ''): Promise<{ text: string; idx: number } | null> => {
+  const draftRevision = async (
+    feedback = '',
+    requestedModel = model,
+  ): Promise<{ text: string; idx: number } | null> => {
     const initial = revs.length === 0
     if (!initial && !(await saveCurrent())) {
       setErr('Could not save the script to the engine.')
@@ -344,8 +348,8 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       stage_id: stageId,
       variant: 'screenplay',
       allow_cost: true,
-      model,
-      ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
+      model: requestedModel,
+      ...(draftReasoning(requestedModel) ? { reasoning: draftReasoning(requestedModel) } : {}),
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
       clips: true,
     })
@@ -388,7 +392,11 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
 
   // THE ONE REVIEW ACTION: (optionally) revise, then run the configured
   // checkers on the result — revealing all findings together.
-  const runReview = async (feedback = '', forceRevise = false): Promise<void> => {
+  const runReview = async (
+    feedback = '',
+    forceRevise = false,
+    requestedModel = model,
+  ): Promise<void> => {
     setCheckMenu(false)
     const revise = forceRevise || revs.length === 0
     const wantCode = checkCode || (!checkCode && !checkAI) // never run nothing
@@ -399,7 +407,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       let idx = sel
       if (revise) {
         setBusy('ai')
-        const res = await draftRevision(feedback)
+        const res = await draftRevision(feedback, requestedModel)
         if (!res) return
         text = res.text
         idx = res.idx
@@ -431,7 +439,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
         const r = await post({
           action: 'ai_review',
           allow_cost: true,
-          model,
+          model: requestedModel,
           previous: { notes: prevNotes.filter((d) => !ignored.has(`ai:${d}`)), dismissed: prevDismissed },
         })
         const out = await r.json().catch(() => null)
@@ -462,6 +470,19 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
       setAiPhase(null)
     }
   }
+
+  useEffect(() => {
+    registerStepAIAction(stageId, {
+      stageId,
+      label: revs.length ? 'Update with AI' : 'Complete step with AI',
+      busy: Boolean(busy),
+      usesTextModel: true,
+      run: ({ instructions, model: requestedModel }) => runReview(instructions, true, requestedModel),
+    })
+    return () => registerStepAIAction(stageId, null)
+    // runReview owns the complete screenplay draft + review transaction.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(busy), registerStepAIAction, revs.length, stageId])
 
   // ASK AI ABOUT THE CODE FINDINGS: the adjudicator. Confirmed findings move
   // into the AI section with a concrete explanation; false positives are
@@ -683,16 +704,6 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
 
       {revs.length === 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0' }}>
-          <FeedbackButton
-            ruleStep={stageId}
-            label="Write it"
-            busy={busy === 'ai'}
-            disabled={!!busy}
-            title="AI writes the first draft from your structure and World Kit"
-            rulesFocus="story"
-            onRun={(fb) => runReview(fb, true)}
-          />
-          <ModelPicker model={model} onChange={setModel} disabled={!!busy} />
           <button
             style={ghost}
             onClick={() => {
@@ -1124,7 +1135,7 @@ export function ScreenplayStage({ stageId }: { stageId: string }) {
                     }}
                     onBlur={() => setEditing(false)}
                     style={{
-                      width: '100%', minHeight: 240, marginTop: 10, resize: 'vertical', background: 'transparent',
+                      width: '100%', marginTop: 10, resize: 'vertical', background: 'transparent',
                       color: 'var(--ink-1, inherit)', border: '1px solid var(--line, #2a3142)', borderRadius: 8,
                       padding: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: 1.55,
                     }}

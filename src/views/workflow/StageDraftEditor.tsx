@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
-import { FeedbackButton } from './FeedbackButton'
 import { useSourceWords, ThinSourceNote } from '../../lib/useSourceWords'
 import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 import { RulesPanel } from './RulesPanel'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
-import { ModelPicker } from './ModelPicker'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 
 // The model catalog + dropdown live in ModelPicker.tsx — ONE list and ONE
@@ -35,12 +33,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const seedStageDraft = useWorkflowStore((s) => s.seedStageDraft)
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
   const [open, setOpen] = useState(false)
   const sourceWords = useSourceWords()
-  const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
-  const [draftJob, setDraftJob] = useState<DraftJob | null>(null)
+  const [, setDraftJob] = useState<DraftJob | null>(null)
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
   const [needRewind, setNeedRewind] = useState(false)
@@ -217,7 +215,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     pollingJobRef.current = null
   }
 
-  const runDraft = async (feedback = '') => {
+  const runDraft = async (feedback = '', requestedModel = DEFAULT_MODEL_ID) => {
     setDrafting(true)
     setDraftError(null)
     setDraftJob(null)
@@ -231,10 +229,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           tenant: 'local',
           ...(useJob ? { kind: 'draft_stage' } : { action: 'draft_stage' }),
           stage_id: stageId,
-          model,
+          model: requestedModel,
           allow_cost: true,
           ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
-          ...(draftReasoning(model) ? { reasoning: draftReasoning(model) } : {}),
+          ...(draftReasoning(requestedModel) ? { reasoning: draftReasoning(requestedModel) } : {}),
         }),
       })
       const out = await res.json().catch(() => null)
@@ -292,6 +290,23 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       setDraftError('Could not reach the engine.')
     }
   }
+
+  useEffect(() => {
+    if (!cfg.aiDraft) {
+      registerStepAIAction(stageId, null)
+      return
+    }
+    registerStepAIAction(stageId, {
+      stageId,
+      label: draft.trim() ? 'Update with AI' : 'Complete step with AI',
+      busy: isBusy,
+      disabled: !(stageCurrent || Boolean(draft.trim())),
+      disabledReason: 'Complete the earlier step first',
+      usesTextModel: true,
+      run: ({ instructions, model }) => runDraft(instructions, model),
+    })
+    return () => registerStepAIAction(stageId, null)
+  }, [cfg.aiDraft, draft, isBusy, registerStepAIAction, stageCurrent, stageId])
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -351,38 +366,16 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           </div>
         </div>
       )}
-      {/* The pacing stage hosts its own AI-update control (a collapsed section
-          below Overlays inside the editor) once a draft exists — the top row
-          only serves its FIRST draft. */}
-      {!needRewind && cfg.aiDraft && (stageCurrent || draft.trim()) && (cfg.structured !== 'pacing' || !draft.trim()) ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <FeedbackButton
-            label={draft.trim() ? 'Re-draft with AI' : 'Draft with AI'}
-            busy={isBusy}
-            busyLabel={(draftJob?.status || stageProcess?.status) === 'queued' ? 'Queued…' : 'Working…'}
-            title="Runs the AI"
-            rulesFocus={stageId === 'structure' ? 'story' : stageId === 'world_kit' ? 'visuals' : stageId === 'visual_pacing' ? 'visual-pacing' : 'series-rules'}
-            historyKey={`draft-notes-${stageId.replace(/_/g, '-')}`}
-            ruleStep={stageId}
-            onRun={(fb) => runDraft(fb)}
-          />
-          <ModelPicker model={model} onChange={setModel} disabled={isBusy} />
-          {(draftJob || stageProcess) && isBusy && (
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              job {draftJob?.status || stageProcess?.status}
-            </span>
-          )}
-          {['input_intake', 'story_lock', 'format_setup'].includes(stageId) && (
-            <ThinSourceNote words={sourceWords} />
-          )}
-          {draftError && (
-            <span style={{ color: 'var(--red)', fontSize: 13, flexBasis: '100%' }}>Engine: {draftError}</span>
-          )}
-        </div>
-      ) : !needRewind && cfg.structured !== 'pacing' && !cfg.aiDraft ? (
+      {!needRewind && cfg.structured !== 'pacing' && !cfg.aiDraft ? (
         <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: '0 0 10px' }}>
           AI drafting for this step isn’t wired up yet — write it below for now.
         </p>
+      ) : null}
+      {!needRewind && draftError ? (
+        <p style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>Engine: {draftError}</p>
+      ) : null}
+      {!needRewind && ['input_intake', 'story_lock', 'format_setup'].includes(stageId) ? (
+        <ThinSourceNote words={sourceWords} />
       ) : null}
       {needRewind ? null : (
         <div style={{ position: 'relative' }}>
@@ -401,7 +394,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             ) : cfg.structured === 'worldkit' ? (
               // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
               // warnings, undo, and reset-to-default — always visible when content exists.
-              <WorldKitEditor stageId={stageId} path={cfg.path} />
+              <WorldKitEditor stageId={stageId} />
             ) : (
               <>
       <button
@@ -445,6 +438,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           ) : (
             // EDIT MODE: raw markdown. Clicking away returns to the rendered view.
             <textarea
+              className="raw-source-textarea"
               autoFocus={editing}
               value={draft}
               placeholder={cfg.placeholder}

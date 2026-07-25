@@ -64,8 +64,17 @@ const shotNoun = (n: number, medium?: string) => {
 export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiUpdate?: boolean }) {
   const draft = useWorkflowStore((s) => s.stageDrafts[stageId] ?? '')
   const setStageDraft = useWorkflowStore((s) => s.setStageDraft)
-  const [history, setHistory] = useState<string[]>([])
-  const [redoHistory, setRedoHistory] = useState<string[]>([])
+  const historyKey = `${activeSession()}:${stageId}`
+  const storedHistory = useWorkflowStore((s) => s.stepHistories[historyKey])
+  const setStepHistory = useWorkflowStore((s) => s.setStepHistory)
+  const [history, setHistory] = useState<string[]>(() => (storedHistory?.undo as string[] | undefined) ?? [])
+  const [redoHistory, setRedoHistory] = useState<string[]>(() => (storedHistory?.redo as string[] | undefined) ?? [])
+  useEffect(() => {
+    setStepHistory(historyKey, {
+      undo: history,
+      redo: redoHistory,
+    })
+  }, [history, historyKey, redoHistory, setStepHistory])
   const [raw, setRaw] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; chunkId: string; beatCode?: string; imageId?: string } | null>(null)
   const [editing, setEditing] = useState<EditDraft | null>(null)
@@ -84,6 +93,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const [hasPrevForUndo, setHasPrevForUndo] = useState(false)
   useEffect(() => {
     setStepUndo({
+      stepId: stageId,
       count: history.length + (hasPrevForUndo ? 1 : 0),
       run: () => {
         if (history.length) undoRef.current()
@@ -92,8 +102,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       redoCount: redoHistory.length,
       redo: () => redoRef.current(),
     })
-    return () => setStepUndo(null)
-  }, [history.length, redoHistory.length, hasPrevForUndo, setStepUndo])
+    return () => {
+      if (useWorkflowStore.getState().stepUndo?.stepId === stageId) setStepUndo(null)
+    }
+  }, [history.length, redoHistory.length, hasPrevForUndo, setStepUndo, stageId])
   // TIMELINE EDGE DRAG: live hold overrides while dragging the boundary
   // between two images of the same beat (zero-sum — the words own the total).
   const [dragHolds, setDragHolds] = useState<Record<string, number> | null>(null)
@@ -1490,6 +1502,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           <p className="vp-hint">Raw markdown — the exact text the engine reads.</p>
         )}
         <textarea
+          className="raw-source-textarea"
           value={draft}
           onChange={(e) => setStageDraft(stageId, e.target.value)}
           style={{
