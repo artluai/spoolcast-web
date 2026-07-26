@@ -26,6 +26,11 @@ export function VariantModule({
   initialPos,
   anchorRect,
   inline = false,
+  actionsSlot,
+  suggestedName = '',
+  hideImportPrompt = false,
+  hideModelPicker = false,
+  modelOverride = '',
   onClose,
   onCreated,
 }: {
@@ -39,6 +44,17 @@ export function VariantModule({
   // Inline mode: render only the fields (no floating window) — for embedding
   // in a host panel that already shows the base item (World Kit CREATE box).
   inline?: boolean
+  // Host-supplied controls rendered in the actions row (the step-5 panel puts
+  // its ⚙ Options menu and the "save as a new variant" checkbox there, so the
+  // variant form and the update form read as ONE layout).
+  actionsSlot?: React.ReactNode
+  // Suggested variant name, prefilled and editable (e.g. "lena-mine-v2").
+  suggestedName?: string
+  // Step-5 folds these into its own controls; step 7 keeps them inline.
+  hideImportPrompt?: boolean
+  hideModelPicker?: boolean
+  /** Image model chosen by the host, when it owns the picker. */
+  modelOverride?: string
   onClose: () => void
   onCreated: (name: string, instruction: string) => void
 }) {
@@ -170,7 +186,14 @@ export function VariantModule({
 
   const createVariant = async () => {
     if (!vInstr.trim()) return
-    const name = (vName.trim() || `${base.name}--${vInstr.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`).replace(/-+$/, '')
+    // Typed name > host's suggestion (e.g. "lena-mine-v2") > derived from the
+    // instruction. The suggestion is what the placeholder shows, so leaving
+    // the box alone gives you exactly the name you were promised.
+    const name = (
+      vName.trim() ||
+      suggestedName.trim() ||
+      `${base.name}--${vInstr.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`
+    ).replace(/-+$/, '')
     setVErr('')
     setVBusy('Registering…')
     const reg = await fetch(actionUrl(), {
@@ -201,8 +224,9 @@ export function VariantModule({
         action: 'generate_worldkit_ref',
         ref: name,
         prompt,
-        // Exactly what the picker shows: explicit choice > base's model > default.
-        model: vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID,
+        // Exactly what the picker shows: explicit choice > the host's picker
+        // (step 5 owns it) > base's model > default.
+        model: vModel || modelOverride || base.active_model || DEFAULT_IMAGE_MODEL_ID,
         ref_images: [...(baseIsImage ? [base.image_path] : []), ...vExtras],
         allow_cost: true,
       }),
@@ -236,25 +260,31 @@ export function VariantModule({
         <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
       </label>
       <div className="vp-var-row">
-        <button
-          type="button"
-          className="vp-undo"
-          disabled={!(base.active_prompt || base.notes)}
-          title="Append the prompt that made the base"
-          onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + (base.active_prompt || base.notes || ''))}
-        >
-          Import original prompt
-        </button>
+        {/* The base prompt is already visible right above this panel, so
+            "Import original prompt" was a button for copy-paste. */}
+        {!hideImportPrompt && (
+          <button
+            type="button"
+            className="vp-undo"
+            disabled={!(base.active_prompt || base.notes)}
+            title="Append the prompt that made the base"
+            onClick={() => setVInstr((cur) => (cur ? cur + '\n\n' : '') + (base.active_prompt || base.notes || ''))}
+          >
+            Import original prompt
+          </button>
+        )}
         <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
           {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
         </button>
-        <ModelPicker
-          model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
-          onChange={setVModel}
-          disabled={!!vBusy}
-          models={IMAGE_MODELS}
-          primary={IMAGE_MODELS}
-        />
+        {!hideModelPicker && (
+          <ModelPicker
+            model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
+            onChange={setVModel}
+            disabled={!!vBusy}
+            models={IMAGE_MODELS}
+            primary={IMAGE_MODELS}
+          />
+        )}
       </div>
       {vExtrasOpen ? (
         <div className="vp-var-extras">
@@ -295,11 +325,18 @@ export function VariantModule({
           </label>
         </div>
       ) : null}
-      <label className="vp-edit-field">Variant name
-        <input value={vName} onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))} placeholder={`${base.name}--…`} />
+      {/* Short field: a ref id is a slug, not prose — a full-width box implied
+          it wanted a sentence. Prefilled with a suggestion; click to edit. */}
+      <label className="vp-edit-field vp-var-name">Variant name
+        <input
+          value={vName}
+          onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
+          placeholder={suggestedName || `${base.name}--…`}
+        />
       </label>
       {vErr ? <p className="vp-var-err">{vErr}</p> : null}
       <div className="vp-edit-actions">
+        {actionsSlot}
         <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
           ✦ Generate variant
         </button>

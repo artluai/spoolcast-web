@@ -766,6 +766,139 @@ export function RefImagePanel({
     fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)',
   }
 
+  // EVERY secondary generation control lives behind one menu, so the panel
+  // shows a prompt, a checkbox and a button — the rest is one click away.
+  // Shared by both modes (update and variant) so the two read identically.
+  const optionsMenu = (
+    <span className="vg-select-wrap" style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="vp-menu-btn vg-select-btn"
+        onClick={() => setOptionsOpen((v) => !v)}
+      >
+        ⚙ Options{optionCount ? ` · ${optionCount}` : ''} ▾
+      </button>
+      {optionsOpen ? (
+        <>
+          <span className="vp-menu-backdrop" onClick={() => setOptionsOpen(false)} />
+          <span className="vp-menu vp-menu-up" style={{ position: 'absolute', bottom: 'calc(100% + 5px)', left: 0, minWidth: 320 }}>
+            <span className="vp-menu-h">IMAGE MODEL</span>
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 9px 8px', flexWrap: 'wrap' }}>
+              <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
+              <select
+                value={ratio}
+                onChange={(e) => setRatio(e.target.value)}
+                title="Canvas ratio for this generation"
+                className="sc-select"
+              >
+                <option value="auto">ratio: {sessionRatio}</option>
+                {['1:1', '16:9', '9:16', '4:3', '3:4'].filter((r) => r !== sessionRatio).map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </span>
+            <span className="vp-menu-h">OPTIONS</span>
+            {!isMaster && (
+              <>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={sheetMode}
+                  className={sheetMode ? 'on' : ''}
+                  onClick={() => {
+                    if (!sheetMode) {
+                      setSheetMode(true)
+                      setImproveOpen(true)
+                      setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
+                    } else {
+                      setSheetMode(false)
+                    }
+                  }}
+                >
+                  <span className="vg-select-choice">
+                    <i className={`vg-menu-check ${sheetMode ? 'on' : ''}`} />
+                    Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
+                  </span>
+                  <small>multi-angle views of the same subject on a blank background</small>
+                </button>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={lessMode}
+                  className={lessMode ? 'on' : ''}
+                  onClick={() => {
+                    if (lessMode) setLessMode(false)
+                    else void openLessMode()
+                    setOptionsOpen(false)
+                  }}
+                >
+                  <span className="vg-select-choice">
+                    <i className={`vg-menu-check ${lessMode ? 'on' : ''}`} />
+                    Reduce AI aesthetic
+                  </span>
+                  <small>rewrites the prompt to read like a casual phone snapshot</small>
+                </button>
+              </>
+            )}
+            {active && active.kind !== 'generated' ? (
+              <button
+                type="button"
+                disabled={describing}
+                onClick={() => {
+                  setOptionsOpen(false)
+                  void describe()
+                }}
+              >
+                <span className="vg-select-choice">
+                  {describing ? (<><span className="spin" /> Reading the image…</>) : '✦ Write the prompt from this image'}
+                </span>
+                <small>AI looks at the picture and fills the prompt box above</small>
+              </button>
+            ) : null}
+          </span>
+        </>
+      ) : null}
+    </span>
+  )
+
+  // Suggested variant name: <ref>-v2, then -v3… skipping any that already
+  // exist. Prefilled as the placeholder so leaving the box alone gives the
+  // name you were shown; click to write your own.
+  const suggestedVariantName = (() => {
+    const base = refId.replace(/-v\d+$/, '')
+    const taken = new Set(Object.keys(kitIndex).map((k) => k.toLowerCase()))
+    let n = 2
+    while (taken.has(`${base}-v${n}`.toLowerCase()) && n < 99) n += 1
+    return `${base}-v${n}`
+  })()
+
+  // Locked on for a global library item — its image belongs to every project,
+  // so the only legal outcome is a copy of your own. Saying so HERE beats a
+  // 403 after the user has already written a prompt.
+  const variantToggle = (
+    <label
+      className="vp-undo"
+      style={{
+        display: 'inline-flex', gap: 8, alignItems: 'center',
+        cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.75 : 1,
+      }}
+      title={readOnly
+        ? 'Library characters are shared and read-only — your changes are saved as your own variant'
+        : 'Save the result as a NEW kit item instead of replacing this one'}
+    >
+      <input
+        type="checkbox"
+        // DERIVED, not just set on open: a read-only item is always a variant,
+        // whatever createMode holds (an inner close can reset it).
+        checked={readOnly || createMode === 'variant'}
+        disabled={readOnly}
+        style={{ margin: 0, accentColor: 'var(--accent)' }}
+        onChange={(e) => setCreateMode(e.target.checked ? 'variant' : 'version')}
+      />
+      Save as a new variant
+    </label>
+  )
+
   return (
     <div style={{ borderTop: fields ? undefined : '1px dashed var(--line, #2a3142)', marginTop: fields ? 0 : 10, paddingTop: fields ? 0 : 12 }}>
       {/* IMAGE LEFT · FIELDS RIGHT — audio has no image, so no image column */}
@@ -797,16 +930,10 @@ export function RefImagePanel({
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 {KIND_BADGE[active.kind]}{dims ? ` · ${dims}` : ''}
               </div>
-              {active.kind !== 'generated' && (
-                <button
-                  type="button"
-                  style={{ ...small, marginTop: 6, padding: '5px 10px', fontSize: 11.5 }}
-                  disabled={describing}
-                  onClick={describe}
-                >
-                  {describing ? (<><span className="spin" /> Describing…</>) : '✦ Describe with AI → notes'}
-                </button>
-              )}
+              {/* "Describe with AI" now lives in ⚙ Options as "Write the
+                  prompt from this image" — it fills the prompt box, so it
+                  belongs with the other generation controls, not floating
+                  under the thumbnail. */}
             </>
           ) : (
             <div
@@ -1012,32 +1139,6 @@ export function RefImagePanel({
             </div>
       {createOpen && !isAudio && (
         <div style={{ position: 'relative', marginTop: 8 }}>
-          {/* THE ONE CHOICE that used to be two buttons. Locked on for a
-              global library item — its image belongs to every project, so the
-              only legal outcome is a copy of your own. Saying so here beats a
-              403 after the user has written a prompt. */}
-          <label
-            className="vp-undo"
-            style={{
-              display: 'inline-flex', gap: 8, alignItems: 'center', marginBottom: 8,
-              cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.75 : 1,
-            }}
-            title={readOnly
-              ? 'Library characters are shared and read-only — your changes are saved as your own variant'
-              : 'Save the result as a NEW kit item instead of replacing this one'}
-          >
-            <input
-              type="checkbox"
-              // DERIVED, not just set on open: a read-only item is always a
-              // variant, whatever createMode happens to hold (it can be reset
-              // by an inner close, or be stale from a previous item).
-              checked={readOnly || createMode === 'variant'}
-              disabled={readOnly}
-              style={{ margin: 0, accentColor: 'var(--accent)' }}
-              onChange={(e) => setCreateMode(e.target.checked ? 'variant' : 'version')}
-            />
-            Save as a new variant
-          </label>
           <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '0 0 8px' }}>
             {readOnly
               ? `${refId} is a library character — shared by every project and read-only. Your change is saved as your own variant, linked to the original.`
@@ -1057,6 +1158,13 @@ export function RefImagePanel({
                 active_model: activeVersion?.model || '',
               }}
               kit={[]}
+              // The panel owns these now, so the variant form and the update
+              // form show the SAME controls in the same place.
+              actionsSlot={<>{optionsMenu}{variantToggle}</>}
+              hideImportPrompt
+              hideModelPicker
+              modelOverride={imgModel}
+              suggestedName={suggestedVariantName}
               // A read-only library item has no legal "version" mode to fall
               // back to — leave the checkbox where it is.
               onClose={() => !readOnly && setCreateMode('version')}
@@ -1068,92 +1176,6 @@ export function RefImagePanel({
             />
           ) : (
             <>
-          {/* MAKE THE IMAGE — everything in this row feeds the image model, so
-              it is labelled and kept apart from the text-model controls that
-              rewrite the prompt. Two pickers with no labels was the confusion. */}
-          <p className="vp-menu-h" style={{ border: 0, padding: 0, margin: '0 0 6px' }}>MAKE THE IMAGE</p>
-          {/* Count on the Options button so an active toggle is visible while
-              the menu is shut — a hidden checkbox that changes the output
-              must never be silent. */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
-            <select
-              value={ratio}
-              onChange={(e) => setRatio(e.target.value)}
-              title="Canvas ratio for this generation"
-              className="sc-select"
-            >
-              <option value="auto">ratio: {sessionRatio}</option>
-              {['1:1', '16:9', '9:16', '4:3', '3:4'].filter((r) => r !== sessionRatio).map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-            {!isMaster && (
-              /* The two generation toggles live in one menu instead of two
-                 loose buttons competing with the model pickers. */
-              <span className="vg-select-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  className="vp-menu-btn vg-select-btn"
-                  onClick={() => setOptionsOpen((v) => !v)}
-                >
-                  ⚙ Options{optionCount ? ` · ${optionCount}` : ''} ▾
-                </button>
-                {optionsOpen ? (
-                  <>
-                    <span className="vp-menu-backdrop" onClick={() => setOptionsOpen(false)} />
-                    <span className="vp-menu" style={{ position: 'absolute', top: 'calc(100% + 5px)', left: 0, minWidth: 300 }}>
-                      <span className="vp-menu-h">GENERATION OPTIONS</span>
-                      <button
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={sheetMode}
-                        className={sheetMode ? 'on' : ''}
-                        onClick={() => {
-                          if (!sheetMode) {
-                            setSheetMode(true)
-                            setImproveOpen(true)
-                            // Sheets are wide (multiple angles side by side) —
-                            // default the canvas to 16:9; still changeable above.
-                            setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
-                          } else {
-                            setSheetMode(false)
-                          }
-                        }}
-                      >
-                        <span className="vg-select-choice">
-                          <i className={`vg-menu-check ${sheetMode ? 'on' : ''}`} />
-                          Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
-                        </span>
-                        <small>
-                          {sheetMode
-                            ? 'Improve writes 2 prompts: character + sheet (what Generate uses)'
-                            : 'multi-angle views of the same subject on a blank background'}
-                        </small>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={lessMode}
-                        className={lessMode ? 'on' : ''}
-                        onClick={() => {
-                          if (lessMode) setLessMode(false)
-                          else void openLessMode()
-                          setOptionsOpen(false)
-                        }}
-                      >
-                        <span className="vg-select-choice">
-                          <i className={`vg-menu-check ${lessMode ? 'on' : ''}`} />
-                          Reduce AI aesthetic
-                        </span>
-                        <small>rewrites the prompt to read like a casual phone snapshot</small>
-                      </button>
-                    </span>
-                  </>
-                ) : null}
-              </span>
-            )}
-          </div>
           {genError !== '' && (
             <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>
               ⚠ {genError}
@@ -1329,7 +1351,12 @@ export function RefImagePanel({
           {/* ONE primary action, bottom-right, like every other module. While
               the improve panel is open, improving IS the action; it closes on
               success and Generate returns. */}
-          <div className="vp-edit-actions" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+          {/* Same row, same controls, same order as the variant form — the two
+              modes differ only in the fields above. */}
+          <div className="vp-edit-actions" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+            {optionsMenu}
+            {variantToggle}
+            <span style={{ flex: 1 }} />
             {improveOpen ? (
               <button type="button" className="vp-save" disabled={detailing} onClick={detailPrompt}>
                 {detailing ? (<><span className="spin" /> Improving…</>) : '✦ Improve prompt'}
@@ -1381,7 +1408,8 @@ export function RefImagePanel({
             </div>
           ))}
           <button type="button" className="vp-undo" style={{ alignSelf: 'center' }} onClick={() => setAudioOpen((v) => !v)}>
-            {audioOpen ? '▾' : '+'} Linked audio
+            {/* A verb: the button DOES something, it isn't a label. */}
+            {audioOpen ? '▾ Link audio' : '+ Link audio'}
           </button>
         </div>
       )}

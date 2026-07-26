@@ -162,63 +162,51 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
               {shown.length} CREATOR{shown.length === 1 ? '' : 'S'}
               {query.trim() ? ' MATCHING' : ' — GLOBAL, READ-ONLY'}
             </p>
-            {/* Two per row: the sheet still reads at this size (it is four
-                panels wide) and 30 creators stay browsable instead of one
-                screen-height card each. */}
+            {/* A GALLERY, not a list of cards: the sheets are the content, so
+                they fill the grid edge to edge. Name and age ride ON the
+                image; the description and the two actions surface on hover
+                (and on keyboard focus). No box-in-a-box. */}
             <div className="gcp-grid">
               {shown.map((c) => {
                 const isIn = added.has(c.id.toLowerCase())
                 const src = c.image_url || (c.content_path ? globalContentUrl(c.content_path) : '')
-                // Same card as the World Kit's own items (wk-card) — this IS a
-                // kit item, just one that lives in the library.
                 return (
-                  <div key={c.id} className="wk-card">
-                    {/* The sheet is the point — full width, never cropped. */}
+                  <figure key={c.id} className="gcp-tile" tabIndex={0}>
                     {src ? (
-                      <img
-                        src={src}
-                        alt={`${c.name} character sheet`}
-                        loading="lazy"
-                        className="gcp-sheet"
-                      />
+                      <img src={src} alt={`${c.name} character sheet`} loading="lazy" />
                     ) : null}
-                    <div className="wk-card-head">
-                      <div className="wk-card-meta">
-                        <h3>{c.name}</h3>
-                        <p>
-                          {[c.age ? `${c.age}` : '', c.nationality ?? ''].filter(Boolean).join(' · ')}
-                        </p>
-                      </div>
-                      {/* The kit's existing read-only badge. */}
-                      <span className="wk-locked-tag">Global</span>
-                    </div>
-                    <p style={{ color: 'var(--ink-2)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-                      {c.description}
-                    </p>
-                    <div className="wk-items" style={{ alignItems: 'center' }}>
-                      {isIn ? (
-                        <span className="wk-empty">✓ in this project</span>
-                      ) : (
+                    {/* Always visible: who this is. */}
+                    <figcaption className="gcp-name">
+                      <b>{c.name}</b>
+                      <span>{[c.age ? `${c.age}` : '', c.nationality ?? ''].filter(Boolean).join(' · ')}</span>
+                    </figcaption>
+                    {isIn ? <span className="gcp-in">✓ in this project</span> : null}
+                    {/* On hover: what they look like, and what you can do. */}
+                    <div className="gcp-over">
+                      <p>{c.description}</p>
+                      <div className="gcp-acts">
+                        {!isIn && (
+                          <button
+                            type="button"
+                            className="vp-undo"
+                            disabled={!!busy}
+                            onClick={() => void run(c.id, false)}
+                          >
+                            {busy === c.id ? 'Adding…' : 'Use this creator'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="vp-undo"
                           disabled={!!busy}
-                          onClick={() => void run(c.id, false)}
+                          title="Creates an editable copy in this project, linked to the original"
+                          onClick={() => void run(c.id, true)}
                         >
-                          {busy === c.id ? 'Adding…' : 'Use this creator'}
+                          {busy === `${c.id}:var` ? 'Copying…' : '⧉ Make my own version'}
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="vp-undo"
-                        disabled={!!busy}
-                        title="Creates an editable copy in this project, linked to the original"
-                        onClick={() => void run(c.id, true)}
-                      >
-                        {busy === `${c.id}:var` ? 'Copying…' : '⧉ Make my own version'}
-                      </button>
+                      </div>
                     </div>
-                  </div>
+                  </figure>
                 )
               })}
             </div>
