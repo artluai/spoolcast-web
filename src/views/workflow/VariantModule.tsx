@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
-import { actionUrl, activeSession, apiUrl, contentUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 
 // THE VARIANT MODULE — shared between the step-7 mapping board and the
@@ -274,8 +274,21 @@ export function VariantModule({
           </button>
         )}
         <button type="button" className="vp-undo" onClick={() => setVExtrasOpen((v) => !v)}>
-          {vExtrasOpen ? '▾' : '▸'} Extra references{vExtras.length ? ` · ${vExtras.length}` : ''}
+          {/* +1: the base image is ALWAYS reference 1 (the engine's prompt
+              says "use reference image 1 as the exact base shot"), so the
+              count has to include it or it under-reports what gets sent. */}
+          {vExtrasOpen ? '▾' : '▸'} Image references{base.image_path ? ` · ${vExtras.length + 1}` : vExtras.length ? ` · ${vExtras.length}` : ''}
         </button>
+        {/* Name sits on this row: a ref id is a short slug, and a full-width
+            field on its own line implied it wanted a sentence. */}
+        <label className="vp-var-nameinline">
+          <span>name</span>
+          <input
+            value={vName}
+            onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
+            placeholder={suggestedName || `${base.name}--…`}
+          />
+        </label>
         {!hideModelPicker && (
           <ModelPicker
             model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
@@ -288,6 +301,21 @@ export function VariantModule({
       </div>
       {vExtrasOpen ? (
         <div className="vp-var-extras">
+          {/* REFERENCE 1 IS THE BASE — always, and not optional: the whole
+              point of a variant is "this exact shot, one change", and the
+              prompt says so literally. Shown selected and disabled so the
+              guarantee is visible instead of implied. */}
+          {base.image_path ? (
+            <span className="vp-var-xref on vp-var-xref-locked" title={`${base.name} — always reference 1`}>
+              {/* A global item's sheet is a CONTENT-ROOT path, not
+                  session-relative — contentUrl would 404 on it. */}
+              <img
+                src={base.image_path.startsWith('global/') ? globalContentUrl(base.image_path) : contentUrl(base.image_path)}
+                alt={base.name}
+              />
+              <small>base</small>
+            </span>
+          ) : null}
           {pool.filter((k) => k.image_path && k.name !== base.name).map((k) => (
             <button
               key={k.name}
@@ -325,15 +353,6 @@ export function VariantModule({
           </label>
         </div>
       ) : null}
-      {/* Short field: a ref id is a slug, not prose — a full-width box implied
-          it wanted a sentence. Prefilled with a suggestion; click to edit. */}
-      <label className="vp-edit-field vp-var-name">Variant name
-        <input
-          value={vName}
-          onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
-          placeholder={suggestedName || `${base.name}--…`}
-        />
-      </label>
       {vErr ? <p className="vp-var-err">{vErr}</p> : null}
       <div className="vp-edit-actions">
         {actionsSlot}

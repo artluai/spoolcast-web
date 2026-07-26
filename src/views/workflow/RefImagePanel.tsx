@@ -86,6 +86,7 @@ export function RefImagePanel({
   onApprove,
   readOnly = false,
   readOnlyImage = '',
+  readOnlyPath = '',
 }: {
   refId: string
   notes: string
@@ -96,6 +97,9 @@ export function RefImagePanel({
   // Ready-to-use URL for a global item's sheet. It lives outside the session,
   // so there is no ref manifest to resolve it from.
   readOnlyImage?: string
+  // The same sheet as a CONTENT-ROOT path — what gets sent to the engine as
+  // the variant's base reference (URLs are for display only).
+  readOnlyPath?: string
   // Column name for the prompt box label (the panel owns the textarea so it
   // can toggle between the generation prompt and the character prompt).
   notesLabel?: string
@@ -781,7 +785,7 @@ export function RefImagePanel({
       {optionsOpen ? (
         <>
           <span className="vp-menu-backdrop" onClick={() => setOptionsOpen(false)} />
-          <span className="vp-menu vp-menu-up" style={{ position: 'absolute', bottom: 'calc(100% + 5px)', left: 0, minWidth: 320 }}>
+          <span className="vp-menu vp-menu-anchored" style={{ minWidth: 320 }}>
             <span className="vp-menu-h">IMAGE MODEL</span>
             <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 9px 8px', flexWrap: 'wrap' }}>
               <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
@@ -877,11 +881,8 @@ export function RefImagePanel({
   // 403 after the user has already written a prompt.
   const variantToggle = (
     <label
-      className="vp-undo"
-      style={{
-        display: 'inline-flex', gap: 8, alignItems: 'center',
-        cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.75 : 1,
-      }}
+      className="vp-varflag"
+      style={{ cursor: readOnly ? 'default' : 'pointer', opacity: readOnly ? 0.75 : 1 }}
       title={readOnly
         ? 'Library characters are shared and read-only — your changes are saved as your own variant'
         : 'Save the result as a NEW kit item instead of replacing this one'}
@@ -903,7 +904,7 @@ export function RefImagePanel({
     <div style={{ borderTop: fields ? undefined : '1px dashed var(--line, #2a3142)', marginTop: fields ? 0 : 10, paddingTop: fields ? 0 : 12 }}>
       {/* IMAGE LEFT · FIELDS RIGHT — audio has no image, so no image column */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {!(isAudio && !active) && <div style={{ width: 210, flex: 'none' }}>
+        {!(isAudio && !active) && <div style={{ width: 320, flex: 'none' }}>
           {/* A global item has no session manifest — its sheet comes in ready
               as a URL. Shown without the version controls below: there are no
               versions to pick, and nothing here can be edited. */}
@@ -913,7 +914,7 @@ export function RefImagePanel({
                 src={readOnlyImage}
                 alt={refId}
                 onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
-                style={{ width: 210, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--line, #2a3142)' }}
+                style={{ width: 320, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--line, #2a3142)' }}
               />
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 from the library{dims ? ` · ${dims}` : ''}
@@ -925,7 +926,7 @@ export function RefImagePanel({
                 src={versionUrl(active)}
                 alt=""
                 onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
-                style={{ width: 210, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--accent)' }}
+                style={{ width: 320, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--accent)' }}
               />
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 {KIND_BADGE[active.kind]}{dims ? ` · ${dims}` : ''}
@@ -938,7 +939,7 @@ export function RefImagePanel({
           ) : (
             <div
               style={{
-                width: 210, height: 160, borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
+                width: 320, height: 200, borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: 12,
                 textAlign: 'center', padding: 10,
               }}
@@ -1153,7 +1154,11 @@ export function RefImagePanel({
                 name: refId,
                 kind,
                 notes,
-                image_path: activeVersion ? versionRelPath(activeVersion) : '',
+                // A GLOBAL item has no session version, but its library sheet
+                // is exactly the shot the variant must stay faithful to — pass
+                // the content-root path (the engine's resolver falls back to
+                // CONTENT_ROOT for non-session-prefixed paths).
+                image_path: activeVersion ? versionRelPath(activeVersion) : readOnlyPath,
                 active_prompt: activeVersion?.prompt || '',
                 active_model: activeVersion?.model || '',
               }}

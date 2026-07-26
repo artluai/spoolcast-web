@@ -945,6 +945,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                               ? globalContentUrl(globalMeta[row[refIdx]].image)
                               : ''
                           }
+                          readOnlyPath={globalMeta[row[refIdx]]?.image || ''}
                           // Global rows carry no text of their own — show the
                           // library's resolved description instead of a blank.
                           notes={
