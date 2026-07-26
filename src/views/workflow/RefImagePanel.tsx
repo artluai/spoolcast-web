@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { activeSession, apiUrl, contentUrl, getFileJson, getJson, postAction, statusUrl } from '../../lib/api'
+import { createPortal } from 'react-dom'
+import { activeSession, apiUrl, contentUrl, getFileJson, getJson, globalContentUrl, postAction, statusUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, DEFAULT_VISION_MODEL_ID, VISION_MODELS, draftReasoning } from '../../lib/draft-models'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
 import { ModelPicker } from './ModelPicker'
@@ -7,8 +8,8 @@ import { VariantModule } from './VariantModule'
 
 // WORLD KIT CASTING PANEL — one kit item's reference image. Two labeled paths:
 //   GENERATE (from the item's notes; options: model, canvas ratio, character
-//   sheet, AI-improved prompt, image ingredients) — or ADD YOUR OWN (upload /
-//   pick from the session). Every result is a kept version; the filmstrip is
+//   sheet, image ingredients) — or USE AN EXISTING IMAGE (upload / pick from
+//   the session). Every result is a kept version; the filmstrip is
 //   the history and clicking picks the active one. Describe-with-AI appears
 //   only for images that didn't come from a prompt.
 
@@ -22,10 +23,16 @@ type RefVersion = {
   // reference this image (the person — never the sheet layout).
   subject?: string
   model?: string
+  aspect_ratio?: string
+  ref_images?: string[]
   at?: string
 }
 type RefManifest = { versions: RefVersion[]; active: string | null }
-type PoolImage = { path: string; name: string; size: number; ref?: string }
+type PoolImage = { path: string; name: string; size?: number; ref?: string; mtime?: number }
+type AssetLibraryGroup = {
+  id: string
+  takes: { path: string; kind: 'image' | 'video' | 'audio'; active: boolean; stamp: string; mtime?: number }[]
+}
 
 const KIND_BADGE: Record<RefVersion['kind'], string> = {
   generated: '✦ gen',
@@ -33,19 +40,125 @@ const KIND_BADGE: Record<RefVersion['kind'], string> = {
   mapped: '↦ mapped',
 }
 
-// ONE text box is the whole prompt: the item's notes are sent verbatim, and
-// every control (character-sheet rewrite, attach/detach, improve-with-AI)
-// edits that text in place — nothing is appended invisibly at send time.
-//
-// A character sheet is multiple angles of the same subject — a suffix can't
-// turn a scene description into one, so the button routes through
-// improve-with-AI with this pre-filled instruction to rewrite the prompt.
-const SHEET_GUIDANCE =
-  'Rewrite this as a character reference sheet: multiple angles of the same person (front, side, three-quarter view), identical face, hair and wardrobe in every view, isolated on a clean blank studio background, no scene.'
+// Character-sheet and aesthetic prompt preparation happen only after Generate
+// is clicked. They are output settings, not extra prompt editors.
+const CHARACTER_SHEET_LAYOUT =
+  'a character reference sheet with full-body front, side/profile, rear, and three-quarter views plus one chest-up talking-head portrait; identical face, hair, body proportions, and wardrobe in every view; clean blank studio background; no scene'
+const OBJECT_SHEET_LAYOUT =
+  'an object reference sheet with front, side, rear, three-quarter, and close-up detail views of the same object; identical materials, colors, and proportions in every view; clean blank studio background; no scene'
 const REF_LINE_RE = /^Reference image \d+.*$/gm
 
 const stripRefLines = (t: string) => t.replace(REF_LINE_RE, '').replace(/\n{3,}/g, '\n\n').trim()
-const existingRefLines = (t: string) => (t.match(REF_LINE_RE) ?? []).join('\n')
+const looksLikeSheetPrompt = (text: string) =>
+  /(character|object) (reference )?sheet|multi(?:ple)?[- ]angle|front.{0,40}(side|profile)|three-quarter view/i.test(text)
+const looksLikeCompleteCharacterSheetPrompt = (text: string) =>
+  looksLikeSheetPrompt(text) && /(talking[- ]head|chest[- ]up|head[- ]and[- ]shoulders|close-up portrait)/i.test(text)
+
+const OUTPUT_RATIOS = [
+  { value: '1:1', label: 'Square', width: 16, height: 16 },
+  { value: '16:9', label: 'Widescreen', width: 22, height: 12 },
+  { value: '9:16', label: 'Portrait', width: 11, height: 19 },
+  { value: '4:3', label: 'Landscape', width: 20, height: 15 },
+  { value: '3:4', label: 'Portrait', width: 12, height: 16 },
+] as const
+
+const ratioMeta = (value: string) =>
+  OUTPUT_RATIOS.find((choice) => choice.value === value) ?? OUTPUT_RATIOS[1]
+
+function RatioGlyph({ value }: { value: string }) {
+  const meta = ratioMeta(value)
+  return (
+    <i
+      className="ratio-glyph"
+      aria-hidden="true"
+      style={{ width: meta.width, height: meta.height }}
+    />
+  )
+}
+
+function RatioPicker({
+  value,
+  sessionRatio,
+  onChange,
+  disabled = false,
+}: {
+  value: string
+  sessionRatio: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+
+  const toggle = () => {
+    if (menuPos) {
+      setMenuPos(null)
+      return
+    }
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight
+    const left = Math.max(8, rect.right - 160)
+    setMenuPos(
+      viewportHeight && rect.bottom + 250 > viewportHeight
+        ? { left, bottom: viewportHeight - rect.top + 4 }
+        : { left, top: rect.bottom + 4 },
+    )
+  }
+
+  const choices = [
+    { value: 'auto', label: `Video default · ${sessionRatio}`, description: ratioMeta(sessionRatio).label },
+    ...OUTPUT_RATIOS.map((choice) => ({
+      value: choice.value,
+      label: choice.value,
+      description: choice.label,
+    })),
+  ]
+  return (
+    <span>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="vp-menu-btn"
+        disabled={disabled}
+        title="Output ratio for this generation"
+        onClick={toggle}
+      >
+        Ratio · {value === 'auto' ? sessionRatio : value} ▾
+      </button>
+      {menuPos
+        ? createPortal(
+            <>
+              <span className="vp-menu-backdrop" onClick={() => setMenuPos(null)} />
+              <span className="vp-menu" style={{ ...menuPos, minWidth: 160 }}>
+                <span className="vp-menu-h">OUTPUT RATIO</span>
+                {choices.map((choice) => (
+                  <button
+                    key={choice.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(choice.value)
+                      setMenuPos(null)
+                    }}
+                    style={value === choice.value ? { background: 'var(--bg-3)' } : undefined}
+                  >
+                    <span className="ratio-menu-choice">
+                      <RatioGlyph value={choice.value === 'auto' ? sessionRatio : choice.value} />
+                      <span>
+                        <span>{choice.label}</span>
+                        <small>{choice.description}</small>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </span>
+            </>,
+            document.body,
+          )
+        : null}
+    </span>
+  )
+}
 
 // Job failures store the tail of stderr (ANSI-colored traceback). Dig out the
 // human sentence — kie's msg=… if present, else the last "SomeError: …" line.
@@ -121,7 +234,7 @@ export function RefImagePanel({
   onToast: (message: string) => void
   // The engine writes variant/audio rows to the FILE; these callbacks let the
   // host editor mirror them into its unsaved draft so saving doesn't erase them.
-  onVariantCreated?: (name: string, instruction: string) => void
+  onVariantCreated?: (name: string, generationPrompt: string) => void
   onAudioAdd?: (audio: { name: string; kind: string; linkedTo: string; source: string; notes: string }) => void
   // Non-audio items: audio objects already pointing at this item (chips with
   // unlink) and the ones that could (LINK EXISTING inside the + panel). The
@@ -138,14 +251,17 @@ export function RefImagePanel({
 }) {
   const [manifest, setManifest] = useState<RefManifest | null>(null)
   const [imgModel, setImgModel] = useState(DEFAULT_IMAGE_MODEL_ID)
-  const [txtModel, setTxtModel] = useState(DEFAULT_MODEL_ID)
+  const txtModel = DEFAULT_MODEL_ID
   // Vision tasks (reading the linked image) — GLM has no eyes; Qwen default.
   const [visionModel, setVisionModel] = useState(DEFAULT_VISION_MODEL_ID)
   const [generating, setGenerating] = useState(false)
-  const [detailing, setDetailing] = useState(false)
   const [describing, setDescribing] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [referencesOpen, setReferencesOpen] = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState('')
+  const [galleryTab, setGalleryTab] = useState<'world-kit' | 'recent'>('world-kit')
   const [pool, setPool] = useState<PoolImage[] | null>(null)
+  const [recentPool, setRecentPool] = useState<PoolImage[] | null>(null)
   // Masters are full scenes; the character-sheet rewrite only fits ingredients.
   const isMaster = /master/i.test(kind)
   // Audio objects (voice/music/ambience/sfx) have no image to generate —
@@ -160,11 +276,16 @@ export function RefImagePanel({
       if (cfg?.aspect_ratio) setSessionRatio(cfg.aspect_ratio)
     })
   }, [])
+  useEffect(() => {
+    if (!lightboxUrl) return
+    const closeLightbox = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLightboxUrl('')
+    }
+    window.addEventListener('keydown', closeLightbox)
+    return () => window.removeEventListener('keydown', closeLightbox)
+  }, [lightboxUrl])
   const [dims, setDims] = useState('')
-  // Ingredients: images that ride along with the prompt (how masters compose).
-  const [attachOpen, setAttachOpen] = useState(false)
-  const [attachPool, setAttachPool] = useState<PoolImage[] | null>(null)
-  const [attached, setAttached] = useState<string[]>([])
+  const [previewWidth, setPreviewWidth] = useState(420)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const promptBoxRef = useRef<HTMLTextAreaElement | null>(null)
   const timerRef = useRef<number | null>(null)
@@ -199,17 +320,19 @@ export function RefImagePanel({
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createOpen, refId, notes])
-  const [improveOpen, setImproveOpen] = useState(false)
   // The two generation toggles live in one menu — see "⚙ Options".
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const [guidance, setGuidance] = useState('')
+  const optionsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [optionsPosition, setOptionsPosition] = useState<{
+    left: number
+    top?: number
+    bottom?: number
+    maxHeight: number
+  } | null>(null)
   // Last generation failure, shown in the panel until the next attempt.
   const [genError, setGenError] = useState('')
-  // "Reduce AI aesthetic" — same pattern as the Character sheet button: it
-  // opens improve-with-AI with the saved instruction pre-filled as guidance,
-  // and Improve rewrites the whole prompt with that look woven in. The
-  // instruction is editable in the guidance box; small buttons save the tweak
-  // (engine resolution: this video's override -> global default -> built-in).
+  // "Reduce AI aesthetic" is also an output setting. Its saved engine snippet
+  // is folded into the prompt internally when Generate is clicked.
   const [lessMode, setLessMode] = useState(false)
   const lessTextRef = useRef<string | null>(null)
   const fetchLess = async (): Promise<string> => {
@@ -218,34 +341,11 @@ export function RefImagePanel({
     lessTextRef.current = out?.ok ? (out.data?.text ?? '').trim() : ''
     return lessTextRef.current
   }
-  const openLessMode = () => {
-    setLessMode(true)
-    setImproveOpen(true)
-    void fetchLess().then((text) => {
-      if (text) setGuidance(text)
-    })
-  }
-  const saveLess = (scope: 'session' | 'global') => {
-    const text = guidance.trim()
-    if (!text) return
-    lessTextRef.current = text
-    void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope, text })
-    if (scope === 'global') {
-      // The global default should now be what the user sees — drop any
-      // session override so it doesn't silently win over the new default.
-      void postAction({ action: 'set_prompt_snippet', name: 'less-ai', scope: 'session', text: '' })
-      onToast('Saved as the default instruction for all videos.')
-    } else {
-      onToast('Saved as this video’s instruction.')
-    }
-  }
   // Dual-prompt state: charPrompt = the character prompt (imported when this
-  // item is referenced elsewhere); notes stay the generation prompt. sheetMode
-  // makes the next Improve produce BOTH (character first, sheet built from it).
+  // item is referenced elsewhere); notes stay the generation prompt.
   const [charPrompt, setCharPrompt] = useState<string | null>(null)
   const [promptView, setPromptView] = useState<'prompt' | 'character'>('prompt')
   const [sheetMode, setSheetMode] = useState(false)
-  const dualImprove = !isMaster && (sheetMode || charPrompt !== null)
   // Shown on the ⚙ Options button so an active toggle stays visible while the
   // menu is shut — a hidden checkbox that changes the output must not be silent.
   const optionCount = (sheetMode ? 1 : 0) + (lessMode ? 1 : 0)
@@ -275,6 +375,28 @@ export function RefImagePanel({
     }
   }
 
+  // Older variants stored only the short "what changed" instruction in the
+  // World Kit row even though the image manifest correctly kept the complete
+  // prompt sent to the model. Repair only that recognizable mismatch; a
+  // genuinely hand-edited prompt remains untouched.
+  const syncShortInstructionToVersion = (v: RefVersion | undefined) => {
+    const savedPrompt = v?.kind === 'generated' ? (v.prompt ?? '').trim() : ''
+    const visiblePrompt = notes.trim()
+    if (
+      savedPrompt
+      && savedPrompt !== visiblePrompt
+      && (
+        visiblePrompt === ''
+        || (
+          visiblePrompt.length < savedPrompt.length
+          && savedPrompt.toLowerCase().includes(visiblePrompt.toLowerCase())
+        )
+      )
+    ) {
+      onNotesChange?.(savedPrompt)
+    }
+  }
+
   const manifestPath = `source/world-kit-refs/${refId}/manifest.json`
   const loadManifest = () =>
     getFileJson<RefManifest>(manifestPath).then((m) => {
@@ -285,13 +407,14 @@ export function RefImagePanel({
 
   useEffect(() => {
     setManifest(null)
-    setAttached([])
     setGenError('')
-    setAttachOpen(false)
     setGalleryOpen(false)
-    setImproveOpen(false)
-    setGuidance('')
+    setReferencesOpen(false)
+    setLightboxUrl('')
+    setOptionsOpen(false)
+    setOptionsPosition(null)
     setDims('')
+    setPreviewWidth(420)
     setCharPrompt(null)
     setPromptView('prompt')
     setSheetMode(false)
@@ -300,6 +423,7 @@ export function RefImagePanel({
     loadManifest().then((m) => {
       setCreateOpen(m.versions.length === 0)
       const act = m.versions.find((v) => v.id === m.active)
+      setRatio(act?.aspect_ratio || 'auto')
       savedSubjectRef.current = act?.subject ?? null
       if (act?.subject) setCharPrompt(act.subject)
       // Notes follow the SELECTED image — but only when they are plainly a
@@ -308,12 +432,12 @@ export function RefImagePanel({
       const noteText = notes.trim()
       const stale =
         noteText === '' || m.versions.some((v) => v.id !== m.active && (v.prompt ?? '').trim() === noteText)
-      if (stale) syncNotesToVersion(m.versions.find((v) => v.id === m.active))
+      if (stale) {
+        syncNotesToVersion(m.versions.find((v) => v.id === m.active))
+      } else {
+        syncShortInstructionToVersion(m.versions.find((v) => v.id === m.active))
+      }
     })
-    if (REF_LINE_RE.test(notes)) {
-      REF_LINE_RE.lastIndex = 0
-      void loadAttachPool().then((pool) => prefillAttached(notes, pool))
-    }
     // HOLD MY PLACE: a generation started earlier keeps running engine-side
     // (durable job files) — leaving the step unmounted the panel and dropped
     // its poller. Find a live job for THIS item and show it again.
@@ -346,6 +470,8 @@ export function RefImagePanel({
     v.kind === 'mapped' ? contentUrl(v.path ?? '') : contentUrl(`source/world-kit-refs/${refId}/${v.file ?? ''}`)
   const versionRelPath = (v: RefVersion) =>
     v.kind === 'mapped' ? (v.path ?? '') : `source/world-kit-refs/${refId}/${v.file ?? ''}`
+  const referenceUrl = (path: string) =>
+    /^(source|working|output)\//.test(path) ? contentUrl(path) : globalContentUrl(path)
   const activeVersion = manifest?.versions.find((v) => v.id === manifest?.active) ?? null
 
   // VARIANT + LINKED AUDIO state (the buttons at the panel's foot).
@@ -458,16 +584,6 @@ export function RefImagePanel({
     }
   }
 
-  // Which kit item an attached image belongs to (by its world-kit-refs path,
-  // or by the pool entry's ref for mapped actives).
-  const itemForPath = (path: string): { ref: string; kind: string; notes: string } | null => {
-    const m = /world-kit-refs\/([^/]+)\//.exec(path)
-    const ref = m?.[1] ?? attachPool?.find((i) => i.path === path)?.ref ?? null
-    if (!ref) return null
-    const info = kitIndex[ref]
-    return { ref, kind: info?.kind ?? '', notes: info?.notes ?? '' }
-  }
-
   const versions = manifest?.versions ?? []
   const active = versions.find((v) => v.id === manifest?.active) ?? null
 
@@ -476,7 +592,9 @@ export function RefImagePanel({
       const state = await getFileJson<{ state?: string; error?: string }>(`working/jobs/${jobId}.json`)
       if (state?.state === 'succeeded') {
         setGenerating(false)
-        await loadManifest()
+        setReferencesOpen(false)
+        const nextManifest = await loadManifest()
+        syncNotesToVersion(nextManifest.versions.find((v) => v.id === nextManifest.active))
         onToast('Reference generated — it joined this item’s history.')
         return
       }
@@ -492,46 +610,6 @@ export function RefImagePanel({
     timerRef.current = window.setTimeout(tick, 4000)
   }
 
-  // The model can't know what "the cast reference" is — each attached image
-  // gets a numbered line spelling out what it contains, written INTO the
-  // notes box so the visible text is exactly what is sent. The description is
-  // the engine's cached SUBJECT of the item's active image (a character sheet
-  // yields the person, never the sheet layout); item notes are the fallback.
-  // The imported description: the item's stored character prompt if its
-  // active image has one, else its notes. NO automatic AI here — describing
-  // an image is always the explicit ✦ Describe button on that item.
-  const subjectsRef = useRef<Record<string, string | null>>({})
-  const fetchSubject = async (ref: string): Promise<string | null> => {
-    if (subjectsRef.current[ref] !== undefined) return subjectsRef.current[ref]
-    const m = await getFileJson<RefManifest>(`source/world-kit-refs/${ref}/manifest.json`)
-    const subject = m?.versions.find((v) => v.id === m.active)?.subject?.trim() || null
-    subjectsRef.current[ref] = subject
-    return subject
-  }
-
-  const buildRefLines = (paths: string[]) =>
-    Promise.all(
-      paths.map(async (p, i) => {
-        const item = itemForPath(p)
-        if (!item) return `Reference image ${i + 1}: ${p.split('/').pop()}`
-        const desc = (await fetchSubject(item.ref)) ?? item.notes.replace(/\s+/g, ' ')
-        const head = `Reference image ${i + 1} is the ${item.kind || 'item'} “${item.ref}”`
-        return desc ? `${head}: ${desc}` : `${head}.`
-      }),
-    )
-
-  const applyAttached = async (paths: string[]) => {
-    if (paths.length === attached.length && paths.every((p, i) => p === attached[i])) return
-    setAttached(paths)
-    const base = stripRefLines(notes)
-    if (!paths.length) {
-      onNotesChange?.(base)
-      return
-    }
-    const lines = await buildRefLines(paths)
-    onNotesChange?.(`${base}\n\n${lines.join('\n')}`)
-  }
-
   // kie.ai rejects prompts over the selected model's documented cap — stop
   // before spending the credit, with the counter showing how far over.
   // EVERY thumbnail grid obeys the same law as the walls: equal square
@@ -545,47 +623,28 @@ export function RefImagePanel({
     im.style.width = `${Math.round(h * r)}px`
   }
 
-  const promptLimit = IMAGE_MODELS.find((m) => m.id === imgModel)?.maxChars ?? 20000
-
-  const generate = async () => {
-    const prompt = notes.trim()
-    if (!prompt) {
-      onToast('Write a prompt description first — that’s what the image is generated from.')
-      return
-    }
-    if (prompt.length > promptLimit) {
-      setGenError(
-        `Prompt is ${prompt.length.toLocaleString()} characters — this model accepts at most ${promptLimit.toLocaleString()}. Shorten it (Improve with AI can compress it).`,
-      )
-      return
-    }
-    if (/^Reference image \d+/m.test(prompt) && attached.length === 0) {
-      setGenError(
-        'The prompt mentions reference images but none are attached — attach them under ⧉ Reference images, or delete those lines.',
-      )
-      return
-    }
-    setGenError('')
-    setGenerating(true)
-    const out = await postAction<{ stdout?: string }>({
-      action: 'generate_worldkit_ref',
-      ref: refId,
-      prompt,
-      model: imgModel,
-      ...(attached.length ? { ref_images: attached } : {}),
-      ...(ratio !== 'auto' ? { aspect_ratio: ratio } : {}),
-      ...(charPrompt?.trim() ? { subject: charPrompt.trim() } : {}),
-      allow_cost: true,
-    })
-    const already = /already running as (\S+)/.exec(out?.details || '')?.[1]
-    const jobId = already ?? /job (\S+)/.exec(out?.data?.stdout || '')?.[1] ?? null
-    if (!out || (!out.ok && !already) || !jobId) {
-      setGenerating(false)
-      onToast(out ? `Engine: ${out.error || out.message || 'could not start generation.'}` : 'The engine is not reachable.')
-      return
-    }
-    pollJob(jobId)
+  // The selected image gets a larger, equal-area canvas: a landscape and a
+  // portrait occupy roughly the same amount of screen instead of both being
+  // forced to 420px wide (which made portrait images tower over the editor).
+  const fitSelectedPreview = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const image = e.currentTarget
+    const naturalWidth = image.naturalWidth || 1
+    const naturalHeight = image.naturalHeight || 1
+    const imageRatio = naturalWidth / naturalHeight
+    const targetArea = 420 * 236
+    const maxSide = 420
+    let width = Math.sqrt(targetArea * imageRatio)
+    let height = targetArea / width
+    const scale = Math.min(1, maxSide / Math.max(width, height))
+    width *= scale
+    height *= scale
+    image.style.width = `${Math.round(width)}px`
+    image.style.height = `${Math.round(height)}px`
+    setPreviewWidth(Math.round(width))
+    setDims(`${naturalWidth}×${naturalHeight}`)
   }
+
+  const promptLimit = IMAGE_MODELS.find((m) => m.id === imgModel)?.maxChars ?? 20000
 
   const expand = (text: string, extraGuidance: string) =>
     postAction<{ text?: string }>({
@@ -597,58 +656,30 @@ export function RefImagePanel({
       allow_cost: true,
     })
 
-  const detailPrompt = async () => {
-    const base = (dualImprove && charPrompt?.trim()) || stripRefLines(notes)
-    if (!base) {
-      onToast('Write a short description first — the AI improves it.')
-      return
-    }
-    setDetailing(true)
-    if (dualImprove) {
-      // Two prompts from one click: the CHARACTER prompt (imported when this
-      // item is referenced elsewhere), then the SHEET prompt built from it
-      // (what Generate uses to make the sheet image).
-      const charOut = await expand(
-        base,
-        `Write it as a description of the character only — never mention a reference sheet, panels, multiple views or layout. ${guidance}`,
+  const prepareGenerationPrompt = async (basePrompt: string) => {
+    const cleanPrompt = stripRefLines(basePrompt)
+    const guidance: string[] = []
+    const characterSheet = /(character|cast)/i.test(kind)
+    const completeSheetPrompt = characterSheet
+      ? looksLikeCompleteCharacterSheetPrompt(cleanPrompt)
+      : looksLikeSheetPrompt(cleanPrompt)
+    const sheetLayout = characterSheet ? CHARACTER_SHEET_LAYOUT : OBJECT_SHEET_LAYOUT
+    if (sheetMode && !completeSheetPrompt) {
+      guidance.push(
+        `Rewrite the prompt so the finished image is ${sheetLayout}. ` +
+        'Change only the layout: preserve every stated subject, wardrobe, material, color, and style detail exactly; do not invent or infer missing details.',
       )
-      if (!charOut?.ok || !charOut.data?.text) {
-        setDetailing(false)
-        onToast(`Engine: ${charOut?.error || charOut?.message || 'could not improve the prompt.'}`)
-        return
-      }
-      const sheetOut = await expand(charOut.data.text, SHEET_GUIDANCE)
-      setDetailing(false)
-      if (!sheetOut?.ok || !sheetOut.data?.text) {
-        onToast(`Engine: ${sheetOut?.error || sheetOut?.message || 'could not build the sheet prompt.'}`)
-        return
-      }
-      setCharPrompt(charOut.data.text)
-      saveSubject(charOut.data.text)
-      onNotesChange?.(sheetOut.data.text)
-      setPromptView('prompt')
-      setImproveOpen(false)
-      if (lessMode) {
-        setLessMode(false)
-        setGuidance('')
-      }
-      onToast('Two prompts written — toggle between sheet and character above the text box.')
-      return
     }
-    const out = await expand(base, guidance)
-    setDetailing(false)
-    if (out?.ok && out.data?.text) {
-      // Rewrite the description in place; the reference-image lines stay.
-      const lines = existingRefLines(notes)
-      onNotesChange?.(out.data.text + (lines ? `\n\n${lines}` : ''))
-      setImproveOpen(false)
-      if (lessMode) {
-        setLessMode(false)
-        setGuidance('')
-      }
-    } else {
-      onToast(`Engine: ${out?.error || out?.message || 'could not improve the prompt.'}`)
+    if (lessMode) {
+      const less = await fetchLess()
+      if (less) guidance.push(less)
     }
+    if (!cleanPrompt || !guidance.length) return cleanPrompt
+    const out = await expand(cleanPrompt, guidance.join('\n\n'))
+    if (!out?.ok || !out.data?.text) {
+      throw new Error(out?.error || out?.message || 'Could not prepare the generation prompt.')
+    }
+    return out.data.text.trim()
   }
 
   const describe = async () => {
@@ -684,55 +715,41 @@ export function RefImagePanel({
     }
   }
 
-  // Session-wide pool (kit actives carry .ref); the gallery filters out the
-  // current item's own images at render time so the cache survives item
-  // switches and the open-time prefill below.
-  const loadAttachPool = async (): Promise<PoolImage[]> => {
-    if (attachPool !== null) return attachPool
-    const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
-      apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
-    )
-    // Mapped kit actives share a path with their source image — keep one
-    // entry per path (prefer the kit one, which carries .ref).
-    const seen = new Map<string, PoolImage>()
-    for (const i of out?.data?.images ?? []) {
-      if (!seen.has(i.path) || i.ref) seen.set(i.path, i)
-    }
-    const pool = [...seen.values()]
-    setAttachPool(pool)
-    return pool
-  }
-
-  const openAttach = () => {
-    setAttachOpen((v) => !v)
-    void loadAttachPool()
-  }
-
-  // "Reference image N …" lines in the prompt are the durable record of what
-  // was attached — re-attach those images when the item opens, so the text
-  // and the payload never disagree after a refresh.
-  const prefillAttached = (text: string, pool: PoolImage[]) => {
-    const paths: string[] = []
-    for (const line of text.match(REF_LINE_RE) ?? []) {
-      const named = /“([^”]+)”/.exec(line)?.[1]
-      const file = named ? null : /^Reference image \d+:\s*(.+)$/.exec(line)?.[1]?.trim()
-      const hit = named
-        ? pool.find((i) => i.ref === named)
-        : file
-          ? pool.find((i) => i.name === file || i.path.endsWith(`/${file}`))
-          : undefined
-      if (hit && !paths.includes(hit.path)) paths.push(hit.path)
-    }
-    if (paths.length) setAttached(paths)
-  }
-
   const openGallery = async () => {
-    setGalleryOpen((v) => !v)
+    if (galleryOpen) {
+      setGalleryOpen(false)
+      return
+    }
+    setGalleryOpen(true)
+    setGalleryTab('world-kit')
     if (pool === null) {
       const out = await getJson<{ ok?: boolean; data?: { images?: PoolImage[] } }>(
-        apiUrl('source-images', { session: activeSession() }),
+        apiUrl('source-images', { session: activeSession(), include_refs: 1 }),
       )
-      setPool(out?.data?.images ?? [])
+      const byRef = new Map<string, PoolImage>()
+      for (const image of out?.data?.images ?? []) {
+        if (image.ref && image.ref !== refId) {
+          byRef.set(image.ref, { ...image, name: image.ref })
+        }
+      }
+      setPool([...byRef.values()])
+    }
+    if (recentPool === null) {
+      const out = await getJson<{ ok?: boolean; data?: { library?: AssetLibraryGroup[] } }>(
+        apiUrl('asset-library', { session: activeSession() }),
+      )
+      const recent = (out?.data?.library ?? [])
+        .flatMap((group) =>
+          group.takes
+            .filter((take) => take.kind === 'image')
+            .map((take) => ({
+              path: take.path,
+              name: take.active ? `${group.id} · current` : `${group.id} · ${take.stamp}`,
+              mtime: take.mtime,
+            })),
+        )
+        .sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0))
+      setRecentPool(recent)
     }
   }
 
@@ -749,6 +766,7 @@ export function RefImagePanel({
 
   const pick = async (v: RefVersion) => {
     if (manifest?.active === v.id) return
+    setReferencesOpen(false)
     setManifest((m) => (m ? { ...m, active: v.id } : m))
     const out = await postAction({ action: 'set_ref_active', ref: refId, id: v.id })
     if (!out?.ok) {
@@ -759,15 +777,37 @@ export function RefImagePanel({
     syncNotesToVersion(v)
     savedSubjectRef.current = v.subject ?? null
     setCharPrompt(v.subject ?? null)
+    setRatio(v.aspect_ratio || 'auto')
     setPromptView('prompt')
   }
 
-  const small: React.CSSProperties = {
-    background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)',
-    borderRadius: 6, padding: '7px 12px', fontSize: 12, cursor: 'pointer',
-  }
   const clusterLabel: React.CSSProperties = {
     fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)',
+  }
+
+  const toggleOptions = () => {
+    if (optionsOpen) {
+      setOptionsOpen(false)
+      setOptionsPosition(null)
+      return
+    }
+    const rect = optionsButtonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight
+    const menuWidth = 340
+    const left = Math.max(8, Math.min(rect.left, viewportWidth - menuWidth - 8))
+    const roomAbove = Math.max(0, rect.top - 12)
+    const roomBelow = Math.max(0, viewportHeight - rect.bottom - 12)
+    const openUp = roomAbove >= roomBelow
+    setOptionsPosition({
+      left,
+      ...(openUp
+        ? { bottom: viewportHeight - rect.top + 6 }
+        : { top: rect.bottom + 6 }),
+      maxHeight: Math.max(180, (openUp ? roomAbove : roomBelow) - 6),
+    })
+    setOptionsOpen(true)
   }
 
   // EVERY secondary generation control lives behind one menu, so the panel
@@ -776,32 +816,42 @@ export function RefImagePanel({
   const optionsMenu = (
     <span className="vg-select-wrap" style={{ position: 'relative' }}>
       <button
+        ref={optionsButtonRef}
         type="button"
         className="vp-menu-btn vg-select-btn"
-        onClick={() => setOptionsOpen((v) => !v)}
+        onClick={toggleOptions}
       >
         ⚙ Options{optionCount ? ` · ${optionCount}` : ''} ▾
       </button>
-      {optionsOpen ? (
-        <>
-          <span className="vp-menu-backdrop" onClick={() => setOptionsOpen(false)} />
-          <span className="vp-menu vp-menu-anchored" style={{ minWidth: 320 }}>
-            <span className="vp-menu-h">IMAGE MODEL</span>
+      {optionsOpen && optionsPosition
+        ? createPortal(
+          <>
+          <span
+            className="vp-menu-backdrop"
+            onClick={() => {
+              setOptionsOpen(false)
+              setOptionsPosition(null)
+            }}
+          />
+          <span
+            className="vp-menu ref-options-menu"
+            style={{
+              ...optionsPosition,
+              width: 340,
+              maxWidth: 'calc(100vw - 16px)',
+              overflowY: 'auto',
+            }}
+          >
+            <span className="vp-menu-h">GENERATE</span>
             <span style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 9px 8px', flexWrap: 'wrap' }}>
               <ModelPicker model={imgModel} onChange={setImgModel} disabled={generating} models={IMAGE_MODELS} primary={IMAGE_MODELS} />
-              <select
+              <RatioPicker
                 value={ratio}
-                onChange={(e) => setRatio(e.target.value)}
-                title="Canvas ratio for this generation"
-                className="sc-select"
-              >
-                <option value="auto">ratio: {sessionRatio}</option>
-                {['1:1', '16:9', '9:16', '4:3', '3:4'].filter((r) => r !== sessionRatio).map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
+                sessionRatio={sessionRatio}
+                onChange={setRatio}
+                disabled={generating}
+              />
             </span>
-            <span className="vp-menu-h">OPTIONS</span>
             {!isMaster && (
               <>
                 <button
@@ -812,7 +862,6 @@ export function RefImagePanel({
                   onClick={() => {
                     if (!sheetMode) {
                       setSheetMode(true)
-                      setImproveOpen(true)
                       setRatio(sessionRatio === '16:9' ? 'auto' : '16:9')
                     } else {
                       setSheetMode(false)
@@ -823,46 +872,28 @@ export function RefImagePanel({
                     <i className={`vg-menu-check ${sheetMode ? 'on' : ''}`} />
                     Generate as {/(character|cast)/i.test(kind) ? 'character' : 'object'} sheet
                   </span>
-                  <small>multi-angle views of the same subject on a blank background</small>
+                  <small>
+                    {/(character|cast)/i.test(kind)
+                      ? 'full-body angles + a chest-up talking-head portrait'
+                      : 'multiple angles + a close-up detail view'}
+                  </small>
                 </button>
                 <button
                   type="button"
                   role="menuitemcheckbox"
                   aria-checked={lessMode}
                   className={lessMode ? 'on' : ''}
-                  onClick={() => {
-                    if (lessMode) setLessMode(false)
-                    else void openLessMode()
-                    setOptionsOpen(false)
-                  }}
+                  onClick={() => setLessMode((value) => !value)}
                 >
                   <span className="vg-select-choice">
                     <i className={`vg-menu-check ${lessMode ? 'on' : ''}`} />
                     Reduce AI aesthetic
                   </span>
-                  <small>rewrites the prompt to read like a casual phone snapshot</small>
+                  <small>makes the result feel like a casual phone snapshot</small>
                 </button>
               </>
             )}
-            {/* The AI rewrite lives here instead of as a button next to
-                Generate — it is a way to prepare the prompt, not a second
-                primary action. Arming it opens the guidance box above. */}
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={improveOpen}
-              className={improveOpen ? 'on' : ''}
-              onClick={() => {
-                setImproveOpen((v) => !v)
-                setOptionsOpen(false)
-              }}
-            >
-              <span className="vg-select-choice">
-                <i className={`vg-menu-check ${improveOpen ? 'on' : ''}`} />
-                Rewrite the prompt with AI
-              </span>
-              <small>expands what you wrote into a fuller image prompt</small>
-            </button>
+            <span className="vp-menu-h">REPLACE EXISTING IMAGE · NO AI</span>
             {/* Setting the item's OWN picture — not a reference for the next
                 generation. Rare, so it lives in the menu rather than a row. */}
             <button
@@ -872,8 +903,7 @@ export function RefImagePanel({
                 fileRef.current?.click()
               }}
             >
-              <span className="vg-select-choice">↑ Upload an image for this item</span>
-              <small>replaces the picture above with a file from your computer</small>
+              <span className="vg-select-choice">↑ Upload from computer</span>
             </button>
             <button
               type="button"
@@ -882,9 +912,9 @@ export function RefImagePanel({
                 void openGallery()
               }}
             >
-              <span className="vg-select-choice">↦ Use an image already in this project</span>
-              <small>pick from what you have uploaded or generated</small>
+              <span className="vg-select-choice">↦ Choose from project</span>
             </button>
+            {active && active.kind !== 'generated' ? <span className="vp-menu-h">PROMPT TOOL · AI</span> : null}
             {active && active.kind !== 'generated' ? (
               <button
                 type="button"
@@ -895,14 +925,16 @@ export function RefImagePanel({
                 }}
               >
                 <span className="vg-select-choice">
-                  {describing ? (<><span className="spin" /> Reading the image…</>) : '✦ Write the prompt from this image'}
+                  {describing ? (<><span className="spin" /> Reading the image…</>) : '✦ Describe current image'}
                 </span>
-                <small>AI looks at the picture and fills the prompt box above</small>
+                <small>fills the Image prompt above</small>
               </button>
             ) : null}
           </span>
-        </>
-      ) : null}
+          </>,
+          document.body,
+        )
+        : null}
     </span>
   )
 
@@ -945,33 +977,80 @@ export function RefImagePanel({
     <div style={{ borderTop: fields ? undefined : '1px dashed var(--line, #2a3142)', marginTop: fields ? 0 : 10, paddingTop: fields ? 0 : 12 }}>
       {/* IMAGE LEFT · FIELDS RIGHT — audio has no image, so no image column */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {!(isAudio && !active) && <div style={{ width: 320, flex: 'none' }}>
+        {!(isAudio && !active) && (
+          <div className="ref-selected-column" style={{ width: previewWidth }}>
           {/* A global item has no session manifest — its sheet comes in ready
               as a URL. Shown without the version controls below: there are no
               versions to pick, and nothing here can be edited. */}
           {!active && readOnlyImage ? (
             <>
-              <img
-                src={readOnlyImage}
-                alt={refId}
-                onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
-                style={{ width: 320, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--line, #2a3142)' }}
-              />
+              <div className="ref-selected-frame">
+                <img
+                  src={readOnlyImage}
+                  alt={refId}
+                  onLoad={fitSelectedPreview}
+                  style={{ borderColor: 'var(--line, #2a3142)' }}
+                />
+                <button
+                  type="button"
+                  className="vg-enlarge"
+                  aria-label={`Enlarge ${refId}`}
+                  onClick={() => setLightboxUrl(readOnlyImage)}
+                >
+                  ⤢
+                </button>
+              </div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 from the library{dims ? ` · ${dims}` : ''}
               </div>
             </>
           ) : active ? (
             <>
-              <img
-                src={versionUrl(active)}
-                alt=""
-                onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
-                style={{ width: 320, height: 'auto', display: 'block', borderRadius: 10, border: '1px solid var(--accent)' }}
-              />
+              <div className="ref-selected-frame">
+                <img
+                  src={versionUrl(active)}
+                  alt={`${refId} selected image`}
+                  onLoad={fitSelectedPreview}
+                  style={{ borderColor: 'var(--accent)' }}
+                />
+                <button
+                  type="button"
+                  className="vg-enlarge"
+                  aria-label={`Enlarge ${refId}`}
+                  onClick={() => setLightboxUrl(versionUrl(active))}
+                >
+                  ⤢
+                </button>
+              </div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 {KIND_BADGE[active.kind]}{dims ? ` · ${dims}` : ''}
               </div>
+              {(active.ref_images?.length ?? 0) > 0 ? (
+                <div className="ref-source-panel">
+                  <button
+                    type="button"
+                    className="ref-source-toggle"
+                    aria-expanded={referencesOpen}
+                    onClick={() => setReferencesOpen((value) => !value)}
+                  >
+                    <span>{referencesOpen ? '▾' : '▸'} References</span>
+                    <span>· {active.ref_images?.length}</span>
+                  </button>
+                  {referencesOpen ? (
+                    <div className="ref-source-grid">
+                      {active.ref_images?.map((path, index) => (
+                        <img
+                          key={`${path}:${index}`}
+                          src={referenceUrl(path)}
+                          alt={`Reference ${index + 1} used for ${refId}`}
+                          title={path}
+                          loading="lazy"
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {/* "Describe with AI" now lives in ⚙ Options as "Write the
                   prompt from this image" — it fills the prompt box, so it
                   belongs with the other generation controls, not floating
@@ -980,7 +1059,7 @@ export function RefImagePanel({
           ) : (
             <div
               style={{
-                width: 320, height: 200, borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
+                width: 420, maxWidth: '100%', height: 236, borderRadius: 10, border: '1px dashed var(--line, #2a3142)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: 12,
                 textAlign: 'center', padding: 10,
               }}
@@ -1014,9 +1093,10 @@ export function RefImagePanel({
               </div>
             </div>
           )}
-        </div>}
+          </div>
+        )}
         {fields && (
-          <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          <div className="ref-selected-fields" style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
             {fields}
             <div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1190,6 +1270,11 @@ export function RefImagePanel({
                 ? `Another take of ${refId} — lands in its history above; click a thumbnail to pick the active one.`
                 : `A NEW linked item — one deliberate change, its own history. Unrelated item? Use + Add on the section.`}
           </p>
+          {genError !== '' && (
+            <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 }}>
+              ⚠ {genError}
+            </div>
+          )}
           {/* ONE body for both outcomes. The fields never change — the
               checkbox next to Generate decides only WHERE the result lands:
               another take in this item's history, or a new character based on
@@ -1215,254 +1300,104 @@ export function RefImagePanel({
               hideImportPrompt
               hideModelPicker
               modelOverride={imgModel}
+              aspectRatioOverride={ratio}
+              characterSheet={sheetMode}
+              sheetLayoutPrompt={
+                /(character|cast)/i.test(kind)
+                  ? CHARACTER_SHEET_LAYOUT
+                  : OBJECT_SHEET_LAYOUT
+              }
+              preparePrompt={sheetMode || lessMode ? prepareGenerationPrompt : undefined}
+              busyOverride={generating ? 'Generation already running…' : ''}
               suggestedName={suggestedVariantName}
               // Unchecked: the change becomes another take of THIS item.
               asVersion={!readOnly && createMode === 'version'}
               // A read-only library item has no legal "version" mode to fall
               // back to — leave the checkbox where it is.
               onClose={() => !readOnly && setCreateMode('version')}
-              onCreated={(name, instruction) => {
+              onCreated={(name, _instruction, generationPrompt) => {
+                const madeVersion = !readOnly && createMode === 'version'
+                if (madeVersion) {
+                  setReferencesOpen(false)
+                  onNotesChange?.(generationPrompt)
+                  void loadManifest()
+                }
                 onToast(
-                  !readOnly && createMode === 'version'
-                    ? `New take of ${refId} — pick it from the history above.`
-                    : `Variant ${name} created.`,
+                  madeVersion
+                    ? `New take of ${refId} is now selected.`
+                    : `${name} was added to Cast and My Library.`,
                 )
-                onVariantCreated?.(name, instruction)
+                if (!madeVersion) onVariantCreated?.(name, generationPrompt)
                 if (!readOnly) setCreateMode('version')
               }}
             />
-          {/* Pick-from-session, opened from ⚙ Options. */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void upload(f)
+              e.target.value = ''
+            }}
+          />
+          {/* Project image picker, opened from ⚙ Options. It is deliberately
+              bounded and collapsible so a large library cannot take over the
+              entire World Kit page. */}
           {galleryOpen && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-              {pool === null ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading images…</span>
-              ) : pool.length === 0 ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No images in this project yet.</span>
+            <div className="ref-project-picker">
+              <div className="ref-project-picker-head">
+                <span className="vg-typepick" role="tablist" aria-label="Project image source">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={galleryTab === 'world-kit'}
+                    className={galleryTab === 'world-kit' ? 'on' : ''}
+                    onClick={() => setGalleryTab('world-kit')}
+                  >
+                    World Kit
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={galleryTab === 'recent'}
+                    className={galleryTab === 'recent' ? 'on' : ''}
+                    onClick={() => setGalleryTab('recent')}
+                  >
+                    Recent generations
+                  </button>
+                </span>
+                <button type="button" className="vp-undo" onClick={() => setGalleryOpen(false)}>
+                  ▴ Collapse
+                </button>
+              </div>
+              <div className="ref-project-picker-grid">
+              {(galleryTab === 'world-kit' ? pool : recentPool) === null ? (
+                <span className="ref-project-picker-empty"><span className="spin" /> Loading images…</span>
+              ) : (galleryTab === 'world-kit' ? pool : recentPool)?.length === 0 ? (
+                <span className="ref-project-picker-empty">
+                  {galleryTab === 'world-kit'
+                    ? 'No other World Kit images yet.'
+                    : 'No recent image generations yet.'}
+                </span>
               ) : (
-                pool.map((img) => (
+                (galleryTab === 'world-kit' ? pool : recentPool)?.map((img) => (
                   <button
                     key={img.path}
                     type="button"
-                    title={img.path}
+                    title={`${img.name}\n${img.path}`}
                     onClick={() => mapImage(img.path)}
-                    style={{
-                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                      background: 'none', border: '1px solid var(--line, #2a3142)',
-                    }}
+                    className="ref-project-picker-tile"
                   >
-                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 96, width: 'auto', display: 'block' }} onLoad={equalArea(12000)} />
+                    <img src={contentUrl(img.path)} alt="" loading="lazy" />
+                    <span>{img.name}</span>
                   </button>
                 ))
               )}
-            </div>
-          )}
-          {/* The old update-mode body stays MOUNTED but hidden: it still owns
-              the hidden file input that ⚙ Options drives, and the attach/
-              prompt plumbing those handlers close over. Nothing here is
-              reachable by clicking. */}
-          <div style={{ display: 'none' }}>
-            <>
-          {genError !== '' && (
-            <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>
-              ⚠ {genError}
-            </div>
-          )}
-          {/* ONE controls row, same shape as the variant form: references on
-              the left, everything else behind ⚙ Options in the actions row.
-              "Improve prompt with AI" is gone — rewriting the prompt is an
-              Options item now, so it stops competing with Generate. */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" className="vp-undo" onClick={openAttach}>
-              ⧉ Image references{attached.length ? ` · ${attached.length}` : ''} {attachOpen ? '▾' : '▸'}
-            </button>
-          </div>
-          {/* The guidance box only appears once an AI rewrite is armed (from
-              Options), so it is never sitting open taking up room. */}
-          {improveOpen && (
-            <div style={{ marginBottom: 6 }}>
-              <textarea
-                value={guidance}
-                onChange={(e) => setGuidance(e.target.value)}
-                rows={2}
-                placeholder="Optional — tell the AI what to emphasize (e.g. “more specific about the wardrobe”, “moodier lighting”)…"
-                style={{
-                  width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'transparent',
-                  color: 'var(--ink-2)', border: '1px solid var(--line, #2a3142)', borderRadius: 6,
-                  padding: '7px 9px', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6,
-                }}
-              />
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* The TEXT model — only ever visible here, where the only
-                    thing it does is rewrite the prompt above. */}
-                <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>rewrite with:</span>
-                <ModelPicker model={txtModel} onChange={setTxtModel} disabled={detailing} />
-                {lessMode && (
-                  <span style={{ fontSize: 11.5, color: 'var(--ink-3)', display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    save this instruction:
-                    <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('session')}>
-                      for this video
-                    </button>
-                    <button type="button" style={{ ...small, padding: '4px 8px', fontSize: 11.5 }} onClick={() => saveLess('global')}>
-                      for all videos
-                    </button>
-                  </span>
-                )}
               </div>
             </div>
           )}
-          {attached.length > 0 && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 6 }}>
-              {attached.map((path) => (
-                <span key={path} style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 96 }}>
-                  <img src={contentUrl(path)} alt="" style={{ height: 96, width: 'auto', borderRadius: 8, border: '1px solid var(--accent)', display: 'block' }} onLoad={equalArea(11000, 150)} />
-                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {itemForPath(path)?.ref ?? path.split('/').pop()}
-                  </span>
-                  <button
-                    type="button"
-                    title="Remove reference image"
-                    onClick={() => applyAttached(attached.filter((x) => x !== path))}
-                    style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, lineHeight: '13px', padding: 0, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer' }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {attachOpen && (
-            <div style={{ marginBottom: 8 }}>
-              {attachPool === null ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading…</span>
-              ) : attachPool.length === 0 ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No other images in this session yet.</span>
-              ) : (
-                (() => {
-                  // ONE PICKER, SOURCES LABELLED. The pool already spans the
-                  // World Kit, generated shots and session uploads — it was
-                  // just one undifferentiated wall, so you could not tell a
-                  // cast member from a stray intake photo.
-                  const usable = attachPool.filter((img) => !img.path.includes(`world-kit-refs/${refId}/`))
-                  const groups: { label: string; note: string; items: PoolImage[] }[] = [
-                    {
-                      label: 'WORLD KIT',
-                      note: 'cast, environments and props from this project',
-                      items: usable.filter((i) => i.ref),
-                    },
-                    {
-                      label: 'GENERATED SHOTS',
-                      note: 'stills already made in this project',
-                      items: usable.filter((i) => !i.ref && /generated-assets/.test(i.path)),
-                    },
-                    {
-                      label: 'UPLOADS & SOURCE MATERIAL',
-                      note: 'what you brought into the project',
-                      items: usable.filter((i) => !i.ref && !/generated-assets/.test(i.path)),
-                    },
-                  ].filter((g) => g.items.length)
-                  const tile = (img: PoolImage) => (
-                    <button
-                      key={img.path}
-                      type="button"
-                      title={img.name}
-                      onClick={() =>
-                        applyAttached(
-                          attached.includes(img.path)
-                            ? attached.filter((x) => x !== img.path)
-                            : attached.length < 4
-                              ? [...attached, img.path]
-                              : attached,
-                        )
-                      }
-                      style={{
-                        padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', position: 'relative',
-                        border: attached.includes(img.path) ? '2px solid var(--accent)' : '1px solid var(--line, #2a3142)',
-                      }}
-                    >
-                      <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
-                      <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, fontSize: 10.5, lineHeight: '16px', background: 'rgba(5,6,8,.78)', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 4px' }}>
-                        {img.ref ?? img.name}
-                      </span>
-                    </button>
-                  )
-                  return groups.map((g) => (
-                    <div key={g.label} style={{ marginBottom: 10 }}>
-                      <p className="vp-menu-h" style={{ border: 0, padding: 0, margin: '0 0 6px' }}>
-                        {g.label} <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {g.note}</span>
-                      </p>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{g.items.map(tile)}</div>
-                    </div>
-                  ))
-                })()
-              )}
-            </div>
-          )}
-          {/* Setting the item's OWN image is a different act from attaching
-              references, but it does not deserve a permanent row — it rides
-              under the references fold with the rest of the image plumbing. */}
-          <div
-            style={{
-              display: attachOpen ? 'flex' : 'none',
-              gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10,
-            }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>set this item’s own image:</span>
-            <button type="button" className="vp-undo" onClick={() => fileRef.current?.click()}>↑ Upload</button>
-            <button type="button" className="vp-undo" onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) void upload(f)
-                e.target.value = ''
-              }}
-            />
-          </div>
-          {galleryOpen && attachOpen && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-              {pool === null ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading session images…</span>
-              ) : pool.length === 0 ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No images in this session yet — upload some in Video idea (source material).</span>
-              ) : (
-                pool.map((img) => (
-                  <button
-                    key={img.path}
-                    type="button"
-                    title={img.path}
-                    onClick={() => mapImage(img.path)}
-                    style={{ padding: 0, border: '1px solid var(--line, #2a3142)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none' }}
-                  >
-                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 120, width: 'auto', display: 'block' }} onLoad={equalArea(20000)} />
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-          {/* ONE primary action, bottom-right, like every other module. While
-              the improve panel is open, improving IS the action; it closes on
-              success and Generate returns. */}
-          {/* Same row, same controls, same order as the variant form — the two
-              modes differ only in the fields above. */}
-          <div className="vp-edit-actions" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-            {optionsMenu}
-            {variantToggle}
-            <span style={{ flex: 1 }} />
-            {improveOpen ? (
-              <button type="button" className="vp-save" disabled={detailing} onClick={detailPrompt}>
-                {detailing ? (<><span className="spin" /> Improving…</>) : '✦ Improve prompt'}
-              </button>
-            ) : (
-              <button type="button" className="vp-save" disabled={generating} onClick={generate}>
-                {generating ? (<><span className="spin" /> Generating…</>) : '✦ Generate'}
-              </button>
-            )}
-          </div>
-            </>
-          </div>
         </div>
       )}
           </div>
@@ -1587,6 +1522,32 @@ export function RefImagePanel({
           </div>
         </div>
       ) : null}
+      {lightboxUrl
+        ? createPortal(
+          <div
+            className="vg-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${refId} enlarged image`}
+            onClick={() => setLightboxUrl('')}
+          >
+            <button
+              type="button"
+              className="vg-lightbox-close"
+              aria-label="Close enlarged image"
+              onClick={() => setLightboxUrl('')}
+            >
+              ✕
+            </button>
+            <img
+              src={lightboxUrl}
+              alt={`${refId} enlarged`}
+              onClick={(event) => event.stopPropagation()}
+            />
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   )
 }

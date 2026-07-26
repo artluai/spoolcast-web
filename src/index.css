@@ -275,6 +275,11 @@ footer {
 .name { font-weight: 500; }
 .desc { margin-left: auto; color: var(--ink-3); font-family: var(--mono); font-size: 11px; }
 .ratio-glyph { width: 22px; height: 13px; border: 1px solid var(--ink-3); border-radius: 2px; }
+.ratio-menu-choice { display: flex !important; align-items: center; gap: 10px; }
+.ratio-menu-choice > .ratio-glyph { flex: none; box-sizing: border-box; }
+.ratio-menu-choice > span { min-width: 0; }
+.ratio-menu-choice > span > span { display: block; color: var(--ink-2); }
+.ratio-menu-choice small { margin-top: 1px !important; }
 .video-rows { gap: 16px; }
 .video-pill { width: 520px; }
 .video-pill .pill-body { display: block; padding: 0; }
@@ -576,6 +581,21 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .gcp-tile { position: relative; margin: 0; border-radius: 10px; overflow: hidden; background: var(--bg-4); line-height: 0; }
 .gcp-tile img { width: 100%; height: auto; display: block; }
 .gcp-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gcp-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.gcp-tabs { display: inline-flex; flex: none; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.gcp-tabs button { border: 0; background: var(--bg-2); color: var(--ink-3); padding: 8px 13px; font: inherit; font-size: 12px; cursor: pointer; }
+.gcp-tabs button + button { border-left: 1px solid var(--line-2); }
+.gcp-tabs button.on { background: var(--accent-glow); color: var(--ink); }
+.gcp-intro { margin: 9px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.gcp-advanced-toggle { margin-top: 8px; padding: 3px 0; border: 0; background: none; color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.gcp-advanced-toggle:hover { color: var(--ink); }
+.gcp-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; padding: 4px 0; }
+.gcp-filters label { display: flex; align-items: center; gap: 7px; color: var(--ink-3); font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.gcp-filters .sc-select { min-height: 30px; padding: 4px 28px 4px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.gcp-variant { position: absolute; top: 8px; left: 8px; z-index: 1; padding: 5px 8px; border-radius: 6px; background: rgba(5,6,8,.72); color: var(--accent-2); font-family: var(--mono); font-size: 9px; line-height: 1; letter-spacing: .1em; text-transform: uppercase; backdrop-filter: blur(4px); }
+.gcp-prompt-only { min-height: 250px; display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 32px; line-height: 1.45; background: linear-gradient(145deg, var(--bg-3), var(--bg-4)); }
+.gcp-prompt-only span { font-family: var(--mono); font-size: 9px; letter-spacing: .16em; color: var(--accent-2); }
+.gcp-prompt-only p { margin: 0; color: var(--ink-2); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 /* Name rides ON the picture; description and actions surface on hover. */
 .gcp-name { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: baseline; gap: 8px; padding: 22px 12px 10px; line-height: 1.3;
   background: linear-gradient(180deg, transparent, rgba(5,6,8,.82)); transition: opacity .14s; }
@@ -597,7 +617,20 @@ body.chat-pinned .detail-card.full { right: 380px; }
 @media (hover: none) { .gcp-over { opacity: 1; pointer-events: auto; } .gcp-name { opacity: 0; } }
 /* No shared text-input style existed when this landed — borrows the select
    treatment from .wk-scope so it reads as the same family. */
-.gcp-search { width: 100%; margin-top: 12px; background: var(--bg-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.gcp-search { flex: 1 1 280px; min-width: 180px; background: var(--bg-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+@media (max-width: 700px) {
+  .gcp-toolbar { align-items: stretch; flex-direction: column; }
+  .gcp-tabs { align-self: flex-start; }
+  .gcp-search { flex-basis: auto; width: 100%; }
+}
+.ref-source-panel { margin-top: 7px; }
+.ref-source-toggle { display: flex; align-items: center; gap: 4px; padding: 4px 0; border: 0; background: none; color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.ref-source-toggle:hover { color: var(--ink); }
+.ref-source-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ref-source-grid img { display: block; max-width: 100%; height: 90px; width: auto; object-fit: contain; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg-4); }
+.ref-selected-column { width: 420px; max-width: 100%; flex: none; }
+.ref-selected-frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.ref-selected-frame > img { display: block; max-width: 100%; border-width: 1px; border-style: solid; border-radius: 10px; background: var(--bg-4); }
 .wk-items { display: flex; flex-wrap: wrap; gap: 7px; }
 .wk-item { font-size: 11.5px; color: var(--ink-2); background: var(--bg-3); border-radius: 7px; padding: 6px 10px; }
 .wk-manage { align-self: flex-start; background: transparent; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
@@ -972,6 +1005,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-select-wrap .vp-menu button:disabled { opacity: .38; cursor: default; }
 .vg-select-wrap .vp-menu button small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; line-height: 1.3; text-transform: uppercase; letter-spacing: .08em; }
 .vg-select-wrap .vp-menu button > .vg-select-choice { display: flex; align-items: center; gap: 8px; }
+.ref-options-menu button > .vg-select-choice { display: flex; align-items: center; gap: 8px; }
 .vg-menu-check { position: relative; width: 12px; height: 12px; flex: none; border: 1px solid var(--line-2); border-radius: 3px; background: var(--bg-2); }
 .vg-menu-check.on { border-color: var(--accent); background: var(--accent); }
 .vg-menu-check.on::after { content: ''; position: absolute; left: 3px; top: 1px; width: 3px; height: 6px; border: solid #071021; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
@@ -1018,8 +1052,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
    box was a cropped letterslot. Portrait clips cap by height and center. */
 .vg-preview { aspect-ratio: 16 / 9; max-height: 460px; margin: 0 auto; max-width: 100%; position: relative; background: var(--bg-4); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; display: grid; place-items: center; color: var(--ink-3); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .vg-preview img, .vg-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vg-preview .vg-enlarge { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0; transition: opacity .12s; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,18,.8); color: var(--ink-2); border-radius: 6px; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; font-size: 13px; }
-.vg-preview:hover .vg-enlarge { opacity: 1; }
+.vg-enlarge { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0; transition: opacity .12s; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,18,.8); color: var(--ink-2); border-radius: 6px; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; font-size: 13px; }
+.vg-preview:hover .vg-enlarge, .ref-selected-frame:hover .vg-enlarge, .vg-enlarge:focus-visible { opacity: 1; }
 .vg-lightbox { position: fixed; inset: 0; z-index: 120; background: rgba(5,7,12,.88); display: grid; place-items: center; padding: 28px; }
 .vg-lightbox img, .vg-lightbox video { max-width: min(96vw, 1400px); max-height: 92vh; width: auto; height: auto; border-radius: 10px; display: block; }
 .vg-lightbox .vg-lightbox-close { position: fixed; top: 18px; right: 22px; border: 1px solid rgba(255,255,255,.25); background: rgba(10,12,18,.8); color: var(--ink); border-radius: 8px; width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; font-size: 15px; }
@@ -3054,28 +3088,16 @@ body.chat-pinned { padding-right: 380px; }
    around it read as a third action competing with the real ones. */
 .vp-varflag { display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
 .vp-varflag input { margin: 0; accent-color: var(--accent); }
-/* Anchored variant of .vp-menu. The base is position:fixed; overriding that to
-   absolute inline lost the panel background and let the menu render see-through
-   over the content below, so the whole look is restated here. */
-/* display:block is load-bearing: this is a <span>, and .vp-menu's own layout
-   comes from position:fixed. Anchored (absolute) inside an inline parent, an
-   inline box ignores bottom/min-width and collapses its block children into a
-   thin strip — which is all the menu rendered as. */
-.vp-menu.vp-menu-anchored { display: block; position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 1002;
-  background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; padding: 5px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.5); max-height: 60vh; overflow-y: auto; }
-.vp-menu.vp-menu-anchored .vp-menu-h:first-child { margin-top: 0; }
-/* The menu's children are <span>s, which stay inline and give the block
-   container no height to wrap — the menu collapsed to a ~12px strip. The
-   fixed-position .vp-menu usages never hit this because their children are
-   <button>s. Flex column makes every child a block regardless of tag. */
-.vp-menu.vp-menu-anchored { display: flex; flex-direction: column; }
-.vp-menu.vp-menu-anchored > * { flex: none; }
-/* THE squash: `.vg-select-wrap .vp-menu` sets `top: calc(100% + 5px)`, and
-   with our `bottom` the box was pinned at BOTH edges — 12px of menu with 411px
-   of content inside it. Opening upward means no top at all. Higher specificity
-   than the .vg-select-wrap rule, so it wins wherever this menu is used. */
-.vg-select-wrap .vp-menu.vp-menu-anchored { top: auto; bottom: calc(100% + 6px); max-width: none; }
+.ref-options-menu { display: flex; flex-direction: column; }
+.ref-options-menu > * { flex: none; }
+.ref-project-picker { margin-top: 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-2); padding: 10px; }
+.ref-project-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ref-project-picker-grid { max-height: 390px; overflow-y: auto; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; padding-right: 4px; }
+.ref-project-picker-empty { color: var(--ink-3); font-size: 12px; padding: 14px 4px; }
+.ref-project-picker-tile { position: relative; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; cursor: pointer; background: none; }
+.ref-project-picker-tile:hover { border-color: var(--accent); }
+.ref-project-picker-tile img { width: auto; height: 118px; display: block; object-fit: cover; }
+.ref-project-picker-tile span { position: absolute; inset: auto 0 0; overflow: hidden; padding: 14px 6px 5px; background: linear-gradient(transparent, rgba(5,6,8,.9)); color: var(--ink-1); font-family: var(--mono); font-size: 9.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 /* Host controls (⚙ Options, "save as a new variant") sit left, Generate right. */
 .vp-var-inline .vp-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .vp-var-inline .vp-edit-actions > .vp-save { margin-left: auto; }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl, postAction } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import GlobalCharacterPicker from './GlobalCharacterPicker'
 import { useWorkflowStore } from '../../store/workflow'
@@ -351,18 +351,18 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // user's pending edits are lost on the next save.
   const openLibrary = async () => {
     try {
-      await fetch(actionUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session: activeSession(),
-          tenant: 'local',
-          action: 'set_stage_output',
-          stage_id: 'world_kit',
-          path: 'working/world-kit.md',
-          content: draftRef.current,
-        }),
+      const out = await postAction<{ content?: string; normalized_variants?: boolean }>({
+        action: 'set_stage_output',
+        stage_id: 'world_kit',
+        path: 'working/world-kit.md',
+        content: draftRef.current,
       })
+      const normalized = out?.data?.content
+      if (normalized && normalized !== draftRef.current) {
+        // Persist the repaired draft too. Otherwise a refresh would restore the
+        // legacy `Kind=variant` row and overwrite Cast on the next library open.
+        setStageDraft(stageId, normalized)
+      }
     } catch {
       /* engine offline — the picker will surface the failure on add */
     }
@@ -372,8 +372,21 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // A library pick / variation writes the FILE via the engine; mirror the row
   // into the unsaved draft too, exactly like variants and audio above, so a
   // pending edit isn't erased on the next save.
-  const onLibraryAdded = (ref: string, variation: boolean, description: string, parent: string) => {
-    const isGlobal = !variation
+  const onLibraryAdded = ({
+    ref,
+    description,
+    variantOf,
+    global: isGlobal,
+    open,
+    existing = false,
+  }: {
+    ref: string
+    description: string
+    variantOf: string
+    global: boolean
+    open: boolean
+    existing?: boolean
+  }) => {
     // BY COLUMN NAME, never by position: the engine adds a `Variant of` column
     // to Cast the first time a variation is made, so a fixed 4-cell row lands
     // the description under the wrong header (it showed up in Variant of, with
@@ -386,7 +399,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     // The engine adds `Variant of` to the FILE on the first variation; the
     // in-memory draft here predates that write, so mirror the column too —
     // otherwise the link is dropped on the next save.
-    if (variation && !cols.some((c) => /^variant of$/i.test(c.trim().replace(/_/g, ' ')))) {
+    if (variantOf && !cols.some((c) => /^variant of$/i.test(c.trim().replace(/_/g, ' ')))) {
       cols.splice(Math.max(0, cols.length - 1), 0, 'Variant of')
     }
     const row = cols.map((c) => {
@@ -394,20 +407,37 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
       if (/^ref$/.test(k)) return ref
       if (/^kind$/.test(k)) return 'character'
       if (/^scope$/.test(k)) return isGlobal ? 'global' : 'episode-only'
-      if (/^variant of$/.test(k)) return isGlobal ? '' : `global:${parent}`
+      if (/^variant of$/.test(k)) return variantOf
       // A global row deliberately carries NO description — it resolves from
       // the library at read time. A variation owns its text.
       if (/^(notes|beats)$/.test(k)) return isGlobal ? '' : description
       return ''
     })
-    const key = appendRowToTable('Cast', cols, row)
+    let key: string | null = null
+    if (existing) {
+      for (let si = 0; si < (doc?.sections.length ?? 0); si += 1) {
+        const section = doc?.sections[si]
+        if (!section || section.kind !== 'table') continue
+        const refIndex = section.columns.findIndex((column) => /^ref$/i.test(column.trim()))
+        if (refIndex < 0) continue
+        const rowIndex = section.rows.findIndex(
+          (candidate) => (candidate[refIndex] || '').trim().toLowerCase() === ref.toLowerCase(),
+        )
+        if (rowIndex >= 0) {
+          key = `${si}:${rowIndex}`
+          break
+        }
+      }
+    } else {
+      key = appendRowToTable('Cast', cols, row)
+    }
     // ALWAYS close: leaving the picker open reads as "nothing happened". The
     // proof of the add is seeing the item land in the kit behind it.
     setLibraryOpen(false)
     // A variation exists to be CHANGED, so open it — the user lands directly
     // in its editor with the copied description ready to edit. A global pick
     // is read-only, so there is nothing to expand into.
-    if (key && variation) setExpanded(key)
+    if (key && open) setExpanded(key)
     // Scroll the new item into view. Closing the modal drops you back at
     // whatever you were looking at, so without this the thing you just added
     // is off-screen and the add still reads as "nothing happened".
@@ -437,9 +467,11 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     }
     window.setTimeout(reveal, 50)
     toast(
-      isGlobal
-        ? `Added ${ref} from the character library`
-        : `Made your own version: ${ref} — edit its description below`,
+      existing
+        ? `Selected ${ref}`
+        : isGlobal
+        ? `Added ${ref} from the Spoolcast Library`
+        : `Added ${ref} to Cast and My Library`,
     )
   }
 
@@ -613,9 +645,11 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     const refIdx = Math.max(0, section.columns.findIndex((c) => /ref/i.test(c)))
                     const kindIdx = section.columns.findIndex((c) => /kind/i.test(c))
                     const scopeIdx = section.columns.findIndex((c) => /scope/i.test(c))
+                    const variantIdx = section.columns.findIndex((c) => /variant\s*of/i.test(c.replace(/_/g, ' ')))
                     const descIdx = section.columns.length - 1
                     const key = `${si}:${ri}`
                     const shared = scopeIdx >= 0 && isSharedScope(row[scopeIdx])
+                    const isVariant = variantIdx >= 0 && !!(row[variantIdx] || '').trim()
                     // A global item's sheet lives OUTSIDE the session, at a
                     // content-root path — globalContentUrl, not contentUrl.
                     const img =
@@ -667,14 +701,21 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                             />
                             {/* Same labeling language as the mapping wall:
                                 kind chip top-left, name ON the image. */}
-                            {kindIdx >= 0 && row[kindIdx] ? (
-                              <span
-                                className={`vp-map-chip k-${(row[kindIdx] || '').trim().toLowerCase()}`}
-                                style={{ position: 'absolute', top: 8, left: 8, lineHeight: 1.4, backdropFilter: 'blur(4px)' }}
-                              >
-                                {(row[kindIdx] || '').trim().toUpperCase()}
-                              </span>
-                            ) : null}
+                            <span style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 5, alignItems: 'center' }}>
+                              {kindIdx >= 0 && row[kindIdx] ? (
+                                <span
+                                  className={`vp-map-chip k-${(row[kindIdx] || '').trim().toLowerCase()}`}
+                                  style={{ position: 'static', lineHeight: 1.4, backdropFilter: 'blur(4px)' }}
+                                >
+                                  {(row[kindIdx] || '').trim().toUpperCase()}
+                                </span>
+                              ) : null}
+                              {isVariant ? (
+                                <span className="vp-map-chip k-variant" style={{ position: 'static', lineHeight: 1.4, backdropFilter: 'blur(4px)' }}>
+                                  VARIANT
+                                </span>
+                              ) : null}
+                            </span>
                             <span
                               style={{
                                 position: 'absolute', left: 0, right: 0, bottom: 0,
@@ -728,7 +769,15 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                             display: 'flex', flexDirection: 'column',
                           }}
                         >
-                          <span style={{ padding: '10px 12px 0', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
+                          <span style={{ display: 'flex', gap: 5, padding: '10px 12px 0' }}>
+                            {kindIdx >= 0 && row[kindIdx] ? (
+                              <span className={`vp-map-chip k-${(row[kindIdx] || '').trim().toLowerCase()}`}>
+                                {(row[kindIdx] || '').trim().toUpperCase()}
+                              </span>
+                            ) : null}
+                            {isVariant ? <span className="vp-map-chip k-variant">VARIANT</span> : null}
+                          </span>
+                          <span style={{ padding: '7px 12px 0', color: 'var(--ink-1)', fontSize: 13, fontWeight: 600 }}>
                             {row[refIdx] || '(unnamed)'}
                             {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
                           </span>
@@ -757,6 +806,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                         onClick={() => setExpanded(expanded === key ? null : key)}
                       >
                         {row[refIdx] || '(unnamed)'}
+                        {isVariant && <span style={{ color: 'var(--accent-2)', marginLeft: 6 }}>variant</span>}
                         {shared && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>⬡</span>}
                       </button>
                     )
@@ -972,13 +1022,41 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                             setCell(descIdx, text)
                           }}
                           onToast={toast}
-                          onVariantCreated={(name, instruction) => {
+                          onVariantCreated={(name, generationPrompt) => {
+                            const cols = [...section.columns]
+                            if (!cols.some((c) => /^variant of$/i.test(c.trim().replace(/_/g, ' ')))) {
+                              cols.splice(Math.max(0, cols.length - 1), 0, 'Variant of')
+                            }
                             const groupIdx = section.columns.findIndex((c) => /group/i.test(c))
-                            appendRowToTable(
-                              'Master variants',
-                              ['Ref', 'Kind', 'Scope', 'Group', 'Variant of', 'Notes'],
-                              [name, 'variant', 'episode-only', groupIdx >= 0 ? row[groupIdx] : '', row[refIdx].trim(), instruction.replace(/\|/g, '/')],
-                            )
+                            const baseKind = kindIdx >= 0 ? (row[kindIdx] || '').trim().toLowerCase() : 'reference'
+                            const variantKind = baseKind === 'master' ? 'variant' : baseKind
+                            const values = cols.map((column) => {
+                              const key = column.trim().toLowerCase().replace(/_/g, ' ')
+                              if (key === 'ref') return name
+                              if (key === 'kind') return variantKind
+                              if (key === 'scope') return 'episode-only'
+                              if (key === 'group') return groupIdx >= 0 ? row[groupIdx] : ''
+                              if (key === 'variant of') return row[refIdx].trim()
+                              if (/^(notes|beats|description)$/.test(key)) return generationPrompt.replace(/\|/g, '/')
+                              return ''
+                            })
+                            const targetHeading = baseKind === 'master' ? 'Master variants' : section.heading
+                            const targetColumns = baseKind === 'master'
+                              ? ['Ref', 'Kind', 'Scope', 'Group', 'Variant of', 'Notes']
+                              : cols
+                            const targetValues = baseKind === 'master'
+                              ? [name, 'variant', 'episode-only', groupIdx >= 0 ? row[groupIdx] : '', row[refIdx].trim(), generationPrompt.replace(/\|/g, '/')]
+                              : values
+                            const key = appendRowToTable(targetHeading, targetColumns, targetValues)
+                            if (key) {
+                              setExpanded(key)
+                              window.setTimeout(() => {
+                                document.querySelector(`[data-wk-ref="${name}"]`)?.scrollIntoView({
+                                  behavior: 'smooth',
+                                  block: 'center',
+                                })
+                              }, 80)
+                            }
                           }}
                           onAudioAdd={(a) => {
                             appendRowToTable(

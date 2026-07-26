@@ -82,16 +82,24 @@ export const downloadUrl = (path: string, session = activeSession()) => apiUrl('
 // changes, because every call site is already labeled with what it actually needs.
 export type MediaVariant = 'full' | 'preview'
 
-/** URL for a piece of session media (relative to the session's content root). */
-export const contentUrl = (sessionRelPath: string, variant: MediaVariant = 'full') => {
+/** URL for a piece of media owned by a specific session. */
+export const sessionContentUrl = (
+  sessionRelPath: string,
+  session: string,
+  variant: MediaVariant = 'full',
+) => {
   const clean = sessionRelPath.trim().replace(/^\/+/, '')
   if (!clean) return ''
   const wantsPreview = MEDIA_PREVIEW_ENABLED && variant === 'preview'
   return apiUrl('content', {
-    path: `sessions/${activeSession()}/${clean}`,
+    path: `sessions/${session}/${clean}`,
     quality: wantsPreview ? 'preview' : undefined,
   })
 }
+
+/** URL for a piece of media in the active session. */
+export const contentUrl = (sessionRelPath: string, variant: MediaVariant = 'full') =>
+  sessionContentUrl(sessionRelPath, activeSession(), variant)
 
 /** URL for a GLOBAL library asset (content-root relative, e.g.
  *  `global/characters/mika/portrait.png`). Global assets live outside any

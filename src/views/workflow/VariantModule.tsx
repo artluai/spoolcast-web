@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DEFAULT_IMAGE_MODEL_ID, IMAGE_MODELS } from '../../lib/image-models'
-import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, getFileJson, globalContentUrl, TENANT } from '../../lib/api'
 import { ModelPicker } from './ModelPicker'
 
 // THE VARIANT MODULE — shared between the step-7 mapping board and the
@@ -32,6 +32,11 @@ export function VariantModule({
   hideModelPicker = false,
   asVersion = false,
   modelOverride = '',
+  aspectRatioOverride = 'auto',
+  characterSheet = false,
+  sheetLayoutPrompt = '',
+  preparePrompt,
+  busyOverride = '',
   onClose,
   onCreated,
 }: {
@@ -60,8 +65,18 @@ export function VariantModule({
   asVersion?: boolean
   /** Image model chosen by the host, when it owns the picker. */
   modelOverride?: string
+  /** Canvas ratio chosen by the host. "auto" lets the engine use the session ratio. */
+  aspectRatioOverride?: string
+  /** Build a multi-angle reference sheet instead of preserving one framing. */
+  characterSheet?: boolean
+  /** Exact visual layout required when characterSheet is on. */
+  sheetLayoutPrompt?: string
+  /** Optional host-owned prompt preparation, run invisibly after Generate. */
+  preparePrompt?: (basePrompt: string) => Promise<string>
+  /** A durable job rediscovered by the host after this module remounts. */
+  busyOverride?: string
   onClose: () => void
-  onCreated: (name: string, instruction: string) => void
+  onCreated: (name: string, instruction: string, generationPrompt: string) => void
 }) {
   const [pool, setPool] = useState<VariantBase[]>(kit)
   useEffect(() => {
@@ -169,7 +184,7 @@ export function VariantModule({
     const r = await fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'upload_file', filename: safeName, content: b64 }),
+      body: JSON.stringify({ session: activeSession(), tenant: TENANT, action: 'upload_file', filename: safeName, content: b64 }),
     }).then((x) => x.json()).catch(() => null)
     if (r?.ok) {
       const rel = `source/${safeName}`
@@ -190,7 +205,8 @@ export function VariantModule({
   }
 
   const createVariant = async () => {
-    if (!vInstr.trim()) return
+    if (!vInstr.trim() || busyOverride) return
+    const instruction = vInstr.trim().replace(/[.!?]+$/, '')
     // Typed name > host's suggestion (e.g. "lena-mine-v2") > derived from the
     // instruction. The suggestion is what the placeholder shows, so leaving
     // the box alone gives you exactly the name you were promised.
@@ -200,6 +216,33 @@ export function VariantModule({
       `${base.name}--${vInstr.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`
     ).replace(/-+$/, '')
     setVErr('')
+    const target = asVersion ? base.name : name
+    // Establish the existing manifest ids before spending generation credits,
+    // so completion can identify and select the exact new take.
+    const beforeManifest = asVersion
+      ? await getFileJson<{ versions?: { id?: string }[] }>(
+          `source/world-kit-refs/${target}/manifest.json`,
+        )
+      : null
+    const beforeVersionIds = asVersion
+      ? new Set(beforeManifest?.versions?.flatMap((v) => (v.id ? [v.id] : [])) ?? [])
+      : null
+    if (asVersion && !beforeManifest && base.image_path) {
+      setVErr('Could not read this item’s history, so generation was not started.')
+      return
+    }
+    const rawBasePrompt = (base.active_prompt || base.notes || '').trim()
+    let basePrompt = rawBasePrompt
+    if (preparePrompt) {
+      setVBusy('Preparing prompt…')
+      try {
+        basePrompt = await preparePrompt(rawBasePrompt)
+      } catch (error) {
+        setVBusy('')
+        setVErr(error instanceof Error ? error.message : 'Could not prepare the generation prompt.')
+        return
+      }
+    }
     // AS A NEW TAKE: no new kit item, so nothing to register — the image lands
     // in the base item's own history. Registration is what makes a variant a
     // separate character, and that is exactly what the unchecked box opts out
@@ -209,7 +252,7 @@ export function VariantModule({
       const reg = await fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'register_master_variant', master: base.name, name, instruction: vInstr.trim() }),
+        body: JSON.stringify({ session: activeSession(), tenant: TENANT, action: 'register_master_variant', master: base.name, name, instruction }),
       }).then((r) => r.json()).catch(() => null)
       if (!reg?.ok) {
         setVBusy('')
@@ -217,29 +260,39 @@ export function VariantModule({
         return
       }
     }
-    const target = asVersion ? base.name : name
     const baseIsImage = !!base.image_path
     setVBusy(baseIsImage ? 'Generating — the base image is reference 1…' : 'Generating — from the base prompt…')
     // Image-backed base: the picked image IS the shot, one change. Prompt-only
     // base: the variant is a change to the prompt itself.
-    const basePrompt = (base.active_prompt || base.notes || '').trim()
-    const prompt = baseIsImage
-      ? `Use reference image 1 as the exact base shot: same person, same clothes, same setting, same framing, same light, same casual phone-camera look. ` +
-        `ONE change only: ${vInstr.trim()}. Everything else stays exactly identical to the reference.`
-      : `${basePrompt}\n\nONE deliberate change from the description above: ${vInstr.trim()}. Everything else stays exactly as described.`
+    const sheetLayout = sheetLayoutPrompt ||
+      'a reference sheet with multiple full-subject angles plus one close-up view on a clean blank studio background'
+    const prompt = characterSheet
+      ? baseIsImage
+        ? `Use reference image 1 for the exact subject identity, face, hair, wardrobe and visual style. ` +
+          `${basePrompt ? `Follow this generation prompt: ${basePrompt}` : `Create ${sheetLayout}.`} ` +
+          `ONE deliberate change only: ${instruction}. Keep the subject consistent in every view.`
+        : `${basePrompt || `Create ${sheetLayout}.`}\n\n` +
+          `ONE deliberate change from the description above: ${instruction}. Keep the subject consistent in every view.`
+      : baseIsImage
+        ? `Use reference image 1 as the exact base shot: same person, same clothes, same setting, same framing, same light, same casual phone-camera look. ` +
+          `ONE change only: ${instruction}. Everything else stays exactly identical to the reference.`
+        : `${basePrompt}\n\nONE deliberate change from the description above: ${instruction}. Everything else stays exactly as described.`
     const gen = await fetch(actionUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session: activeSession(),
-        tenant: 'local',
+        tenant: TENANT,
         action: 'generate_worldkit_ref',
         ref: target,
         prompt,
         // Exactly what the picker shows: explicit choice > the host's picker
         // (step 5 owns it) > base's model > default.
-        model: vModel || modelOverride || base.active_model || DEFAULT_IMAGE_MODEL_ID,
+        // A host-owned picker is the explicit choice. The module's own state
+        // only wins when its picker is actually visible.
+        model: modelOverride || vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID,
         ref_images: [...(baseIsImage ? [base.image_path] : []), ...vExtras],
+        ...(aspectRatioOverride !== 'auto' ? { aspect_ratio: aspectRatioOverride } : {}),
         allow_cost: true,
       }),
     }).then((r) => r.json()).catch(() => null)
@@ -248,16 +301,39 @@ export function VariantModule({
       setVErr(gen?.error || gen?.message || 'Generation did not start.')
       return
     }
-    // A NEW TAKE lands inside an item that already exists, so "did a kit item
-    // appear" never fires — watch for its picture CHANGING instead.
-    const before = asVersion ? pool.find((k) => k.name === target)?.image_path ?? '' : ''
     for (let i = 0; i < 40; i += 1) {
       await new Promise((r) => window.setTimeout(r, 6000))
-      const fresh = await refetchKit()
-      const hit = fresh.find((k) => k.name === target)?.image_path
-      if (asVersion ? !!hit && hit !== before : !!hit) {
+      const currentManifest = asVersion
+        ? await getFileJson<{ versions?: { id?: string }[] }>(
+            `source/world-kit-refs/${target}/manifest.json`,
+          )
+        : null
+      const newVersion = currentManifest?.versions?.find((v) => !!v.id && !beforeVersionIds?.has(v.id))
+      const appeared = asVersion
+        ? !!newVersion?.id
+        : !!(await refetchKit()).find((k) => k.name === target)?.image_path
+      if (appeared) {
+        if (asVersion && newVersion?.id) {
+          setVBusy('Selecting the new take…')
+          const selected = await fetch(actionUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session: activeSession(),
+              tenant: TENANT,
+              action: 'set_ref_active',
+              ref: target,
+              id: newVersion.id,
+            }),
+          }).then((r) => r.json()).catch(() => null)
+          if (!selected?.ok) {
+            setVBusy('')
+            setVErr(selected?.error || 'The image finished, but could not be selected.')
+            return
+          }
+        }
         setVBusy('')
-        onCreated(target, vInstr.trim())
+        onCreated(target, instruction, prompt)
         onClose()
         return
       }
@@ -267,12 +343,13 @@ export function VariantModule({
     setVErr('Still generating — it will appear in the kit when done.')
   }
 
+  const busyText = vBusy || busyOverride
 
   // The FIELDS are the module; the floating window is only chrome. Inline
   // mode embeds them straight into a host panel.
   const fieldsJsx = (
     <div className="vp-var-fields">
-      <label className="vp-edit-field">What changes (one deliberate change)
+      <label className="vp-edit-field">What should be different?
         <textarea rows={7} value={vInstr} onChange={(e) => setVInstr(e.target.value)} placeholder="e.g. remove the shoes from her hands — hands rest in her lap" />
       </label>
       <div className="vp-var-row">
@@ -311,7 +388,7 @@ export function VariantModule({
           <ModelPicker
             model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
             onChange={setVModel}
-            disabled={!!vBusy}
+            disabled={!!busyText}
             models={IMAGE_MODELS}
             primary={IMAGE_MODELS}
           />
@@ -374,7 +451,7 @@ export function VariantModule({
       {vErr ? <p className="vp-var-err">{vErr}</p> : null}
       <div className="vp-edit-actions">
         {actionsSlot}
-        <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
+        <button type="button" className="vp-save" disabled={!!busyText || !vInstr.trim()} onClick={createVariant}>
           {asVersion ? '✦ Generate' : '✦ Generate variant'}
         </button>
       </div>
@@ -385,10 +462,10 @@ export function VariantModule({
     return (
       <div className="vp-var-inline" style={{ position: 'relative', border: '1px dashed var(--line, #2a3142)', borderRadius: 10, padding: 12 }}>
         {fieldsJsx}
-        {vBusy ? (
+        {busyText ? (
           <div className="vp-var-busyov" style={{ borderRadius: 10 }}>
             <span className="spin" />
-            <span>{vBusy}</span>
+            <span>{busyText}</span>
           </div>
         ) : null}
       </div>
@@ -423,12 +500,12 @@ export function VariantModule({
             type="button"
             className="vp-var-close"
             title="Cancel"
-            disabled={!!vBusy}
+            disabled={!!busyText}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={onClose}
           >✕</button>
         </div>
-        <div className={`vp-var-scroll ${vBusy ? 'busy' : ''}`}>
+        <div className={`vp-var-scroll ${busyText ? 'busy' : ''}`}>
           <div className="vp-var-body">
             {base.image_path ? (
               <img className="vp-var-master" src={contentUrl(base.image_path)} alt={base.name} onClick={() => setLightbox(base.image_path)} title="Click to view large" />
@@ -440,10 +517,10 @@ export function VariantModule({
             {fieldsJsx}
           </div>
         </div>
-        {vBusy ? (
+        {busyText ? (
           <div className="vp-var-busyov">
             <span className="spin" />
-            <span>{vBusy}</span>
+            <span>{busyText}</span>
           </div>
         ) : null}
       </div>

@@ -145,17 +145,35 @@ export function appendDraftVariantRow(name: string, baseName: string, instructio
   if (!md) return
   try {
     const doc = parseWorldKit(md)
-    let table = doc.sections.find((sec) => sec.kind === 'table' && /master variants/i.test(sec.heading))
+    const source = doc.sections.find((sec) => {
+      if (sec.kind !== 'table') return false
+      const iRef = col(sec.columns, /^ref$/i)
+      return iRef >= 0 && sec.rows.some((row) => (row[iRef] || '').trim() === baseName)
+    })
+    if (!source || source.kind !== 'table') return
+    const sourceRef = col(source.columns, /^ref$/i)
+    const sourceKind = col(source.columns, /^kind$/i)
+    const baseRow = source.rows.find((row) => (row[sourceRef] || '').trim() === baseName)
+    const baseKind = (sourceKind >= 0 ? baseRow?.[sourceKind] : 'reference')?.trim().toLowerCase() || 'reference'
+    let table = baseKind === 'master'
+      ? doc.sections.find((sec) => sec.kind === 'table' && /master variants/i.test(sec.heading))
+      : source
     if (!table) {
       table = { kind: 'table', heading: 'Master variants', columns: ['Ref', 'Kind', 'Scope', 'Group', 'Variant of', 'Notes'], rows: [] } as (typeof doc.sections)[number]
       doc.sections.push(table)
     }
     if (table.kind !== 'table') return
+    if (!table.columns.some((c) => /^variant of$/i.test(c.trim().replace(/_/g, ' ')))) {
+      const descriptionAt = table.columns.findIndex((c) => /notes|beats|description/i.test(c))
+      const insertAt = descriptionAt >= 0 ? descriptionAt : table.columns.length
+      table.columns.splice(insertAt, 0, 'Variant of')
+      for (const row of table.rows) row.splice(insertAt, 0, '')
+    }
     const iRef = col(table.columns, /^ref$/i)
     if (table.rows.some((r) => (r[iRef] || '').trim() === name)) return
     const row = table.columns.map((c) => {
       if (/^ref$/i.test(c)) return name
-      if (/^kind$/i.test(c)) return 'variant'
+      if (/^kind$/i.test(c)) return baseKind === 'master' ? 'variant' : baseKind
       if (/^scope$/i.test(c)) return 'episode-only'
       if (/variant/i.test(c)) return baseName
       if (/notes|description/i.test(c)) return instruction.replace(/\|/g, '/')
