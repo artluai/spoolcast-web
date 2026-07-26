@@ -863,6 +863,28 @@ export function RefImagePanel({
               </span>
               <small>expands what you wrote into a fuller image prompt</small>
             </button>
+            {/* Setting the item's OWN picture — not a reference for the next
+                generation. Rare, so it lives in the menu rather than a row. */}
+            <button
+              type="button"
+              onClick={() => {
+                setOptionsOpen(false)
+                fileRef.current?.click()
+              }}
+            >
+              <span className="vg-select-choice">↑ Upload an image for this item</span>
+              <small>replaces the picture above with a file from your computer</small>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOptionsOpen(false)
+                void openGallery()
+              }}
+            >
+              <span className="vg-select-choice">↦ Use an image already in this project</span>
+              <small>pick from what you have uploaded or generated</small>
+            </button>
             {active && active.kind !== 'generated' ? (
               <button
                 type="button"
@@ -1097,14 +1119,9 @@ export function RefImagePanel({
                     }
                   }}
                 >
-                  {/* The label follows the mode — saying "Update existing"
-                      over a variant form contradicts what is on screen. */}
-                  {createOpen ? '▾' : '▸'}{' '}
-                  {readOnly
-                    ? 'Make my own version'
-                    : createMode === 'variant'
-                      ? 'Make a new variant'
-                      : 'Update existing'}
+                  {/* Always the same label: this button only opens the editor.
+                      WHAT happens is the checkbox next to Generate. */}
+                  {createOpen ? '▾' : '▸'} Update existing
                 </button>
                 <span
                   title="Prompt length vs. the selected model's limit"
@@ -1173,8 +1190,11 @@ export function RefImagePanel({
                 ? `Another take of ${refId} — lands in its history above; click a thumbnail to pick the active one.`
                 : `A NEW linked item — one deliberate change, its own history. Unrelated item? Use + Add on the section.`}
           </p>
-          {readOnly || createMode === 'variant' ? (
-            <VariantModule
+          {/* ONE body for both outcomes. The fields never change — the
+              checkbox next to Generate decides only WHERE the result lands:
+              another take in this item's history, or a new character based on
+              it. A global item can only ever do the latter. */}
+          <VariantModule
               inline
               base={{
                 name: refId,
@@ -1196,16 +1216,51 @@ export function RefImagePanel({
               hideModelPicker
               modelOverride={imgModel}
               suggestedName={suggestedVariantName}
+              // Unchecked: the change becomes another take of THIS item.
+              asVersion={!readOnly && createMode === 'version'}
               // A read-only library item has no legal "version" mode to fall
               // back to — leave the checkbox where it is.
               onClose={() => !readOnly && setCreateMode('version')}
               onCreated={(name, instruction) => {
-                onToast(`Variant ${name} created.`)
+                onToast(
+                  !readOnly && createMode === 'version'
+                    ? `New take of ${refId} — pick it from the history above.`
+                    : `Variant ${name} created.`,
+                )
                 onVariantCreated?.(name, instruction)
                 if (!readOnly) setCreateMode('version')
               }}
             />
-          ) : (
+          {/* Pick-from-session, opened from ⚙ Options. */}
+          {galleryOpen && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+              {pool === null ? (
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading images…</span>
+              ) : pool.length === 0 ? (
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>No images in this project yet.</span>
+              ) : (
+                pool.map((img) => (
+                  <button
+                    key={img.path}
+                    type="button"
+                    title={img.path}
+                    onClick={() => mapImage(img.path)}
+                    style={{
+                      padding: 0, borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                      background: 'none', border: '1px solid var(--line, #2a3142)',
+                    }}
+                  >
+                    <img src={contentUrl(img.path)} alt="" loading="lazy" style={{ height: 96, width: 'auto', display: 'block' }} onLoad={equalArea(12000)} />
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+          {/* The old update-mode body stays MOUNTED but hidden: it still owns
+              the hidden file input that ⚙ Options drives, and the attach/
+              prompt plumbing those handlers close over. Nothing here is
+              reachable by clicking. */}
+          <div style={{ display: 'none' }}>
             <>
           {genError !== '' && (
             <div style={{ color: 'var(--red, #e5534b)', fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 }}>
@@ -1407,7 +1462,7 @@ export function RefImagePanel({
             )}
           </div>
             </>
-          )}
+          </div>
         </div>
       )}
           </div>

@@ -3057,10 +3057,25 @@ body.chat-pinned { padding-right: 380px; }
 /* Anchored variant of .vp-menu. The base is position:fixed; overriding that to
    absolute inline lost the panel background and let the menu render see-through
    over the content below, so the whole look is restated here. */
-.vp-menu.vp-menu-anchored { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 1002;
+/* display:block is load-bearing: this is a <span>, and .vp-menu's own layout
+   comes from position:fixed. Anchored (absolute) inside an inline parent, an
+   inline box ignores bottom/min-width and collapses its block children into a
+   thin strip — which is all the menu rendered as. */
+.vp-menu.vp-menu-anchored { display: block; position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 1002;
   background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; padding: 5px;
   box-shadow: 0 10px 30px rgba(0,0,0,.5); max-height: 60vh; overflow-y: auto; }
 .vp-menu.vp-menu-anchored .vp-menu-h:first-child { margin-top: 0; }
+/* The menu's children are <span>s, which stay inline and give the block
+   container no height to wrap — the menu collapsed to a ~12px strip. The
+   fixed-position .vp-menu usages never hit this because their children are
+   <button>s. Flex column makes every child a block regardless of tag. */
+.vp-menu.vp-menu-anchored { display: flex; flex-direction: column; }
+.vp-menu.vp-menu-anchored > * { flex: none; }
+/* THE squash: `.vg-select-wrap .vp-menu` sets `top: calc(100% + 5px)`, and
+   with our `bottom` the box was pinned at BOTH edges — 12px of menu with 411px
+   of content inside it. Opening upward means no top at all. Higher specificity
+   than the .vg-select-wrap rule, so it wins wherever this menu is used. */
+.vg-select-wrap .vp-menu.vp-menu-anchored { top: auto; bottom: calc(100% + 6px); max-width: none; }
 /* Host controls (⚙ Options, "save as a new variant") sit left, Generate right. */
 .vp-var-inline .vp-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .vp-var-inline .vp-edit-actions > .vp-save { margin-left: auto; }

@@ -30,6 +30,7 @@ export function VariantModule({
   suggestedName = '',
   hideImportPrompt = false,
   hideModelPicker = false,
+  asVersion = false,
   modelOverride = '',
   onClose,
   onCreated,
@@ -53,6 +54,10 @@ export function VariantModule({
   // Step-5 folds these into its own controls; step 7 keeps them inline.
   hideImportPrompt?: boolean
   hideModelPicker?: boolean
+  /** Write the result back onto the BASE item as another take, instead of
+   *  registering a new kit item. Same input either way — "one change from
+   *  this picture" — only the destination differs. */
+  asVersion?: boolean
   /** Image model chosen by the host, when it owns the picker. */
   modelOverride?: string
   onClose: () => void
@@ -195,17 +200,24 @@ export function VariantModule({
       `${base.name}--${vInstr.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`
     ).replace(/-+$/, '')
     setVErr('')
-    setVBusy('Registering…')
-    const reg = await fetch(actionUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'register_master_variant', master: base.name, name, instruction: vInstr.trim() }),
-    }).then((r) => r.json()).catch(() => null)
-    if (!reg?.ok) {
-      setVBusy('')
-      setVErr(reg?.error || 'Could not register the variant.')
-      return
+    // AS A NEW TAKE: no new kit item, so nothing to register — the image lands
+    // in the base item's own history. Registration is what makes a variant a
+    // separate character, and that is exactly what the unchecked box opts out
+    // of.
+    if (!asVersion) {
+      setVBusy('Registering…')
+      const reg = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'register_master_variant', master: base.name, name, instruction: vInstr.trim() }),
+      }).then((r) => r.json()).catch(() => null)
+      if (!reg?.ok) {
+        setVBusy('')
+        setVErr(reg?.error || 'Could not register the variant.')
+        return
+      }
     }
+    const target = asVersion ? base.name : name
     const baseIsImage = !!base.image_path
     setVBusy(baseIsImage ? 'Generating — the base image is reference 1…' : 'Generating — from the base prompt…')
     // Image-backed base: the picked image IS the shot, one change. Prompt-only
@@ -222,7 +234,7 @@ export function VariantModule({
         session: activeSession(),
         tenant: 'local',
         action: 'generate_worldkit_ref',
-        ref: name,
+        ref: target,
         prompt,
         // Exactly what the picker shows: explicit choice > the host's picker
         // (step 5 owns it) > base's model > default.
@@ -236,12 +248,16 @@ export function VariantModule({
       setVErr(gen?.error || gen?.message || 'Generation did not start.')
       return
     }
+    // A NEW TAKE lands inside an item that already exists, so "did a kit item
+    // appear" never fires — watch for its picture CHANGING instead.
+    const before = asVersion ? pool.find((k) => k.name === target)?.image_path ?? '' : ''
     for (let i = 0; i < 40; i += 1) {
       await new Promise((r) => window.setTimeout(r, 6000))
       const fresh = await refetchKit()
-      if (fresh.find((k) => k.name === name)?.image_path) {
+      const hit = fresh.find((k) => k.name === target)?.image_path
+      if (asVersion ? !!hit && hit !== before : !!hit) {
         setVBusy('')
-        onCreated(name, vInstr.trim())
+        onCreated(target, vInstr.trim())
         onClose()
         return
       }
@@ -279,16 +295,18 @@ export function VariantModule({
               count has to include it or it under-reports what gets sent. */}
           {vExtrasOpen ? '▾' : '▸'} Image references{base.image_path ? ` · ${vExtras.length + 1}` : vExtras.length ? ` · ${vExtras.length}` : ''}
         </button>
-        {/* Name sits on this row: a ref id is a short slug, and a full-width
-            field on its own line implied it wanted a sentence. */}
-        <label className="vp-var-nameinline">
-          <span>name</span>
-          <input
-            value={vName}
-            onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
-            placeholder={suggestedName || `${base.name}--…`}
-          />
-        </label>
+        {/* Only a NEW character needs a name — a new take belongs to the item
+            it came from. */}
+        {!asVersion && (
+          <label className="vp-var-nameinline">
+            <span>name</span>
+            <input
+              value={vName}
+              onChange={(e) => setVName(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))}
+              placeholder={suggestedName || `${base.name}--…`}
+            />
+          </label>
+        )}
         {!hideModelPicker && (
           <ModelPicker
             model={vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID}
@@ -357,7 +375,7 @@ export function VariantModule({
       <div className="vp-edit-actions">
         {actionsSlot}
         <button type="button" className="vp-save" disabled={!!vBusy || !vInstr.trim()} onClick={createVariant}>
-          ✦ Generate variant
+          {asVersion ? '✦ Generate' : '✦ Generate variant'}
         </button>
       </div>
     </div>
