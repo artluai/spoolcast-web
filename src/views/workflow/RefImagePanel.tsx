@@ -844,6 +844,25 @@ export function RefImagePanel({
                 </button>
               </>
             )}
+            {/* The AI rewrite lives here instead of as a button next to
+                Generate — it is a way to prepare the prompt, not a second
+                primary action. Arming it opens the guidance box above. */}
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={improveOpen}
+              className={improveOpen ? 'on' : ''}
+              onClick={() => {
+                setImproveOpen((v) => !v)
+                setOptionsOpen(false)
+              }}
+            >
+              <span className="vg-select-choice">
+                <i className={`vg-menu-check ${improveOpen ? 'on' : ''}`} />
+                Rewrite the prompt with AI
+              </span>
+              <small>expands what you wrote into a fuller image prompt</small>
+            </button>
             {active && active.kind !== 'generated' ? (
               <button
                 type="button"
@@ -1078,7 +1097,14 @@ export function RefImagePanel({
                     }
                   }}
                 >
-                  {createOpen ? '▾' : '▸'} {readOnly ? 'Make my own version' : 'Update existing'}
+                  {/* The label follows the mode — saying "Update existing"
+                      over a variant form contradicts what is on screen. */}
+                  {createOpen ? '▾' : '▸'}{' '}
+                  {readOnly
+                    ? 'Make my own version'
+                    : createMode === 'variant'
+                      ? 'Make a new variant'
+                      : 'Update existing'}
                 </button>
                 <span
                   title="Prompt length vs. the selected model's limit"
@@ -1186,17 +1212,17 @@ export function RefImagePanel({
               ⚠ {genError}
             </div>
           )}
-          {/* REWRITE THE PROMPT — a different model doing a different job. Its
-              picker lives INSIDE the fold it belongs to, so the two model
-              pickers are never on screen together unlabelled. */}
+          {/* ONE controls row, same shape as the variant form: references on
+              the left, everything else behind ⚙ Options in the actions row.
+              "Improve prompt with AI" is gone — rewriting the prompt is an
+              Options item now, so it stops competing with Generate. */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button type="button" className="vp-undo" onClick={() => setImproveOpen((v) => !v)}>
-              ✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}
-            </button>
             <button type="button" className="vp-undo" onClick={openAttach}>
-              ⧉ Reference images{attached.length ? ` (${attached.length})` : ''} {attachOpen ? '▴' : '▾'}
+              ⧉ Image references{attached.length ? ` · ${attached.length}` : ''} {attachOpen ? '▾' : '▸'}
             </button>
           </div>
+          {/* The guidance box only appears once an AI rewrite is armed (from
+              Options), so it is never sitting open taking up room. */}
           {improveOpen && (
             <div style={{ marginBottom: 6 }}>
               <textarea
@@ -1316,8 +1342,16 @@ export function RefImagePanel({
               )}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>or add your own:</span>
+          {/* Setting the item's OWN image is a different act from attaching
+              references, but it does not deserve a permanent row — it rides
+              under the references fold with the rest of the image plumbing. */}
+          <div
+            style={{
+              display: attachOpen ? 'flex' : 'none',
+              gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>set this item’s own image:</span>
             <button type="button" className="vp-undo" onClick={() => fileRef.current?.click()}>↑ Upload</button>
             <button type="button" className="vp-undo" onClick={() => void openGallery()}>↦ Pick from session {galleryOpen ? '▴' : '▾'}</button>
             <input
@@ -1332,7 +1366,7 @@ export function RefImagePanel({
               }}
             />
           </div>
-          {galleryOpen && (
+          {galleryOpen && attachOpen && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {pool === null ? (
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}><span className="spin" /> Loading session images…</span>
