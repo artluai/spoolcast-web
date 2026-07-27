@@ -383,6 +383,9 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
                     </figcaption>
                     {isIn ? <span className="gcp-in">✓ in this project</span> : null}
                     <div className="gcp-over">
+                      {/* Audition-sheet framing: this text is the AI actor,
+                          not the character they'll play in a video. */}
+                      <span className="gcp-over-label">AI ACTOR DESCRIPTION</span>
                       <p>{c.description}</p>
                       <div className="gcp-acts">
                         {isIn ? (

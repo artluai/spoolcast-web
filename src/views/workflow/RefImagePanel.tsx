@@ -1101,7 +1101,11 @@ export function RefImagePanel({
             <div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 {charPrompt === null ? (
-                  isAudio ? 'SOUND DESCRIPTION — how it sounds; rides into every clip of whatever it’s linked to' : 'IMAGE PROMPT — makes this item’s image'
+                  isAudio ? 'SOUND DESCRIPTION — how it sounds; rides into every clip of whatever it’s linked to'
+                    // A GLOBAL library row shows the creator's audition sheet:
+                    // it describes the AI actor, never their role in this video.
+                    : readOnly ? 'AI ACTOR DESCRIPTION — the creator’s look, not their role in this video'
+                    : 'IMAGE PROMPT — makes this item’s image'
                 ) : (
                   <>
                     {(['prompt', 'character'] as const).map((v) => (
