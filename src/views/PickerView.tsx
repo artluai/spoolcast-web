@@ -27,14 +27,6 @@ type EngineSession = {
   stage_count: number
 }
 
-const UNDECIDED_TEMPLATE: EngineTemplate = {
-  id: 'undecided',
-  name: 'Decide at step 1',
-  format: 'template picked later',
-  contract: 'base',
-  description: 'Start with the idea; pick the template at step 1 — or let AI pick it from the idea.',
-}
-
 const timeAgo = (epochSeconds?: number) => {
   if (!epochSeconds) return ''
   const s = Math.max(0, Date.now() / 1000 - epochSeconds)
@@ -57,6 +49,8 @@ export function PickerView({
   const [sessions, setSessions] = useState<EngineSession[]>([])
   const [engineDown, setEngineDown] = useState(false)
   const [creating, setCreating] = useState<EngineTemplate | null>(null)
+  const [creatingBlank, setCreatingBlank] = useState(false)
+  const [blankError, setBlankError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<EngineSession | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
@@ -89,6 +83,27 @@ export function PickerView({
   const matches = (t: EngineTemplate) =>
     !query || `${t.name} ${t.format} ${t.description ?? ''}`.toLowerCase().includes(query)
   const anyShown = templates.some(matches)
+  const createBlank = async () => {
+    if (creatingBlank) return
+    const existingIds = new Set(sessions.map((session) => session.id))
+    let number = 1
+    let id = 'untitled-01'
+    while (existingIds.has(id)) id = `untitled-${String(++number).padStart(2, '0')}`
+
+    setCreatingBlank(true)
+    setBlankError('')
+    const out = await postAction<{ session?: string }>({
+      action: 'create_session',
+      session: id,
+      template: 'undecided',
+    })
+    setCreatingBlank(false)
+    if (out?.ok && out.data?.session) {
+      onOpenSession(out.data.session)
+    } else {
+      setBlankError(out?.message || out?.error || 'Could not start the project.')
+    }
+  }
 
   return (
     <section className="tpl-picker" onScroll={(e) => onScrolled(e.currentTarget.scrollTop > 8)}>
@@ -98,7 +113,7 @@ export function PickerView({
           <p className="lede">Pick up where you left off, or start something new.</p>
         </div>
 
-        <button className="blank-top solo" onClick={() => setCreating(UNDECIDED_TEMPLATE)}>
+        <button className="blank-top solo" disabled={creatingBlank} onClick={() => void createBlank()}>
           <span className="bt-glyph">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 5v14M5 12h14" />
@@ -106,10 +121,14 @@ export function PickerView({
           </span>
           <span className="bt-text">
             <span className="bt-title">Standalone — start blank</span>
-            <span className="bt-sub">A true one-off. Choose format &amp; style from scratch — no template applied.</span>
+            <span className="bt-sub">Start with your idea. Choose a series or template in Step 1.</span>
           </span>
-          <span className="bt-cta">Start blank →</span>
+          <span className="bt-cta">
+            {creatingBlank ? <span className="spin" /> : null}
+            {creatingBlank ? 'Starting…' : 'Start blank →'}
+          </span>
         </button>
+        {blankError ? <p className="cs-error blank-error">{blankError}</p> : null}
 
         {sessions.length ? (
           <>
@@ -147,7 +166,7 @@ export function PickerView({
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search template, format…"
+              placeholder="Search templates…"
             />
           </div>
         </div>
@@ -161,14 +180,6 @@ export function PickerView({
               onUse={() => setCreating(t)}
             />
           ))}
-          {/* THE INTERCHANGEABLE ORDER: start from the idea alone and pick
-              the template at step 1 (by hand or let AI pick from the idea).
-              The engine runs the session on the base contract until then. */}
-          <PickerTile
-            tpl={UNDECIDED_TEMPLATE}
-            hidden={q.trim().length > 0 && !'decide later undecided idea first'.includes(q.trim().toLowerCase())}
-            onUse={() => setCreating(UNDECIDED_TEMPLATE)}
-          />
         </div>
         {engineDown ? (
           <div className="no-results show">The engine isn’t reachable — start it to see your projects and templates.</div>
@@ -268,7 +279,6 @@ function PickerTile({
       {art?.video ? (
         <video ref={ref} src={art.video} poster={art.poster} preload="metadata" playsInline />
       ) : null}
-      <span className="badge tl">{tpl.format}</span>
       {art?.duration ? <span className="badge tr">{art.duration}</span> : null}
       {art?.video ? (
         <button className="play" aria-label="Play preview">

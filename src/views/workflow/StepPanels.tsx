@@ -9,7 +9,6 @@ import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
-import { FeedbackButton } from './FeedbackButton'
 import { ModelPicker } from './ModelPicker'
 
 const VOICE_RULES_ID = 'series:spoolcast-devlog:voice'
@@ -1507,26 +1506,18 @@ type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock
 // "let AI pick" from the idea already written. Invisible once decided; the
 // engine's lock rule refuses changes after work starts, so this bar only
 // ever appears while changing is still legal.
-export function TemplatePickerBar({ idea = '' }: { idea?: string }) {
+export function TemplatePickerBar({
+  idea = '',
+  chosenBySeries = false,
+}: {
+  idea?: string
+  chosenBySeries?: boolean
+}) {
   type Tpl = { id: string; name?: string; format?: string; description?: string }
   const [tpls, setTpls] = useState<Tpl[]>([])
   const [current, setCurrent] = useState<string | null>(null)
-  const [choice, setChoice] = useState('')
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
-  // The creator the AI cast for this idea, if it decided the video needs a
-  // real person on camera. A PROPOSAL — applying the template does not add it;
-  // the user clicks through to the kit, or picks their own at step 5.
-  const [cast, setCast] = useState<{
-    id: string
-    name?: string
-    description?: string
-    age?: number | null
-    nationality?: string | null
-    content_path?: string | null
-    image_url?: string | null
-    why?: string
-  } | null>(null)
   useEffect(() => {
     let live = true
     Promise.all([
@@ -1537,7 +1528,6 @@ export function TemplatePickerBar({ idea = '' }: { idea?: string }) {
       try {
         const templateId = String(JSON.parse(sess?.data?.content || '{}')?.template || '')
         setCurrent(templateId)
-        setChoice((existing) => existing || templateId)
       } catch {
         setCurrent('')
       }
@@ -1565,20 +1555,20 @@ export function TemplatePickerBar({ idea = '' }: { idea?: string }) {
     setNote(out?.message || out?.error || 'Could not save the idea before using the template.')
     return false
   }
-  const apply = async (id: string) => {
+  const apply = async (id: string, castId = '', ideaAlreadySaved = false) => {
     if (!id || id === current) return
-    setBusy('apply')
+    setBusy(id)
     setNote('')
-    if (!(await persistIdea())) {
+    if (!ideaAlreadySaved && !(await persistIdea())) {
       setBusy('')
       return
     }
     const out = await post({ action: 'apply_template', template: id })
-    if (out?.ok && cast?.id) {
+    if (out?.ok && castId) {
       // The suggested creator rides along with the template so "apply" means
       // what the card says. Best-effort: the kit may not exist yet this early,
       // in which case the user picks at step 5 — never block the template.
-      await post({ action: 'use_global_asset', slug: cast.id })
+      await post({ action: 'use_global_asset', slug: castId })
     }
     if (out?.ok) {
       // The template changes the contract and the step list wholesale — a
@@ -1598,93 +1588,48 @@ export function TemplatePickerBar({ idea = '' }: { idea?: string }) {
     }
     const out = await post({ action: 'suggest_template', allow_cost: true })
     if (out?.ok && out?.data?.template) {
-      setChoice(out.data.template)
-      setNote(`AI suggests ${out.data.template}${out.data.reason ? ` — ${out.data.reason}` : ''}`)
       const meta = out.data.character_meta
-      setCast(
-        meta?.id
-          ? { ...meta, why: String(out.data.character_reason || '') }
-          : null,
-      )
+      await apply(String(out.data.template), String(meta?.id || ''), true)
+      return
     } else {
       setNote(out?.message || out?.error || 'Could not get a suggestion — is the idea written yet?')
     }
     setBusy('')
   }
   return (
-    <div className="panel-flat" style={{ marginBottom: 14 }}>
-      <div className="ch">
-        <h3>{current ? `Template — ${current}` : 'Template — not decided yet'}</h3>
-        <span>picks the step list; changes lock once later work starts</span>
+    <div className="step1-choice-group">
+      <div className="step1-choice-head">
+        <h3>Template</h3>
+        <span>{chosenBySeries && current ? 'Chosen by your series' : 'Choose the workflow for this video'}</span>
       </div>
-      <p className="vp-hint" style={{ margin: '0 0 10px' }}>
-        {current
-          ? 'Choose a different template only while this project is still at Step 1.'
-          : 'Pick the video’s template now, or let AI pick from the idea above.'}
-      </p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      <div className="step1-choice-row">
         {tpls.map((t) => (
           <button
             key={t.id}
             type="button"
-            className={`vp-undo ${choice === t.id ? 'on' : ''}`}
-            style={choice === t.id ? { borderColor: 'var(--accent)', color: 'var(--accent-2)' } : undefined}
+            className={`step1-choice-card ${current === t.id ? 'sel' : ''}`}
+            disabled={!!busy || (chosenBySeries && !!current && current !== t.id)}
             title={t.description || t.id}
-            onClick={() => setChoice(t.id)}
+            aria-pressed={current === t.id}
+            onClick={() => void apply(t.id)}
           >
-            {t.name || t.id}{t.format ? ` · ${t.format}` : ''}
+            <b>{busy === t.id ? <><span className="spin" /> Applying…</> : (t.name || displayId(t.id))}</b>
+            {t.description ? <span>{t.description}</span> : null}
           </button>
         ))}
-        <button type="button" className="vp-undo vp-aimap" disabled={!!busy} onClick={suggest}>
-          ✦ {busy === 'suggest' ? 'Reading the idea…' : 'Let AI pick from the idea'}
-        </button>
-        <button
-          type="button"
-          className="vp-save"
-          disabled={!choice || (!!current && choice === current) || !!busy}
-          onClick={() => void apply(choice)}
-        >
-          {busy === 'apply'
-            ? 'Applying…'
-            : current && choice === current
-              ? 'Currently applied'
-              : `Apply${choice ? ` ${choice}` : ' template'}`}
-        </button>
+        {!chosenBySeries || !current ? (
+          <button
+            type="button"
+            className="step1-choice-card ai"
+            disabled={!!busy}
+            onClick={() => void suggest()}
+          >
+            <b>✦ {busy === 'suggest' ? 'Reading the idea…' : 'Let AI choose'}</b>
+            <span>Pick the best template from your idea</span>
+          </button>
+        ) : null}
       </div>
       {note ? <p className="vp-hint" style={{ margin: '10px 0 0' }}>{note}</p> : null}
-      {cast ? (
-        <div
-          style={{
-            marginTop: 12,
-            border: '1px solid var(--line, #2a3142)',
-            borderRadius: 10,
-            padding: 10,
-          }}
-        >
-          <p className="vp-menu-h" style={{ margin: '0 0 8px' }}>
-            SUGGESTED CREATOR — FROM THE CHARACTER LIBRARY
-          </p>
-          {cast.image_url || cast.content_path ? (
-            <img
-              src={cast.image_url || globalContentUrl(cast.content_path || '')}
-              alt={`${cast.name ?? cast.id} character sheet`}
-              style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 6 }}
-            />
-          ) : null}
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-            <b style={{ fontSize: 14 }}>{cast.name ?? cast.id}</b>
-            <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
-              {[cast.age ? `${cast.age}` : '', cast.nationality ?? ''].filter(Boolean).join(' · ')}
-            </span>
-          </div>
-          {cast.why ? (
-            <p className="vp-hint" style={{ margin: '6px 0 0' }}>{cast.why}</p>
-          ) : null}
-          <p className="vp-hint" style={{ margin: '6px 0 0', color: 'var(--ink-3)' }}>
-            Applied with the template — you can swap or edit them at the World Kit step.
-          </p>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -1732,9 +1677,8 @@ function StepOneAdvanced({
   const [open, setOpen] = useState(false)
   const [template, setTemplate] = useState('')
   const [series, setSeries] = useState('')
-  const [seriesOptions, setSeriesOptions] = useState<string[]>([])
-  const [seriesChoice, setSeriesChoice] = useState('')
-  const [joiningSeries, setJoiningSeries] = useState(false)
+  const [seriesOptions, setSeriesOptions] = useState<{ id: string; template: string }[]>([])
+  const [joiningSeries, setJoiningSeries] = useState('')
   const [seriesError, setSeriesError] = useState('')
   const [webResearch, setWebResearch] = useState<boolean | null>(null)
   const [kit, setKit] = useState<StepOneKitItem[]>([])
@@ -1757,13 +1701,21 @@ function StepOneAdvanced({
       }
       const sessions = sessionsOut?.data?.sessions
       if (Array.isArray(sessions)) {
-        setSeriesOptions(
-          [...new Set(
-            sessions
-              .map((entry: { series?: string | null }) => String(entry.series || '').trim())
-              .filter(Boolean),
-          )].sort(),
-        )
+        const bySeries = new Map<string, Set<string>>()
+        sessions.forEach((entry: { series?: string | null; template?: string | null }) => {
+          const id = String(entry.series || '').trim()
+          if (!id) return
+          const known = bySeries.get(id) ?? new Set<string>()
+          const templateId = String(entry.template || '').trim()
+          if (templateId) known.add(templateId)
+          bySeries.set(id, known)
+        })
+        setSeriesOptions([...bySeries.entries()]
+          .map(([id, templates]) => ({
+            id,
+            template: templates.size === 1 ? [...templates][0] : '',
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id)))
       }
     })
     return () => {
@@ -1800,9 +1752,9 @@ function StepOneAdvanced({
     }
   }, [open, series])
 
-  const joinSeries = async () => {
-    if (!seriesChoice || joiningSeries) return
-    setJoiningSeries(true)
+  const joinSeries = async (seriesId: string) => {
+    if (!seriesId || joiningSeries || series) return
+    setJoiningSeries(seriesId)
     setSeriesError('')
     const response = await fetch(actionUrl(), {
       method: 'POST',
@@ -1811,13 +1763,13 @@ function StepOneAdvanced({
         session: activeSession(),
         tenant: 'local',
         action: 'join_series',
-        series: seriesChoice,
+        series: seriesId,
       }),
     }).catch(() => null)
     const out = response ? await response.json().catch(() => null) : null
-    setJoiningSeries(false)
+    setJoiningSeries('')
     if (response?.ok && out?.ok) {
-      setSeries(seriesChoice)
+      window.location.reload()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not join this series.')
     }
@@ -1845,6 +1797,7 @@ function StepOneAdvanced({
     <>
       {template || series ? (
         <p className="vp-hint" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '22px 0 0' }}>
+          {series ? <span>Series: {displayId(series)}</span> : <span>Standalone</span>}
           {template ? (
             <span>
               Template: {displayId(template)} ·{' '}
@@ -1864,7 +1817,6 @@ function StepOneAdvanced({
               </button>
             </span>
           ) : null}
-          {series ? <span>Series: {series}</span> : null}
         </p>
       ) : null}
 
@@ -1875,52 +1827,48 @@ function StepOneAdvanced({
       >
         <summary className="vp-section-sum">
           <span className="vp-sec-title">Advanced</span>
-          <span className="vp-section-count">TEMPLATE · SERIES · WORLD KIT · WEB</span>
+          <span className="vp-section-count">OPTIONAL</span>
         </summary>
-        <div style={{ marginTop: 14 }}>
-          <TemplatePickerBar idea={idea} />
-
-          <div className="panel-flat" style={{ marginBottom: 14 }}>
-            <div className="ch">
-              <h3>Series</h3>
-              <span>{series ? 'read-only once joined' : 'optional show settings and shared references'}</span>
+        <div className="step1-advanced-body">
+          <div className="step1-choice-group">
+            <div className="step1-choice-head">
+              <h3>Your Series</h3>
+              <span>Choosing a series also chooses its template</span>
             </div>
-            {series ? (
-              <p className="vp-hint" style={{ margin: 0 }}>
-                This project belongs to <b>{series}</b>. Changing shows mid-project is not supported.
-              </p>
-            ) : seriesOptions.length ? (
-              <>
-                <label className="cs-field">
-                  <b>Join an existing series</b>
-                  <select value={seriesChoice} onChange={(event) => setSeriesChoice(event.target.value)}>
-                    <option value="">Choose a series…</option>
-                    {seriesOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="vp-hint" style={{ margin: '8px 0 10px' }}>
-                  The series fills only settings this project has not already chosen.
-                </p>
+            <div className="step1-choice-row">
+              <button
+                type="button"
+                className={`step1-choice-card ${series ? '' : 'sel'}`}
+                disabled={!!series || !!joiningSeries}
+                aria-pressed={!series}
+              >
+                <b>Standalone</b>
+                <span>Make a one-off video</span>
+              </button>
+              {seriesOptions.map((option) => (
                 <button
+                  key={option.id}
                   type="button"
-                  className="vp-save"
-                  disabled={!seriesChoice || joiningSeries}
-                  onClick={() => void joinSeries()}
+                  className={`step1-choice-card ${series === option.id ? 'sel' : ''}`}
+                  disabled={!!joiningSeries || (!!series && series !== option.id)}
+                  aria-pressed={series === option.id}
+                  onClick={() => void joinSeries(option.id)}
                 >
-                  {joiningSeries ? 'Joining…' : 'Join series'}
+                  <b>
+                    {joiningSeries === option.id ? <><span className="spin" /> Joining…</> : displayId(option.id)}
+                  </b>
+                  <span>{option.template ? displayId(option.template) : 'Series template'}</span>
                 </button>
-                {seriesError ? <p className="voice-error">{seriesError}</p> : null}
-              </>
-            ) : (
-              <p className="vp-hint" style={{ margin: 0 }}>No existing series are available yet.</p>
-            )}
+              ))}
+            </div>
+            {seriesError ? <p className="voice-error">{seriesError}</p> : null}
           </div>
 
+          <TemplatePickerBar idea={idea} chosenBySeries={!!series} />
+
           {series ? (
-            <div className="panel-flat" style={{ marginBottom: 14 }}>
-              <div className="ch">
+            <div className="step1-choice-group">
+              <div className="step1-choice-head">
                 <h3>World Kit</h3>
                 <span>shared show and template references</span>
               </div>
@@ -1967,8 +1915,8 @@ function StepOneAdvanced({
             </div>
           ) : null}
 
-          <div className="panel-flat">
-            <div className="ch">
+          <div className="step1-choice-group">
+            <div className="step1-choice-head">
               <h3>Web research</h3>
               <span>runs in the background after Step 1</span>
             </div>
@@ -2004,6 +1952,8 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
   const [improvedPrompt, setImprovedPrompt] = useState(() => localStorage.getItem(improveProposalStorageKey) || '')
   const [improveError, setImproveError] = useState<string | null>(null)
   const [improveModel, setImproveModel] = useState(DEFAULT_MODEL_ID)
+  const [improveOpen, setImproveOpen] = useState(false)
+  const [improveNotes, setImproveNotes] = useState('')
   const improving = Boolean(improveJobId)
     || Boolean(stageProcess && ['queued', 'running'].includes(stageProcess.status))
   const onBriefChange = (value: string) => {
@@ -2279,29 +2229,44 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         placeholder="Describe the idea, topic, opinion, or story this video should become. Paste any relevant links here too."
       />
 
-      <div className="step-ai-control" style={{ marginTop: 12 }}>
-        <FeedbackButton
-          label="Improve prompt with AI"
-          busy={improving}
-          busyLabel="Improving…"
-          disabled={!brief.trim()}
+      <div className="vg-row-actions step1-prompt-actions">
+        <button
+          type="button"
+          className="vp-undo"
+          disabled={!brief.trim() || improving}
           title={brief.trim()
             ? 'Make this idea clearer and more useful across the full video workflow'
             : 'Write the video idea first'}
-          placeholder="Optional notes about what the improved prompt should emphasize or preserve…"
-          historyKey={`improve-prompt-${stepId.replace(/_/g, '-')}`}
-          ruleStep={stepId}
-          allowRuleSave={false}
-          runExtras={(
+          onClick={() => setImproveOpen((value) => !value)}
+        >
+          {improving ? 'AI rewriting…' : <>✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}</>}
+        </button>
+      </div>
+      {improveOpen ? (
+        <div className="vg-regen-note-panel step1-improve-panel">
+          <textarea
+            value={improveNotes}
+            onChange={(event) => setImproveNotes(event.target.value)}
+            placeholder="Optional notes about what the improved prompt should emphasize or preserve…"
+            rows={3}
+          />
+          <div className="vp-edit-actions step1-improve-actions">
             <ModelPicker
               model={improveModel}
               onChange={setImproveModel}
               disabled={improving}
             />
-          )}
-          onRun={(instructions) => void improveIdea(instructions, improveModel)}
-        />
-      </div>
+            <button
+              type="button"
+              className="vp-save"
+              disabled={!brief.trim() || improving}
+              onClick={() => void improveIdea(improveNotes, improveModel)}
+            >
+              {improving ? <><span className="spin" /> Improving…</> : '✦ Improve prompt'}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {improveError ? <p className="voice-error">{improveError}</p> : null}
       {improvedPrompt ? (

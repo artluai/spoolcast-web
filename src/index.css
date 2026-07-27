@@ -1741,6 +1741,28 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-section > .vp-chunks { margin-top: 12px; }
 .vp-section > .table-wrap { margin-top: 12px; }
 
+/* Step 1 advanced choices: two related, horizontally scalable card rows.
+   Spacing groups the rows; no nested header rules or extra confirm buttons. */
+.step1-advanced-body { display: flex; flex-direction: column; gap: 26px; margin-top: 18px; }
+.step1-choice-group { min-width: 0; }
+.step1-choice-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
+.step1-choice-head h3 { margin: 0; color: var(--ink); font-size: 14px; }
+.step1-choice-head span { color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; text-align: right; }
+.step1-choice-row { display: flex; gap: 9px; overflow-x: auto; padding: 2px 2px 7px; scrollbar-width: thin; scroll-snap-type: x proximity; }
+.step1-choice-card { flex: 0 0 218px; min-height: 70px; scroll-snap-align: start; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-3); color: var(--ink-2); padding: 12px 14px; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+.step1-choice-card:hover:not(:disabled) { border-color: #414866; background: var(--bg-4); color: var(--ink); }
+.step1-choice-card.sel { border-color: var(--accent); background: rgba(122,162,255,.07); box-shadow: 0 0 0 2px var(--accent-glow); }
+.step1-choice-card:disabled:not(.sel) { opacity: .38; cursor: default; }
+.step1-choice-card.sel:disabled { opacity: 1; cursor: default; }
+.step1-choice-card b { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; }
+.step1-choice-card.sel b { color: var(--accent-2); }
+.step1-choice-card > span { color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
+.step1-choice-card.ai { border-color: rgba(176,139,255,.45); background: rgba(176,139,255,.07); }
+.step1-choice-card.ai b { color: var(--purple); }
+.step1-prompt-actions { justify-content: flex-end; margin-top: 8px; }
+.step1-improve-panel { grid-template-columns: minmax(0, 1fr) auto; }
+.step1-improve-actions { justify-content: flex-end; flex-wrap: wrap; }
+
 .vp-jump { margin-left: 12px; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 4px 9px; font-family: var(--mono); font-size: 10px; cursor: pointer; }
 .vp-jump:hover { background: var(--bg-4); color: var(--ink); border-color: var(--accent); }
 
@@ -2615,12 +2637,15 @@ body.chat-pinned { padding-right: 380px; }
   border:0;border-radius:12px;padding:14px 16px;margin-bottom:18px;
   background:var(--panel);transition:background .15s}
 .tpl-picker .blank-top:hover{background:var(--panel-hi)}
+.tpl-picker .blank-top:disabled{cursor:default;opacity:.7}
 .tpl-picker .bt-glyph{width:46px;height:46px;border-radius:10px;flex:none;display:grid;place-items:center;color:var(--accent-2);background:var(--bg-2)}
 .tpl-picker .bt-glyph svg{width:20px;height:20px}
 .tpl-picker .bt-text{flex:1;min-width:0}
 .tpl-picker .bt-title{font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.12em}
 .tpl-picker .bt-sub{display:block;margin-top:3px;color:var(--ink-3);font-size:12.5px}
 .tpl-picker .bt-cta{flex:none;border:0;border-radius:8px;background:var(--accent);color:#071021;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.tpl-picker .bt-cta .spin{margin-right:7px}
+.tpl-picker .blank-error{margin:-14px 2px 20px}
 
 /* tetris/bento grid */
 .tpl-picker .bento{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:160px;gap:8px;grid-auto-flow:dense}
