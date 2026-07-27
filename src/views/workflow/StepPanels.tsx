@@ -2461,7 +2461,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
               : 'Write the video idea first'}
             onClick={() => void improveIdea('', improveModel)}
           >
-            {improving ? 'AI rewriting…' : '✎ Improve prompt with AI'}
+            {improving ? 'AI rewriting…' : '✦ Improve prompt with AI'}
           </button>
         </span>
       </div>

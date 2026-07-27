@@ -1026,13 +1026,13 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-advanced-actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: 8px; }
 .vg-advanced-actions .vg-action-btn { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; white-space: nowrap; }
 .vg-advanced-actions .vp-undo.on { color: var(--ink); border-color: var(--accent); background: var(--accent-glow); }
-.vg-split-action { display: inline-flex; align-items: stretch; min-height: var(--control-height); border: 1px solid var(--line-2); border-radius: var(--control-radius); overflow: hidden; background: var(--bg-3); }
+.vg-split-action { display: inline-flex; align-items: stretch; height: var(--control-height); min-height: var(--control-height); box-sizing: border-box; border: 1px solid var(--line-2); border-radius: var(--control-radius); overflow: hidden; background: var(--bg-3); }
 .vg-split-action:hover { background: var(--bg-4); border-color: var(--accent); }
 .vg-split-action:has(button:disabled) { opacity: .4; cursor: default; }
-.vg-split-toggle { width: 42px; border: 0; border-right: 1px solid var(--line-2); background: transparent; color: var(--ink-2); font-family: var(--mono); font-size: 11px; cursor: pointer; }
+.vg-split-toggle { width: 42px; height: 100%; min-height: 0; box-sizing: border-box; border: 0; border-right: 1px solid var(--line-2); background: transparent; color: var(--ink-2); font-family: var(--mono); font-size: 11px; cursor: pointer; }
 .vg-split-action:hover .vg-split-toggle { border-right-color: var(--accent); color: var(--ink); }
 .vg-split-toggle:disabled { color: var(--ink-3); cursor: not-allowed; }
-.vg-split-action .vg-split-main { width: auto; min-width: 210px; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); font-weight: 400; color: var(--ink-2); }
+.vg-split-action .vg-split-main { width: auto; min-width: 210px; height: 100%; min-height: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); font-weight: 400; color: var(--ink-2); }
 .vg-split-action .vg-split-main:hover:not(:disabled) { background: transparent; color: var(--ink); }
 .vg-split-action .vg-split-main:disabled { background: transparent; border: 0; }
 .vg-regen-note-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-top: 10px; padding: 12px; border: 1px dashed var(--line-2); border-radius: 8px; background: rgba(255,255,255,.015); }
@@ -1792,7 +1792,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .step1-new-series .vp-hint { flex: 0 1 auto; align-self: center; }
 .step1-input-actions { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .step1-attach-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.step1-attach-button { display: inline-flex; align-items: center; min-height: 34px; box-sizing: border-box; cursor: pointer; }
+.step1-attach-button { display: inline-flex; align-items: center; height: var(--control-height); min-height: var(--control-height); box-sizing: border-box; cursor: pointer; }
 .step1-attach-button input { display: none; }
 .step1-info-toggle { display: inline-flex; align-items: center; }
 .step1-helper-text { margin: 6px 0 0; color: var(--ink-3); font-family: var(--sans); font-size: 12px; line-height: 1.5; }

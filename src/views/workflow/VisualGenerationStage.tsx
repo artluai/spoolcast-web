@@ -2535,7 +2535,7 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                           title="Opens a note — tell the AI how this prompt should change (uses model credits)"
                           onClick={() => { setRowAiFor(rowAiFor === row.id ? null : row.id); setRowAiNote('') }}
                         >
-                          {promptBusyIds.has(row.id) ? 'AI rewriting…' : <>✎ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}</>}
+                          {promptBusyIds.has(row.id) ? 'AI rewriting…' : <>✦ Improve prompt with AI {rowAiFor === row.id ? '▴' : '▾'}</>}
                         </button>
                         </span>
                       </div>
