@@ -23,6 +23,7 @@ type EngineSession = {
   style?: string | null
   core_message?: string | null
   modified_at?: number
+  thumbnail?: string | null
   done_stages: number
   stage_count: number
 }
@@ -144,7 +145,9 @@ export function PickerView({
                   sub={`${s.series ?? 'standalone'} · ${timeAgo(s.modified_at)}`}
                   step={`${String(s.done_stages).padStart(2, '0')} / ${s.stage_count}`}
                   pct={s.stage_count ? Math.round((s.done_stages / s.stage_count) * 100) : 0}
-                  thumb={apiUrl('content', { path: `sessions/${s.id}/renders/${s.id}-thumbnail.png` })}
+                  thumb={s.thumbnail
+                    ? apiUrl('content', { path: `sessions/${s.id}/${s.thumbnail}` })
+                    : ''}
                   onClick={() => onOpenSession(s.id)}
                   onDelete={() => {
                     setDeleteError('')

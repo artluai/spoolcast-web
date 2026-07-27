@@ -7,6 +7,7 @@ import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
+import { TEMPLATE_ART } from '../../data/picker'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
 import { ModelPicker } from './ModelPicker'
@@ -1509,15 +1510,26 @@ type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock
 export function TemplatePickerBar({
   idea = '',
   chosenBySeries = false,
+  lockedReason = '',
+  thumbnails = {},
 }: {
   idea?: string
   chosenBySeries?: boolean
+  lockedReason?: string
+  thumbnails?: Record<string, string>
 }) {
-  type Tpl = { id: string; name?: string; format?: string; description?: string }
+  type Tpl = {
+    id: string
+    name?: string
+    description?: string
+    thumbnail?: string
+  }
   const [tpls, setTpls] = useState<Tpl[]>([])
   const [current, setCurrent] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
+  const thumbnailUrl = (path: string) =>
+    /^https?:\/\//i.test(path) ? path : globalContentUrl(path)
   useEffect(() => {
     let live = true
     Promise.all([
@@ -1600,32 +1612,51 @@ export function TemplatePickerBar({
     <div className="step1-choice-group">
       <div className="step1-choice-head">
         <h3>Template</h3>
-        <span>{chosenBySeries && current ? 'Chosen by your series' : 'Choose the workflow for this video'}</span>
+        <span>
+          {lockedReason
+            ? 'Locked after later work started'
+            : chosenBySeries && current
+              ? 'Chosen by your series'
+              : 'Choose the workflow for this video'}
+        </span>
       </div>
       <div className="step1-choice-row">
-        {tpls.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`step1-choice-card ${current === t.id ? 'sel' : ''}`}
-            disabled={!!busy || (chosenBySeries && !!current && current !== t.id)}
-            title={t.description || t.id}
-            aria-pressed={current === t.id}
-            onClick={() => void apply(t.id)}
-          >
-            <b>{busy === t.id ? <><span className="spin" /> Applying…</> : (t.name || displayId(t.id))}</b>
-            {t.description ? <span>{t.description}</span> : null}
-          </button>
-        ))}
-        {!chosenBySeries || !current ? (
+        {tpls.map((t) => {
+          const thumbnail = t.thumbnail
+            ? thumbnailUrl(t.thumbnail)
+            : TEMPLATE_ART[t.id]?.poster || thumbnails[t.id] || ''
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={`step1-choice-card ${current === t.id ? 'sel' : ''}`}
+              disabled={!!busy || !!lockedReason || (chosenBySeries && !!current && current !== t.id)}
+              title={t.description || t.id}
+              aria-pressed={current === t.id}
+              onClick={() => void apply(t.id)}
+            >
+              <span className={`step1-choice-thumb ${thumbnail ? '' : 'empty'}`}>
+                {thumbnail ? <img src={thumbnail} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
+              </span>
+              <span className="step1-choice-copy">
+                <b>{busy === t.id ? <><span className="spin" /> Applying…</> : (t.name || displayId(t.id))}</b>
+                {t.description ? <span>{t.description}</span> : null}
+              </span>
+            </button>
+          )
+        })}
+        {(!chosenBySeries || !current) && !lockedReason ? (
           <button
             type="button"
             className="step1-choice-card ai"
             disabled={!!busy}
             onClick={() => void suggest()}
           >
-            <b>✦ {busy === 'suggest' ? 'Reading the idea…' : 'Let AI choose'}</b>
-            <span>Pick the best template from your idea</span>
+            <span className="step1-choice-thumb ai">✦</span>
+            <span className="step1-choice-copy">
+              <b>{busy === 'suggest' ? 'Reading the idea…' : 'Let AI choose'}</b>
+              <span>Pick the best template from your idea</span>
+            </span>
           </button>
         ) : null}
       </div>
@@ -1640,6 +1671,16 @@ type StepOneKitItem = {
   global_path?: string
   image_scope?: string
   scope?: string
+}
+
+type StepOneSession = {
+  id: string
+  series?: string | null
+  template?: string | null
+  series_template?: string | null
+  modified_at?: number
+  thumbnail?: string | null
+  series_thumbnail?: string | null
 }
 
 const displayId = (id: string) =>
@@ -1677,19 +1718,30 @@ function StepOneAdvanced({
   const [open, setOpen] = useState(false)
   const [template, setTemplate] = useState('')
   const [series, setSeries] = useState('')
-  const [seriesOptions, setSeriesOptions] = useState<{ id: string; template: string }[]>([])
+  const [seriesOptions, setSeriesOptions] = useState<{ id: string; template: string; thumbnail: string }[]>([])
+  const [templateThumbnails, setTemplateThumbnails] = useState<Record<string, string>>({})
   const [joiningSeries, setJoiningSeries] = useState('')
   const [seriesError, setSeriesError] = useState('')
+  const [lockedReason, setLockedReason] = useState('')
   const [webResearch, setWebResearch] = useState<boolean | null>(null)
   const [kit, setKit] = useState<StepOneKitItem[]>([])
-  const [kitLoading, setKitLoading] = useState(false)
+  const [kitLoading, setKitLoading] = useState(true)
 
   useEffect(() => {
     let live = true
     Promise.all([
       fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(sessionsUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([sessionOut, sessionsOut]) => {
+      fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          action: 'template_lock_status',
+        }),
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([sessionOut, sessionsOut, lockOut]) => {
       if (!live) return
       try {
         const cfg = JSON.parse(sessionOut?.data?.content || '{}')
@@ -1699,21 +1751,39 @@ function StepOneAdvanced({
       } catch {
         setWebResearch(true)
       }
+      setLockedReason(String(lockOut?.data?.reason || ''))
       const sessions = sessionsOut?.data?.sessions
       if (Array.isArray(sessions)) {
-        const bySeries = new Map<string, Set<string>>()
-        sessions.forEach((entry: { series?: string | null; template?: string | null }) => {
+        const rows = [...sessions] as StepOneSession[]
+        rows.sort((a, b) => Number(b.modified_at || 0) - Number(a.modified_at || 0))
+        const bySeries = new Map<string, { templates: Set<string>; latest: StepOneSession }>()
+        const nextTemplateThumbnails: Record<string, string> = {}
+        rows.forEach((entry) => {
           const id = String(entry.series || '').trim()
+          const templateId = String(entry.template || entry.series_template || '').trim()
+          const thumbnail = entry.thumbnail
+            ? apiUrl('content', { path: `sessions/${entry.id}/${entry.thumbnail}` })
+            : ''
+          if (templateId && thumbnail && !nextTemplateThumbnails[templateId]) {
+            nextTemplateThumbnails[templateId] = thumbnail
+          }
           if (!id) return
-          const known = bySeries.get(id) ?? new Set<string>()
-          const templateId = String(entry.template || '').trim()
-          if (templateId) known.add(templateId)
+          const known = bySeries.get(id) ?? { templates: new Set<string>(), latest: entry }
+          if (templateId) known.templates.add(templateId)
           bySeries.set(id, known)
         })
+        setTemplateThumbnails(nextTemplateThumbnails)
         setSeriesOptions([...bySeries.entries()]
-          .map(([id, templates]) => ({
+          .map(([id, value]) => ({
             id,
-            template: templates.size === 1 ? [...templates][0] : '',
+            template: value.templates.size === 1 ? [...value.templates][0] : '',
+            thumbnail: value.latest.series_thumbnail
+              ? (/^https?:\/\//i.test(value.latest.series_thumbnail)
+                  ? value.latest.series_thumbnail
+                  : globalContentUrl(value.latest.series_thumbnail))
+              : value.latest.thumbnail
+                ? apiUrl('content', { path: `sessions/${value.latest.id}/${value.latest.thumbnail}` })
+                : '',
           }))
           .sort((a, b) => a.id.localeCompare(b.id)))
       }
@@ -1726,7 +1796,6 @@ function StepOneAdvanced({
   useEffect(() => {
     if (!open || !series) return
     let live = true
-    setKitLoading(true)
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
@@ -1753,7 +1822,7 @@ function StepOneAdvanced({
   }, [open, series])
 
   const joinSeries = async (seriesId: string) => {
-    if (!seriesId || joiningSeries || series) return
+    if (!seriesId || joiningSeries || lockedReason || seriesId === series) return
     setJoiningSeries(seriesId)
     setSeriesError('')
     const response = await fetch(actionUrl(), {
@@ -1772,6 +1841,28 @@ function StepOneAdvanced({
       window.location.reload()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not join this series.')
+    }
+  }
+
+  const leaveSeries = async () => {
+    if (!series || joiningSeries || lockedReason) return
+    setJoiningSeries('__standalone')
+    setSeriesError('')
+    const response = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'leave_series',
+      }),
+    }).catch(() => null)
+    const out = response ? await response.json().catch(() => null) : null
+    setJoiningSeries('')
+    if (response?.ok && out?.ok) {
+      window.location.reload()
+    } else {
+      setSeriesError(out?.message || out?.error || 'Could not make this project standalone.')
     }
   }
 
@@ -1801,7 +1892,7 @@ function StepOneAdvanced({
           {template ? (
             <span>
               Template: {displayId(template)} ·{' '}
-              <button
+              {!lockedReason ? <button
                 type="button"
                 onClick={() => setOpen(true)}
                 style={{
@@ -1814,7 +1905,7 @@ function StepOneAdvanced({
                 }}
               >
                 change
-              </button>
+              </button> : <span>locked</span>}
             </span>
           ) : null}
         </p>
@@ -1833,38 +1924,52 @@ function StepOneAdvanced({
           <div className="step1-choice-group">
             <div className="step1-choice-head">
               <h3>Your Series</h3>
-              <span>Choosing a series also chooses its template</span>
+              <span>{lockedReason ? 'Locked after later work started' : 'Choosing a series also chooses its template'}</span>
             </div>
             <div className="step1-choice-row">
               <button
                 type="button"
                 className={`step1-choice-card ${series ? '' : 'sel'}`}
-                disabled={!!series || !!joiningSeries}
+                disabled={!!joiningSeries || !!lockedReason}
                 aria-pressed={!series}
+                onClick={() => void leaveSeries()}
               >
-                <b>Standalone</b>
-                <span>Make a one-off video</span>
+                <span className="step1-choice-thumb empty" />
+                <span className="step1-choice-copy">
+                  <b>{joiningSeries === '__standalone' ? <><span className="spin" /> Changing…</> : 'Standalone'}</b>
+                  <span>Make a one-off video</span>
+                </span>
               </button>
               {seriesOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
                   className={`step1-choice-card ${series === option.id ? 'sel' : ''}`}
-                  disabled={!!joiningSeries || (!!series && series !== option.id)}
+                  disabled={!!joiningSeries || !!lockedReason}
                   aria-pressed={series === option.id}
                   onClick={() => void joinSeries(option.id)}
                 >
-                  <b>
-                    {joiningSeries === option.id ? <><span className="spin" /> Joining…</> : displayId(option.id)}
-                  </b>
-                  <span>{option.template ? displayId(option.template) : 'Series template'}</span>
+                  <span className={`step1-choice-thumb ${option.thumbnail ? '' : 'empty'}`}>
+                    {option.thumbnail ? <img src={option.thumbnail} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
+                  </span>
+                  <span className="step1-choice-copy">
+                    <b>
+                      {joiningSeries === option.id ? <><span className="spin" /> Changing…</> : displayId(option.id)}
+                    </b>
+                    <span>{option.template ? displayId(option.template) : 'Series template'}</span>
+                  </span>
                 </button>
               ))}
             </div>
             {seriesError ? <p className="voice-error">{seriesError}</p> : null}
           </div>
 
-          <TemplatePickerBar idea={idea} chosenBySeries={!!series} />
+          <TemplatePickerBar
+            idea={idea}
+            chosenBySeries={!!series}
+            lockedReason={lockedReason}
+            thumbnails={templateThumbnails}
+          />
 
           {series ? (
             <div className="step1-choice-group">
@@ -1921,7 +2026,7 @@ function StepOneAdvanced({
               <span>runs in the background after Step 1</span>
             </div>
             {webResearch !== null ? (
-              <label className="voice-pron-check">
+              <label className="voice-pron-check step1-option-check">
                 <input
                   type="checkbox"
                   checked={webResearch}
@@ -1930,7 +2035,7 @@ function StepOneAdvanced({
                 <span>Allow Spoolcast to search the web when researching this topic</span>
               </label>
             ) : null}
-            <p className="vp-hint" style={{ margin: 0 }}>
+            <p className="step1-helper-text">
               Links pasted in the idea are always read; this setting only controls finding additional sources.
             </p>
           </div>
@@ -1954,6 +2059,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
   const [improveModel, setImproveModel] = useState(DEFAULT_MODEL_ID)
   const [improveOpen, setImproveOpen] = useState(false)
   const [improveNotes, setImproveNotes] = useState('')
+  const [attachmentsInfoOpen, setAttachmentsInfoOpen] = useState(false)
   const improving = Boolean(improveJobId)
     || Boolean(stageProcess && ['queued', 'running'].includes(stageProcess.status))
   const onBriefChange = (value: string) => {
@@ -2229,19 +2335,50 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         placeholder="Describe the idea, topic, opinion, or story this video should become. Paste any relevant links here too."
       />
 
-      <div className="vg-row-actions step1-prompt-actions">
-        <button
-          type="button"
-          className="vp-undo"
-          disabled={!brief.trim() || improving}
-          title={brief.trim()
-            ? 'Make this idea clearer and more useful across the full video workflow'
-            : 'Write the video idea first'}
-          onClick={() => setImproveOpen((value) => !value)}
-        >
-          {improving ? 'AI rewriting…' : <>✎ Improve prompt with AI {improveOpen ? '▴' : '▾'}</>}
-        </button>
+      <div className="step1-input-actions">
+        <span className="step1-attach-actions">
+          <label className="vp-undo step1-attach-button">
+            <span>＋ Attach references</span>
+            <input type="file" onChange={handleFileUpload} />
+          </label>
+          <button
+            type="button"
+            className="step1-info-toggle"
+            onClick={() => setAttachmentsInfoOpen((value) => !value)}
+            aria-expanded={attachmentsInfoOpen}
+          >
+            ⓘ What can I attach?
+          </button>
+        </span>
+        <span className={`vg-split-action ${improveOpen ? 'open' : ''}`}>
+          <button
+            type="button"
+            className="vg-split-toggle"
+            disabled={!brief.trim() || improving}
+            title="Add optional notes or choose a model"
+            aria-label="Open improvement options"
+            onClick={() => setImproveOpen((value) => !value)}
+          >
+            {improveOpen ? '▴' : '▾'}
+          </button>
+          <button
+            type="button"
+            className="vp-undo vg-split-main"
+            disabled={!brief.trim() || improving}
+            title={brief.trim()
+              ? 'Improve this idea immediately using the selected model'
+              : 'Write the video idea first'}
+            onClick={() => void improveIdea('', improveModel)}
+          >
+            {improving ? 'AI rewriting…' : '✎ Improve prompt with AI'}
+          </button>
+        </span>
       </div>
+      {attachmentsInfoOpen ? (
+        <p className="step1-helper-text step1-attachment-info">
+          Attach notes, transcripts, screenshots, and reference files. Paste links in the video idea above.
+        </p>
+      ) : null}
       {improveOpen ? (
         <div className="vg-regen-note-panel step1-improve-panel">
           <textarea
@@ -2300,12 +2437,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         </div>
       ) : null}
 
-      <section className="idea-sources">
-        <span className="eyebrow">SOURCE MATERIAL</span>
-        <p className="idea-sources-caption">
-          Attach notes, transcripts, screenshots, and reference files. Paste links in the video idea above.
-        </p>
-
+      <section className="idea-sources compact">
         {files.length ? (
           <div className="file-list">
             {files.map((file) => (
@@ -2337,19 +2469,6 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
             ))}
           </div>
         ) : null}
-
-        <label className="idea-attach" style={{ cursor: 'pointer' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
-          </svg>
-          Attach files
-          <input
-            type="file"
-            style={{ display: 'none' }}
-            onChange={handleFileUpload}
-          />
-        </label>
 
         {researchRunning ? (
           <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 0' }}>
