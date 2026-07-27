@@ -16,7 +16,7 @@ import {
   stageToStepMap,
   type WorkflowContract,
 } from './lib/workflow-graph'
-import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
+import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, researchJobStorageKey, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
 import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
@@ -1029,6 +1029,41 @@ function SpoolcastApp() {
                           setGates(buildGates(contract, initialStandalone, apiData.data))
                         }
                         return false
+                      }
+                      if (sourceId === 'input_intake') {
+                        // Research belongs to Step 1, but it must never hold the
+                        // user there. The action only queues work and returns a
+                        // job id; every failure stays silent apart from the log.
+                        const researchSession = activeSession()
+                        const storageKey = researchJobStorageKey(researchSession)
+                        sessionStorage.setItem(storageKey, 'pending')
+                        void fetch(actionUrl(), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session: researchSession,
+                            tenant: 'local',
+                            action: 'draft_research',
+                            allow_cost: true,
+                          }),
+                        })
+                          .then(async (researchRes) => {
+                            const researchOut = await researchRes.json().catch(() => null)
+                            const jobId = researchOut?.data?.id
+                            if (!researchRes.ok || researchOut?.ok === false) {
+                              sessionStorage.removeItem(storageKey)
+                              console.warn('Background research did not start.', researchOut)
+                            } else if (jobId) {
+                              sessionStorage.setItem(storageKey, String(jobId))
+                            } else {
+                              // Expected no-op: research disabled with no links/files.
+                              sessionStorage.removeItem(storageKey)
+                            }
+                          })
+                          .catch((error) => {
+                            sessionStorage.removeItem(storageKey)
+                            console.warn('Background research did not start.', error)
+                          })
                       }
                     }
 

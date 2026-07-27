@@ -221,9 +221,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     setDraftJob(null)
     try {
       // Long-running drafts go through the jobs queue instead of the
-      // synchronous 180s action path: pacing plans big sessions, research
-      // fetches pages and searches the web.
-      const useJob = stageId === 'visual_pacing' || stageId === 'research'
+      // synchronous 180s action path: pacing plans can be large.
+      const useJob = stageId === 'visual_pacing'
       const res = await fetch(useJob ? jobsUrl() : actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

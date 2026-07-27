@@ -66,6 +66,7 @@ export const renderInfoUrl = (session = activeSession()) => apiUrl('render-info'
 /** Short work goes here; long or paid work goes through {@link jobsUrl}. */
 export const actionUrl = () => apiUrl('action')
 export const jobsUrl = (jobId?: string) => (jobId ? apiUrl(`jobs/${jobId}`) : apiUrl('jobs'))
+export const researchJobStorageKey = (session = activeSession()) => `spoolcast:research-job:${session}`
 
 // Entry spine: the real project list, the template registry, and the session's
 // contract — the workflow builds its steps from THIS, not a bundled mirror.

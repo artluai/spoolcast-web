@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, statusUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -1665,6 +1667,53 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       ? []
       : [], // ZERO DUMMY DATA RULE: Source material must come from the engine, not hardcoded mocks.
   )
+  const [researchBrief, setResearchBrief] = useState('')
+  const [researchRunning, setResearchRunning] = useState(false)
+
+  // Research starts as Step 1 is left. If the user returns, show its quiet
+  // background state and the resulting read-only brief here — never as a
+  // workflow stage, blocker, or approval screen.
+  useEffect(() => {
+    let cancelled = false
+    const storageKey = researchJobStorageKey()
+    const loadBrief = async () => {
+      const response = await fetch(fileUrl('working/research-brief.md'), { cache: 'no-store' })
+      const out = await response.json().catch(() => null)
+      if (!cancelled) {
+        setResearchBrief(out?.ok && out.data?.exists && typeof out.data.content === 'string' ? out.data.content : '')
+      }
+    }
+    const refreshResearch = async () => {
+      const storedJob = sessionStorage.getItem(storageKey)
+      if (!storedJob) {
+        if (!cancelled) setResearchRunning(false)
+        await loadBrief()
+        return
+      }
+      if (!cancelled) setResearchRunning(true)
+      await loadBrief()
+      if (storedJob === 'pending') return
+      const response = await fetch(jobsUrl(storedJob))
+      const out = await response.json().catch(() => null)
+      const status = out?.data?.status
+      if (status === 'done') {
+        sessionStorage.removeItem(storageKey)
+        if (!cancelled) setResearchRunning(false)
+        await loadBrief()
+      } else if (!response.ok || out?.ok === false || status === 'failed') {
+        sessionStorage.removeItem(storageKey)
+        if (!cancelled) setResearchRunning(false)
+      }
+    }
+    void refreshResearch().catch(() => {
+      if (!cancelled) setResearchRunning(false)
+    })
+    const timer = window.setInterval(() => void refreshResearch().catch(() => {}), 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
   // Research permission mirrors session.json — null until read, so the
   // checkbox never flashes a default the engine might contradict.
@@ -1852,6 +1901,32 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
             />
             <span>Allow Spoolcast to search the web when researching this topic</span>
           </label>
+        ) : null}
+        {researchRunning ? (
+          <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 0' }}>
+            <span className="spin" />
+            <span>Researching in the background…</span>
+          </p>
+        ) : null}
+        {researchBrief ? (
+          <details className="vp-section">
+            <summary className="vp-section-sum">
+              <span className="vp-sec-title">Research brief</span>
+              <span className="vp-section-count">READY</span>
+            </summary>
+            <div
+              className="md-preview"
+              style={{
+                marginTop: 12,
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 8,
+                padding: '4px 16px',
+              }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(marked.parse(researchBrief, { async: false }) as string),
+              }}
+            />
+          </details>
         ) : null}
       </section>
     </div>
