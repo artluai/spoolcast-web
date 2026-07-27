@@ -86,23 +86,43 @@ export function PickerView({
   const anyShown = templates.some(matches)
   const createBlank = async () => {
     if (creatingBlank) return
-    const existingIds = new Set(sessions.map((session) => session.id))
-    let number = 1
-    let id = 'untitled-01'
-    while (existingIds.has(id)) id = `untitled-${String(++number).padStart(2, '0')}`
-
     setCreatingBlank(true)
     setBlankError('')
-    const out = await postAction<{ session?: string }>({
-      action: 'create_session',
-      session: id,
-      template: 'undecided',
-    })
-    setCreatingBlank(false)
-    if (out?.ok && out.data?.session) {
-      onOpenSession(out.data.session)
-    } else {
+    const listing = await getJson<{ ok?: boolean; data?: { sessions?: EngineSession[] } }>(sessionsUrl())
+    if (!listing?.ok) {
+      setCreatingBlank(false)
+      setBlankError('Could not read the project list. Is the engine running?')
+      return
+    }
+
+    const existingIds = new Set((listing.data?.sessions ?? []).map((session) => session.id))
+    let number = 1
+    while (true) {
+      const id = `untitled-${String(number).padStart(2, '0')}`
+      if (existingIds.has(id)) {
+        number += 1
+        continue
+      }
+
+      const out = await postAction<{ session?: string }>({
+        action: 'create_session',
+        session: id,
+        template: 'undecided',
+      })
+      if (out?.ok && out.data?.session) {
+        setCreatingBlank(false)
+        onOpenSession(out.data.session)
+        return
+      }
+      if ((out?.error ?? '').includes('already exists')) {
+        existingIds.add(id)
+        number += 1
+        continue
+      }
+
+      setCreatingBlank(false)
       setBlankError(out?.message || out?.error || 'Could not start the project.')
+      return
     }
   }
 
