@@ -18,11 +18,13 @@ export function ShowSettingsModal({
 }) {
   const [rules, setRules] = useState<string | null>(null)
   const [overlay, setOverlay] = useState<string | null>(null)
+  const [defaults, setDefaults] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dirty, setDirty] = useState<{ rules: boolean; overlay: boolean }>({ rules: false, overlay: false })
+  const [dirty, setDirty] = useState<{ rules: boolean; overlay: boolean; defaults: boolean }>({ rules: false, overlay: false, defaults: false })
   const [busy, setBusy] = useState(false)
   const [overlayOpen, setOverlayOpen] = useState(false)
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
 
   useEffect(() => {
     fetch(apiUrl('series', { series }))
@@ -33,11 +35,13 @@ export function ShowSettingsModal({
         setRules(out.data.rules_md ?? '')
         setOverlay(out.data.overlay_json)
         if (out.data.overlay_json) setOverlayOpen(true)
+        setDefaults(out.data.defaults_json)
+        if (out.data.defaults_json) setDefaultsOpen(true)
       })
       .catch(() => setError('Could not reach the engine — is it running?'))
   }, [series])
 
-  const save = async (file: 'rules.md' | 'contract-overlay.json', content: string) => {
+  const save = async (file: 'rules.md' | 'contract-overlay.json' | 'defaults.json', content: string) => {
     setBusy(true)
     try {
       const res = await fetch(actionUrl(), {
@@ -50,7 +54,7 @@ export function ShowSettingsModal({
         onToast(`Engine: ${out?.error || 'could not save.'}`)
         return
       }
-      setDirty((d) => (file === 'rules.md' ? { ...d, rules: false } : { ...d, overlay: false }))
+      setDirty((d) => (file === 'rules.md' ? { ...d, rules: false } : file === 'defaults.json' ? { ...d, defaults: false } : { ...d, overlay: false }))
       onToast(`Saved ${file} for ${showName}.`)
     } finally {
       setBusy(false)
@@ -95,6 +99,37 @@ export function ShowSettingsModal({
                 Save rules
               </button>
             </div>
+          </div>
+        ) : null}
+
+        {rules !== null ? (
+          <div style={{ marginTop: 6 }}>
+            {defaultsOpen ? (
+              <>
+                <span style={label}>SERIES DEFAULTS — style/voice/brand stamped into every new episode (JSON)</span>
+                <textarea
+                  value={defaults ?? ''}
+                  rows={6}
+                  placeholder={'{\n  "style": "…",\n  "tts_voice": "…"\n}'}
+                  onChange={(e) => { setDefaults(e.target.value); setDirty((d) => ({ ...d, defaults: true })) }}
+                  style={areaStyle}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button type="button" className="vp-save" disabled={busy || !dirty.defaults} onClick={() => void save('defaults.json', defaults ?? '')}>
+                    Save defaults
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="vp-undo"
+                title="Session keys (style, voice, brand) stamped into every new episode of this show — beats the template's defaults, never overwrites choices already made"
+                onClick={() => { setDefaults(defaults ?? '{\n  "style": "",\n  "tts_voice": ""\n}'); setDefaultsOpen(true) }}
+              >
+                ▸ Series defaults (style, voice, brand)
+              </button>
+            )}
           </div>
         ) : null}
 
