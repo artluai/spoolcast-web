@@ -4,8 +4,12 @@
 //   GET /api/site/u/:handle   → { creator, series: [...], videos: [...] }
 //   GET /api/site/s/:slug     → { series, creator, videos: [...] }
 //   GET /api/site/v/:slug     → { video, creator, series, siblings: [...] }
+//   GET /api/site/templates   → { templates: [...] } (live global templates)
 
 const MEDIA_BASE = 'https://pub-6903b93eacaf46b08e7b4644251ab085.r2.dev'
+// Global asset library bucket (spoolcast-assets) — same base the character
+// library's image_url values use.
+const ASSETS_BASE = 'https://pub-275d3988223b4b53b851fe856882cec0.r2.dev'
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify({ ok: status < 400, data }), {
@@ -114,6 +118,25 @@ export async function onRequestGet({ env, params }) {
         ).results.map(withUrls)
       : []
     return json({ video: withUrls(video), creator, series, siblings })
+  }
+
+  if (route === 'templates') {
+    const templates = (
+      await db
+        .prepare(
+          `SELECT slug, name, description, format, contract, version, r2_prefix, files,
+                  poster_key, preview_key, published_at, updated_at
+           FROM global_templates WHERE live = 1 ORDER BY name`,
+        )
+        .all()
+    ).results.map((t) => ({
+      ...t,
+      files: JSON.parse(t.files || '[]'),
+      template_url: `${ASSETS_BASE}/${t.r2_prefix}/template.json`,
+      poster_url: t.poster_key ? `${ASSETS_BASE}/${t.poster_key}` : '',
+      preview_url: t.preview_key ? `${ASSETS_BASE}/${t.preview_key}` : '',
+    }))
+    return json({ templates })
   }
 
   return json({ error: 'unknown route' }, 404)

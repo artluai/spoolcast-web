@@ -3173,3 +3173,23 @@ body.chat-pinned { padding-right: 380px; }
 .site-create:hover { border-color: var(--accent); color: var(--ink); }
 .pp-link { color: var(--ink-2); text-decoration: none; }
 .pp-link:hover { color: var(--accent-2); }
+
+/* ---- /admin: global library dashboard. Same site tokens; templates are
+   manage rows (they have actions), characters reuse the card grid. */
+.admin-tpl { display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--line-2); background: var(--bg-2); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.admin-tpl-hidden { opacity: .55; }
+.admin-tpl-art { flex: 0 0 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-3); }
+.admin-tpl-art-blank { display: flex; align-items: center; justify-content: center; color: var(--ink-3); font-size: 20px; background: linear-gradient(145deg, var(--bg-3), var(--bg-4)); }
+.admin-tpl-body { flex: 1 1 auto; min-width: 0; }
+.admin-tpl-body b { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.admin-tpl-body p { color: var(--ink-2); font-size: 12.5px; line-height: 1.5; margin: 4px 0 8px; max-width: 640px; }
+.admin-badge { font-family: var(--mono); font-size: 9.5px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line-2); color: var(--ink-3); }
+.admin-badge.live { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.admin-files { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.admin-files a { color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; text-decoration: none; }
+.admin-files a:hover { color: var(--accent-2); }
+.admin-btn { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.admin-btn:hover { border-color: var(--accent); color: var(--ink); }
+.admin-btn:disabled { opacity: .5; cursor: default; }
+.admin-cast .site-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+.admin-cast .site-card img { aspect-ratio: 3 / 4; }

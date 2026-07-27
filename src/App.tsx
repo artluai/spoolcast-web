@@ -137,7 +137,7 @@ function RouteSplit() {
   const route = useLocation().pathname
   // The watch feed IS the front door ('/'), YouTube-style; the editor lives
   // behind the site's Create button.
-  if (route === '/' || route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/')) {
+  if (route === '/' || route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/') || route === '/admin') {
     return <SiteView />
   }
   return <SpoolcastApp />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom'
+import AdminView from './AdminView'
 
 // The PUBLIC viewer site (display layer). Own chrome — none of the editor
 // header belongs here. Data comes from /api/site/* (Pages Functions + D1),
@@ -299,6 +300,7 @@ export default function SiteView() {
           <Route path="/watch/s/:slug" element={<SiteSeries />} />
           <Route path="/watch/v/:slug" element={<SitePlayer />} />
           <Route path="/u/:handle" element={<SiteProfile />} />
+          <Route path="/admin" element={<AdminView />} />
         </Routes>
       </main>
     </div>

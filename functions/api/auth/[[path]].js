@@ -10,6 +10,8 @@
 // (.dev.vars, never production) the link is echoed in the response for local
 // testing; otherwise requests fail loudly instead of pretending to send.
 
+import { readCookie, sessionUser } from '../_auth.js'
+
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify({ ok: status < 400, data }), {
     status,
@@ -21,26 +23,21 @@ const token = () => {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-const readCookie = (request, name) => {
-  const raw = request.headers.get('Cookie') || ''
-  const hit = raw.split(/;\s*/).find((c) => c.startsWith(`${name}=`))
-  return hit ? hit.slice(name.length + 1) : ''
-}
-
-const sessionUser = async (env, request) => {
-  const t = readCookie(request, 'sc_session')
-  if (!t) return null
-  return env.DB.prepare(
-    `SELECT u.* FROM web_sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token = ? AND s.expires_at > datetime('now')`,
-  ).bind(t).first()
-}
-
 const sessionCookie = (token) =>
   `sc_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=7776000`
 
 const startSession = async (env, email) => {
   await env.DB.prepare(`INSERT OR IGNORE INTO users (email) VALUES (?)`).bind(email).run()
+  // The admin allowlist lives in env.ADMIN_EMAILS (comma-separated) so a fresh
+  // database gives the operator the admin role again on first sign-in.
+  const admins = String(env.ADMIN_EMAILS || '')
+    .toLowerCase()
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean)
+  if (admins.includes(email)) {
+    await env.DB.prepare(`UPDATE users SET role = 'admin' WHERE email = ?`).bind(email).run()
+  }
   const user = await env.DB.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first()
   const s = token()
   await env.DB.prepare(

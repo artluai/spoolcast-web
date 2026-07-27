@@ -6,6 +6,11 @@ name = "spoolcast-web"
 compatibility_date = "2026-07-01"
 pages_build_output_dir = "dist"
 
+[vars]
+# Sign-ins from these addresses get the admin role (comma-separated) — keeps
+# the operator account admin even on a fresh database.
+ADMIN_EMAILS = "bitbrandsagency@gmail.com"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "spoolcast-site"
@@ -14,3 +19,10 @@ database_id = "ad151aba-415c-4988-bc6d-67673432d39d"
 [[r2_buckets]]
 binding = "VIDEOS"
 bucket_name = "spoolcast-videos"
+
+# Global asset library (character sheets, templates) — written by the admin
+# publish endpoints, served to browsers from the bucket's public URL.
+# ("ASSETS" itself is a reserved binding name in Pages projects.)
+[[r2_buckets]]
+binding = "GLOBAL_ASSETS"
+bucket_name = "spoolcast-assets"

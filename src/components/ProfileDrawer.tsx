@@ -40,7 +40,13 @@ export function ProfileDrawer({ open, onClose }: { open: boolean; onClose: () =>
             <section>
               <h3>Account</h3>
               <p>{user.handle ? `@${user.handle}` : 'No handle yet'}</p>
-              <small>{user.role === 'admin' ? 'Admin — can publish global assets' : 'Creator account'}</small>
+              <small>
+                {user.role === 'admin' ? (
+                  <a className="pp-link" href="/admin">Admin — manage global assets ›</a>
+                ) : (
+                  'Creator account'
+                )}
+              </small>
             </section>
             <section>
               <p><a className="pp-link" href="#signout" onClick={(e) => { e.preventDefault(); void signOut() }}>Sign out ›</a></p>
