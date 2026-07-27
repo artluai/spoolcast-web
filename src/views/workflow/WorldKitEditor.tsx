@@ -9,7 +9,7 @@ import { useWorkflowStore } from '../../store/workflow'
 // Scope tokens (stored in the md) ↔ human labels shown in the per-item picker.
 const SCOPE_OPTIONS = [
   { value: 'episode-only', label: 'This episode only (default)' },
-  { value: 'show-shared', label: 'Show / subtemplate — affects future episodes' },
+  { value: 'show-shared', label: 'Series — affects future episodes' },
   { value: 'template-shared', label: 'Format template — affects every show on it' },
 ]
 const isSharedScope = (scope: string) => /show|template|format/i.test(scope)

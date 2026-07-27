@@ -71,6 +71,7 @@ export const researchJobStorageKey = (session = activeSession()) => `spoolcast:r
 // Entry spine: the real project list, the template registry, and the session's
 // contract — the workflow builds its steps from THIS, not a bundled mirror.
 export const sessionsUrl = () => apiUrl('sessions')
+export const seriesUrl = (series?: string) => apiUrl('series', { series })
 export const templatesUrl = () => apiUrl('templates')
 export const contractUrl = (session = activeSession()) => apiUrl('contract', { session })
 

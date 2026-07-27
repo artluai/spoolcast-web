@@ -2139,8 +2139,8 @@ export function VisualGenerationStage({ stageId }: { stageId: string }) {
                 <span aria-hidden="true">{generateMode === 'image' ? '▧' : '▶'}</span>
                 {generateLabel}
               </button>
-              <button type="button" className="vg-advanced-toggle" onClick={() => setAdvancedMenu((v) => !v)}>
-                Advanced {advancedMenu ? '▴' : '▾'}
+              <button type="button" className="utility-disclosure-toggle" onClick={() => setAdvancedMenu((v) => !v)}>
+                {advancedMenu ? '▾' : '▸'} Advanced
               </button>
               <span className="vg-toolbar-progress">
                 <span className="vg-toolbar-progress-meta">

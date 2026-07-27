@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, sessionsUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -1510,13 +1510,13 @@ type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock
 export function TemplatePickerBar({
   idea = '',
   chosenBySeries = false,
+  seriesName = '',
   lockedReason = '',
-  thumbnails = {},
 }: {
   idea?: string
   chosenBySeries?: boolean
+  seriesName?: string
   lockedReason?: string
-  thumbnails?: Record<string, string>
 }) {
   type Tpl = {
     id: string
@@ -1616,7 +1616,7 @@ export function TemplatePickerBar({
           {lockedReason
             ? 'Locked after later work started'
             : chosenBySeries && current
-              ? 'Chosen by your series'
+              ? `Included with ${displayId(seriesName || 'your series')}`
               : 'Choose the workflow for this video'}
         </span>
       </div>
@@ -1624,7 +1624,7 @@ export function TemplatePickerBar({
         {tpls.map((t) => {
           const thumbnail = t.thumbnail
             ? thumbnailUrl(t.thumbnail)
-            : TEMPLATE_ART[t.id]?.poster || thumbnails[t.id] || ''
+            : TEMPLATE_ART[t.id]?.poster || ''
           return (
             <button
               key={t.id}
@@ -1673,14 +1673,11 @@ type StepOneKitItem = {
   scope?: string
 }
 
-type StepOneSession = {
+type StepOneSeries = {
   id: string
-  series?: string | null
-  template?: string | null
-  series_template?: string | null
-  modified_at?: number
-  thumbnail?: string | null
-  series_thumbnail?: string | null
+  name?: string
+  template?: string
+  thumbnail?: string
 }
 
 const displayId = (id: string) =>
@@ -1725,8 +1722,7 @@ function StepOneAdvanced({
   const [open, setOpen] = useState(false)
   const [template, setTemplate] = useState('')
   const [series, setSeries] = useState('')
-  const [seriesOptions, setSeriesOptions] = useState<{ id: string; template: string; thumbnail: string }[]>([])
-  const [templateThumbnails, setTemplateThumbnails] = useState<Record<string, string>>({})
+  const [seriesOptions, setSeriesOptions] = useState<StepOneSeries[]>([])
   const [joiningSeries, setJoiningSeries] = useState('')
   const [creatingSeries, setCreatingSeries] = useState(false)
   const [newSeriesName, setNewSeriesName] = useState('')
@@ -1740,7 +1736,7 @@ function StepOneAdvanced({
     let live = true
     Promise.all([
       fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(sessionsUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(seriesUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(actionUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1750,7 +1746,7 @@ function StepOneAdvanced({
           action: 'template_lock_status',
         }),
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([sessionOut, sessionsOut, lockOut]) => {
+    ]).then(([sessionOut, seriesOut, lockOut]) => {
       if (!live) return
       try {
         const cfg = JSON.parse(sessionOut?.data?.content || '{}')
@@ -1761,41 +1757,8 @@ function StepOneAdvanced({
         setWebResearch(true)
       }
       setLockedReason(String(lockOut?.data?.reason || ''))
-      const sessions = sessionsOut?.data?.sessions
-      if (Array.isArray(sessions)) {
-        const rows = [...sessions] as StepOneSession[]
-        rows.sort((a, b) => Number(b.modified_at || 0) - Number(a.modified_at || 0))
-        const bySeries = new Map<string, { templates: Set<string>; latest: StepOneSession }>()
-        const nextTemplateThumbnails: Record<string, string> = {}
-        rows.forEach((entry) => {
-          const id = String(entry.series || '').trim()
-          const templateId = String(entry.template || entry.series_template || '').trim()
-          const thumbnail = entry.thumbnail
-            ? apiUrl('content', { path: `sessions/${entry.id}/${entry.thumbnail}` })
-            : ''
-          if (templateId && thumbnail && !nextTemplateThumbnails[templateId]) {
-            nextTemplateThumbnails[templateId] = thumbnail
-          }
-          if (!id) return
-          const known = bySeries.get(id) ?? { templates: new Set<string>(), latest: entry }
-          if (templateId) known.templates.add(templateId)
-          bySeries.set(id, known)
-        })
-        setTemplateThumbnails(nextTemplateThumbnails)
-        setSeriesOptions([...bySeries.entries()]
-          .map(([id, value]) => ({
-            id,
-            template: value.templates.size === 1 ? [...value.templates][0] : '',
-            thumbnail: value.latest.series_thumbnail
-              ? (/^https?:\/\//i.test(value.latest.series_thumbnail)
-                  ? value.latest.series_thumbnail
-                  : globalContentUrl(value.latest.series_thumbnail))
-              : value.latest.thumbnail
-                ? apiUrl('content', { path: `sessions/${value.latest.id}/${value.latest.thumbnail}` })
-                : '',
-          }))
-          .sort((a, b) => a.id.localeCompare(b.id)))
-      }
+      const options = seriesOut?.data?.series
+      setSeriesOptions(Array.isArray(options) ? options : [])
     })
     return () => {
       live = false
@@ -1916,31 +1879,22 @@ function StepOneAdvanced({
   const selectedFeatures = featuringNames(idea)
   const selectedSet = new Set(selectedFeatures)
   const imageKit = kit.filter((item) => item.name && (item.global_path || item.image_path))
+  const seriesThumbnailUrl = (path: string) =>
+    /^https?:\/\//i.test(path) ? path : globalContentUrl(path)
 
   return (
     <>
       {template || series ? (
-        <p className="vp-hint" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '22px 0 0' }}>
-          {series ? <span>Series: {displayId(series)}</span> : <span>Standalone</span>}
-          {template ? (
-            <span>
-              Template: {displayId(template)} ·{' '}
-              {!lockedReason ? <button
-                type="button"
-                onClick={() => setOpen(true)}
-                style={{
-                  border: 0,
-                  padding: 0,
-                  background: 'none',
-                  color: 'var(--accent-2)',
-                  font: 'inherit',
-                  cursor: 'pointer',
-                }}
-              >
-                change
-              </button> : <span>locked</span>}
-            </span>
-          ) : null}
+        <p className="step1-selection-status">
+          <span>
+            {series ? <>{displayId(series)} series</> : <>Standalone</>}
+            {template ? <> <span aria-hidden="true">→</span> {displayId(template)} template</> : null}
+          </span>
+          {!lockedReason ? (
+            <button type="button" onClick={() => setOpen(true)} className="step1-change-link">
+              change
+            </button>
+          ) : <span>locked</span>}
         </p>
       ) : null}
 
@@ -1985,13 +1939,13 @@ function StepOneAdvanced({
                       onClick={() => void joinSeries(option.id)}
                     >
                       <span className={`step1-choice-thumb ${option.thumbnail ? '' : 'empty'}`}>
-                        {option.thumbnail ? <img src={option.thumbnail} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
+                        {option.thumbnail ? <img src={seriesThumbnailUrl(option.thumbnail)} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
                       </span>
                       <span className="step1-choice-copy">
                         <b>
-                          {joiningSeries === option.id ? <><span className="spin" /> Changing…</> : displayId(option.id)}
+                          {joiningSeries === option.id ? <><span className="spin" /> Changing…</> : (option.name || displayId(option.id))}
                         </b>
-                        <span>{option.template ? displayId(option.template) : 'Series template'}</span>
+                        <span>{option.template ? `Includes ${displayId(option.template)} template` : 'Choose a template after joining'}</span>
                       </span>
                     </button>
                     {selected ? (
@@ -2017,8 +1971,8 @@ function StepOneAdvanced({
               >
                 <span className="step1-choice-thumb empty">＋</span>
                 <span className="step1-choice-copy">
-                  <b>New series</b>
-                  <span>Make this project its first episode</span>
+                  <b>{series ? 'Duplicate as new series' : 'New series'}</b>
+                  <span>{series ? 'Copy this project’s reusable setup into a new series' : 'Make this project its first episode'}</span>
                 </span>
               </button>
             </div>
@@ -2048,7 +2002,7 @@ function StepOneAdvanced({
                   disabled={!seriesIdFromName(newSeriesName) || !!joiningSeries}
                   onClick={() => void createSeries()}
                 >
-                  {joiningSeries === '__new' ? 'Creating…' : 'Create series'}
+                  {joiningSeries === '__new' ? 'Creating…' : (series ? 'Duplicate series' : 'Create series')}
                 </button>
               </div>
             ) : null}
@@ -2058,15 +2012,15 @@ function StepOneAdvanced({
           <TemplatePickerBar
             idea={idea}
             chosenBySeries={!!series}
+            seriesName={series}
             lockedReason={lockedReason}
-            thumbnails={templateThumbnails}
           />
 
           {series ? (
             <div className="step1-choice-group">
               <div className="step1-choice-head">
                 <h3>World Kit</h3>
-                <span>shared show and template references</span>
+                <span>shared series and template references</span>
               </div>
               {kitLoading ? (
                 <p className="vp-hint" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
@@ -2105,7 +2059,7 @@ function StepOneAdvanced({
                 </>
               ) : (
                 <p className="vp-hint" style={{ margin: 0 }}>
-                  This series does not have shared World Kit images yet.
+                  No series-shared images yet. In World Kit, open an image and set Save to → Series.
                 </p>
               )}
             </div>
@@ -2434,12 +2388,17 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
           </label>
           <button
             type="button"
-            className="vp-undo step1-info-toggle"
+            className="step1-info-toggle"
             onClick={() => setAttachmentsInfoOpen((value) => !value)}
             aria-expanded={attachmentsInfoOpen}
           >
             ⓘ What can I attach?
           </button>
+          {attachmentsInfoOpen ? (
+            <span className="step1-helper-text step1-attachment-info">
+              Attach notes, transcripts, screenshots, and reference files. Paste links in the video idea above.
+            </span>
+          ) : null}
         </span>
         <span className={`vg-split-action ${improveOpen ? 'open' : ''}`}>
           <button
@@ -2465,11 +2424,6 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
           </button>
         </span>
       </div>
-      {attachmentsInfoOpen ? (
-        <p className="step1-helper-text step1-attachment-info">
-          Attach notes, transcripts, screenshots, and reference files. Paste links in the video idea above.
-        </p>
-      ) : null}
       {improveOpen ? (
         <div className="vg-regen-note-panel step1-improve-panel">
           <textarea

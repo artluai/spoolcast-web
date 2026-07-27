@@ -273,7 +273,7 @@ export default function GlobalCharacterPicker({ existing, onClose, onAdded }: Pr
             : 'Ready-made creators shared by every project and kept read-only.'}
         </p>
 
-        <button type="button" className="gcp-advanced-toggle" onClick={() => setAdvanced((value) => !value)}>
+        <button type="button" className="utility-disclosure-toggle" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? '▾' : '▸'} Advanced
         </button>
         {advanced ? (
