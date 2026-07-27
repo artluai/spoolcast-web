@@ -4,15 +4,23 @@
     {
       "name": "dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173,
       "autoPort": true
     },
     {
       "name": "api",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["/Users/ralphxu/Documents/Projects/spoolcast/local_api.py"],
-      "port": 8000
+      "port": 8000,
+      "url": "http://localhost:8000"
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "pages", "dev", "dist", "--port", "8788"],
+      "port": 8788
     }
   ]
 }

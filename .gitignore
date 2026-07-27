@@ -28,3 +28,7 @@ spoolcast-web-horizontal-qa.png
 *.njsproj
 *.sln
 *.sw?
+
+# wrangler local state (D1/R2 simulators)
+.wrangler/
+.dev.vars

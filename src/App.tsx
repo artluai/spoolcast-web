@@ -34,6 +34,7 @@ import { PickerView } from './views/PickerView'
 import { WorkflowView } from './views/workflow/WorkflowView'
 import { WorldKitView } from './views/workflow/WorldKit'
 import { RulesView } from './views/RulesView'
+import SiteView from './views/site/SiteView'
 
 type ApiArtifact = {
   stage_id?: string
@@ -125,9 +126,19 @@ const countVisualCoverage = (shotList: ShotListData | null, manifest: SceneManif
 function App() {
   return (
     <BrowserRouter>
-      <SpoolcastApp />
+      <RouteSplit />
     </BrowserRouter>
   )
+}
+
+// PUBLIC viewer site vs the editor: chosen here, ABOVE SpoolcastApp, so the
+// editor's hook tree never renders conditionally (rules of hooks).
+function RouteSplit() {
+  const route = useLocation().pathname
+  if (route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/')) {
+    return <SiteView />
+  }
+  return <SpoolcastApp />
 }
 
 function SpoolcastApp() {
