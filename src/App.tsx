@@ -638,8 +638,8 @@ function SpoolcastApp() {
   const header = (
     <Header
       route={route}
-      setupMode={setupMode}
       showName={showName}
+      seriesId={seriesId}
       onShowSettings={seriesId ? () => setShowSettingsOpen(true) : undefined}
       isWorkflow={isWorkflow}
       isWorldKit={isWorldKit}

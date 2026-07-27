@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { SetupMode } from '../types'
+import { SeriesMenu } from './SeriesMenu'
 
 // Avatar letter comes from the REAL session (same-origin cookie); '?' when
 // signed out or when the auth functions aren't reachable (plain vite).
@@ -20,8 +20,8 @@ function useAvatarLetter() {
 
 export function Header({
   route,
-  setupMode,
   showName,
+  seriesId,
   onShowSettings,
   isWorkflow,
   isWorldKit,
@@ -39,10 +39,8 @@ export function Header({
   onProfile,
 }: {
   route: string
-  setupMode: SetupMode
   showName: string
-  // Present only when a real show sits behind the session — makes the show
-  // name in the crumb clickable (show settings).
+  seriesId: string
   onShowSettings?: () => void
   isWorkflow: boolean
   isWorldKit: boolean
@@ -114,33 +112,23 @@ export function Header({
         <span className="sep">/</span>
         {isWorldKit ? (
           <>
-            <span className="crumb-secondary">{showName}</span>
+            <SeriesMenu
+              series={seriesId}
+              label={seriesId ? showName : 'Standalone'}
+              onViewSeries={onShowSettings}
+            />
             <span className="sep">/</span>
             <b>World Kit</b>
           </>
-        ) : setupMode === 'series' ? (
+        ) : (
           <>
             <b>{projectLabel}</b>
             <span className="sep">·</span>
-            {onShowSettings ? (
-              <button
-                type="button"
-                className="crumb-secondary"
-                title={`Show settings — what every ${showName} episode inherits`}
-                onClick={onShowSettings}
-                style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
-              >
-                {showName}
-              </button>
-            ) : (
-              <span className="crumb-secondary">{showName}</span>
-            )}
-          </>
-        ) : (
-          <>
-            <b>Untitled video</b>
-            <span className="sep">·</span>
-            <span className="crumb-secondary">Standalone</span>
+            <SeriesMenu
+              series={seriesId}
+              label={seriesId ? showName : 'Standalone'}
+              onViewSeries={onShowSettings}
+            />
           </>
         )}
       </>

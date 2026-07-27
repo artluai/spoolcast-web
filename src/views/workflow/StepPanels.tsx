@@ -1690,6 +1690,13 @@ const displayId = (id: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
 
+const seriesIdFromName = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
 const featuringNames = (idea: string) => {
   const line = idea.split(/\r?\n/).find((entry) => /^\s*Featuring\s*:/i.test(entry))
   return (line?.replace(/^\s*Featuring\s*:\s*/i, '') || '')
@@ -1721,6 +1728,8 @@ function StepOneAdvanced({
   const [seriesOptions, setSeriesOptions] = useState<{ id: string; template: string; thumbnail: string }[]>([])
   const [templateThumbnails, setTemplateThumbnails] = useState<Record<string, string>>({})
   const [joiningSeries, setJoiningSeries] = useState('')
+  const [creatingSeries, setCreatingSeries] = useState(false)
+  const [newSeriesName, setNewSeriesName] = useState('')
   const [seriesError, setSeriesError] = useState('')
   const [lockedReason, setLockedReason] = useState('')
   const [webResearch, setWebResearch] = useState<boolean | null>(null)
@@ -1822,7 +1831,7 @@ function StepOneAdvanced({
   }, [open, series])
 
   const joinSeries = async (seriesId: string) => {
-    if (!seriesId || joiningSeries || lockedReason || seriesId === series) return
+    if (!seriesId || joiningSeries || seriesId === series) return
     setJoiningSeries(seriesId)
     setSeriesError('')
     const response = await fetch(actionUrl(), {
@@ -1845,7 +1854,7 @@ function StepOneAdvanced({
   }
 
   const leaveSeries = async () => {
-    if (!series || joiningSeries || lockedReason) return
+    if (!series || joiningSeries) return
     setJoiningSeries('__standalone')
     setSeriesError('')
     const response = await fetch(actionUrl(), {
@@ -1863,6 +1872,30 @@ function StepOneAdvanced({
       window.location.reload()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not make this project standalone.')
+    }
+  }
+
+  const createSeries = async () => {
+    const seriesId = seriesIdFromName(newSeriesName)
+    if (!seriesId || joiningSeries) return
+    setJoiningSeries('__new')
+    setSeriesError('')
+    const response = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'create_series_from_project',
+        series: seriesId,
+      }),
+    }).catch(() => null)
+    const out = response ? await response.json().catch(() => null) : null
+    setJoiningSeries('')
+    if (response?.ok && out?.ok) {
+      window.location.reload()
+    } else {
+      setSeriesError(out?.message || out?.error || 'Could not create this series.')
     }
   }
 
@@ -1924,13 +1957,13 @@ function StepOneAdvanced({
           <div className="step1-choice-group">
             <div className="step1-choice-head">
               <h3>Your Series</h3>
-              <span>{lockedReason ? 'Locked after later work started' : 'Choosing a series also chooses its template'}</span>
+              <span>{lockedReason ? 'Series can change; the template remains locked' : 'Choosing a series also chooses its template'}</span>
             </div>
             <div className="step1-choice-row">
               <button
                 type="button"
                 className={`step1-choice-card ${series ? '' : 'sel'}`}
-                disabled={!!joiningSeries || !!lockedReason}
+                disabled={!!joiningSeries}
                 aria-pressed={!series}
                 onClick={() => void leaveSeries()}
               >
@@ -1940,27 +1973,85 @@ function StepOneAdvanced({
                   <span>Make a one-off video</span>
                 </span>
               </button>
-              {seriesOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`step1-choice-card ${series === option.id ? 'sel' : ''}`}
-                  disabled={!!joiningSeries || !!lockedReason}
-                  aria-pressed={series === option.id}
-                  onClick={() => void joinSeries(option.id)}
-                >
-                  <span className={`step1-choice-thumb ${option.thumbnail ? '' : 'empty'}`}>
-                    {option.thumbnail ? <img src={option.thumbnail} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
+              {seriesOptions.map((option) => {
+                const selected = series === option.id
+                return (
+                  <span className="step1-choice-wrap" key={option.id}>
+                    <button
+                      type="button"
+                      className={`step1-choice-card ${selected ? 'sel' : ''}`}
+                      disabled={!!joiningSeries}
+                      aria-pressed={selected}
+                      onClick={() => void joinSeries(option.id)}
+                    >
+                      <span className={`step1-choice-thumb ${option.thumbnail ? '' : 'empty'}`}>
+                        {option.thumbnail ? <img src={option.thumbnail} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : null}
+                      </span>
+                      <span className="step1-choice-copy">
+                        <b>
+                          {joiningSeries === option.id ? <><span className="spin" /> Changing…</> : displayId(option.id)}
+                        </b>
+                        <span>{option.template ? displayId(option.template) : 'Series template'}</span>
+                      </span>
+                    </button>
+                    {selected ? (
+                      <button
+                        type="button"
+                        className="step1-choice-remove"
+                        title="Remove this project from the series"
+                        aria-label={`Remove ${displayId(option.id)} series`}
+                        disabled={!!joiningSeries}
+                        onClick={() => void leaveSeries()}
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </span>
-                  <span className="step1-choice-copy">
-                    <b>
-                      {joiningSeries === option.id ? <><span className="spin" /> Changing…</> : displayId(option.id)}
-                    </b>
-                    <span>{option.template ? displayId(option.template) : 'Series template'}</span>
-                  </span>
-                </button>
-              ))}
+                )
+              })}
+              <button
+                type="button"
+                className="step1-choice-card new"
+                disabled={!!joiningSeries}
+                onClick={() => setCreatingSeries(true)}
+              >
+                <span className="step1-choice-thumb empty">＋</span>
+                <span className="step1-choice-copy">
+                  <b>New series</b>
+                  <span>Make this project its first episode</span>
+                </span>
+              </button>
             </div>
+            {creatingSeries ? (
+              <div className="step1-new-series">
+                <label>
+                  SERIES NAME
+                  <input
+                    autoFocus
+                    value={newSeriesName}
+                    onChange={(event) => setNewSeriesName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void createSeries()
+                    }}
+                    placeholder="e.g. Asyllum Loafer"
+                  />
+                </label>
+                {seriesIdFromName(newSeriesName) ? (
+                  <span className="vp-hint">ID: {seriesIdFromName(newSeriesName)}</span>
+                ) : null}
+                <button type="button" className="vp-undo" onClick={() => setCreatingSeries(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="vp-save"
+                  disabled={!seriesIdFromName(newSeriesName) || !!joiningSeries}
+                  onClick={() => void createSeries()}
+                >
+                  {joiningSeries === '__new' ? 'Creating…' : 'Create series'}
+                </button>
+              </div>
+            ) : null}
             {seriesError ? <p className="voice-error">{seriesError}</p> : null}
           </div>
 
@@ -2343,7 +2434,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
           </label>
           <button
             type="button"
-            className="step1-info-toggle"
+            className="vp-undo step1-info-toggle"
             onClick={() => setAttachmentsInfoOpen((value) => !value)}
             aria-expanded={attachmentsInfoOpen}
           >

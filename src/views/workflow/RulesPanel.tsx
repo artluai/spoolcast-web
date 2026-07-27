@@ -73,16 +73,11 @@ export function RulesPanel({ step, onToast, title }: { step: string; onToast?: (
   }
 
   const onCount = rules?.filter((r) => r.enabled).length ?? 0
-  const label = () => ({
-    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-    fontSize: 10, letterSpacing: '.1em', color: 'var(--ink-3)', fontFamily: 'var(--mono)',
-    display: 'inline-flex', gap: 6, alignItems: 'center',
-  }) as React.CSSProperties
 
   if (!open) {
     return (
       <div style={{ marginTop: 14 }}>
-        <button type="button" onClick={() => setOpen(true)} style={label()}>
+        <button type="button" onClick={() => setOpen(true)} className="utility-disclosure-toggle">
           <span style={{ fontSize: 10 }}>▸</span> {title ?? 'RULES FOR THIS STEP'}{rules ? ` (${onCount} ON)` : ''}
         </button>
       </div>
@@ -91,7 +86,7 @@ export function RulesPanel({ step, onToast, title }: { step: string; onToast?: (
 
   return (
     <div style={{ marginTop: 14 }}>
-      <button type="button" onClick={() => setOpen(false)} style={{ ...label(), marginBottom: 8 }}>
+      <button type="button" onClick={() => setOpen(false)} className="utility-disclosure-toggle" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 10 }}>▾</span> {title ?? 'RULES FOR THIS STEP'} — EVERY AI DRAFT HERE OBEYS THEM
       </button>
       {rules === null ? (

@@ -828,6 +828,28 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     if (sec.kind === 'table') sec.rows[ri][ci] = v
                     apply(d)
                   }
+                  const setScope = async (value: string) => {
+                    const d = structuredClone(doc!)
+                    const sec = d.sections[si]
+                    if (sec.kind !== 'table') return
+                    sec.rows[ri][scopeIdx] = value
+                    apply(d)
+                    const out = await postAction({
+                      action: 'set_stage_output',
+                      stage_id: stageId,
+                      path: 'working/world-kit.md',
+                      content: serializeWorldKit(d),
+                    })
+                    if (out?.ok) {
+                      toast(
+                        isSharedScope(value)
+                          ? `“${row[refIdx]}” is now shared with this series.`
+                          : `“${row[refIdx]}” now belongs to this episode only.`,
+                      )
+                    } else {
+                      toast(`Engine: ${out?.error || out?.message || 'could not save the World Kit scope.'}`)
+                    }
+                  }
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
                   const scopeKnown = SCOPE_OPTIONS.some((o) => o.value === scope)
                   const fieldRows = (
@@ -866,7 +888,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                                 <select
                                   value={scope}
                                   onFocus={snapshot}
-                                  onChange={(e) => setCell(scopeIdx, e.target.value)}
+                                  onChange={(e) => void setScope(e.target.value)}
                                   className="sc-select"
                                   style={{ display: 'block', marginTop: 3, color: isSharedScope(scope) ? 'var(--amber)' : undefined }}
                                 >
@@ -1118,7 +1140,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
         })
       )}
       <span style={{ display: 'block', marginTop: 4, color: 'var(--ink-3)', fontSize: 12 }}>
-        ⬡ = shared with the show/template · saved to the engine on “Approve &amp; continue”
+        ⬡ = shared with the series/template · scope changes save immediately
       </span>
       {libraryOpen && (
         <GlobalCharacterPicker

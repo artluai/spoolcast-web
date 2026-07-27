@@ -123,7 +123,7 @@ export function ShowSettingsModal({
             ) : (
               <button
                 type="button"
-                className="vp-undo"
+                className="utility-disclosure-toggle"
                 title="Session keys (style, voice, brand) stamped into every new episode of this show — beats the template's defaults, never overwrites choices already made"
                 onClick={() => { setDefaults(defaults ?? '{\n  "style": "",\n  "tts_voice": ""\n}'); setDefaultsOpen(true) }}
               >
@@ -154,7 +154,7 @@ export function ShowSettingsModal({
             ) : (
               <button
                 type="button"
-                className="vp-undo"
+                className="utility-disclosure-toggle"
                 title="A JSON patch on the show's contract — add, change, or remove pipeline steps for every episode of this show"
                 onClick={() => { setOverlay(overlay ?? '{\n  "extends": "ad",\n  "stages": {}\n}'); setOverlayOpen(true) }}
               >
