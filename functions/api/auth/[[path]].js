@@ -36,9 +36,82 @@ const sessionUser = async (env, request) => {
   ).bind(t).first()
 }
 
+const sessionCookie = (token) =>
+  `sc_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=7776000`
+
+const startSession = async (env, email) => {
+  await env.DB.prepare(`INSERT OR IGNORE INTO users (email) VALUES (?)`).bind(email).run()
+  const user = await env.DB.prepare(`SELECT * FROM users WHERE email = ?`).bind(email).first()
+  const s = token()
+  await env.DB.prepare(
+    `INSERT INTO web_sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+90 days'))`,
+  ).bind(s, user.id).run()
+  return s
+}
+
 export async function onRequest({ env, request, params }) {
-  const route = (Array.isArray(params.path) ? params.path : [params.path])[0]
+  const parts = Array.isArray(params.path) ? params.path : [params.path]
+  const route = parts[0]
   const url = new URL(request.url)
+
+  // Google sign-in: /api/auth/google redirects to Google's consent screen;
+  // /api/auth/google/callback exchanges the code and starts a session.
+  // Needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (Pages env / .dev.vars).
+  if (route === 'google' && request.method === 'GET') {
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+      return new Response('Google sign-in is not configured yet.', { status: 503 })
+    }
+    const redirect = `${url.origin}/api/auth/google/callback`
+    if (parts[1] === 'callback') {
+      const state = url.searchParams.get('state') || ''
+      if (!state || state !== readCookie(request, 'sc_oauth_state')) {
+        return new Response('Sign-in state mismatch — start again from the Sign in button.', { status: 400 })
+      }
+      const code = url.searchParams.get('code') || ''
+      if (!code) return new Response('Google did not return a sign-in code.', { status: 400 })
+      const exchanged = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: env.GOOGLE_CLIENT_ID,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: redirect,
+          grant_type: 'authorization_code',
+        }),
+      }).then((r) => r.json()).catch(() => null)
+      // The id_token came straight from Google over TLS, so decoding its
+      // payload without signature checks is safe here.
+      const payload = exchanged?.id_token?.split('.')?.[1]
+      const claims = payload
+        ? JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+        : null
+      const email = claims?.email_verified ? String(claims.email || '').toLowerCase() : ''
+      if (!email) return new Response('Google sign-in failed — no verified email.', { status: 400 })
+      const s = await startSession(env, email)
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: '/watch',
+          'Set-Cookie': sessionCookie(s),
+        },
+      })
+    }
+    const state = token()
+    const consent = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+    consent.searchParams.set('client_id', env.GOOGLE_CLIENT_ID)
+    consent.searchParams.set('redirect_uri', redirect)
+    consent.searchParams.set('response_type', 'code')
+    consent.searchParams.set('scope', 'openid email profile')
+    consent.searchParams.set('state', state)
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: consent.toString(),
+        'Set-Cookie': `sc_oauth_state=${state}; Path=/api/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      },
+    })
+  }
 
   if (route === 'request' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}))
@@ -74,19 +147,10 @@ export async function onRequest({ env, request, params }) {
     ).bind(t).first()
     if (!row) return new Response('This sign-in link is invalid or expired.', { status: 400 })
     await env.DB.prepare(`UPDATE auth_tokens SET used = 1 WHERE token = ?`).bind(t).run()
-    // find-or-create the account; handle stays empty until the user picks one
-    await env.DB.prepare(`INSERT OR IGNORE INTO users (email) VALUES (?)`).bind(row.email).run()
-    const user = await env.DB.prepare(`SELECT * FROM users WHERE email = ?`).bind(row.email).first()
-    const s = token()
-    await env.DB.prepare(
-      `INSERT INTO web_sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+90 days'))`,
-    ).bind(s, user.id).run()
+    const s = await startSession(env, row.email)
     return new Response(null, {
       status: 302,
-      headers: {
-        Location: '/watch',
-        'Set-Cookie': `sc_session=${s}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=7776000`,
-      },
+      headers: { Location: '/watch', 'Set-Cookie': sessionCookie(s) },
     })
   }
 

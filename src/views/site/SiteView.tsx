@@ -100,11 +100,14 @@ function SiteHeader() {
               void request()
             }}
           >
+            {/* Google is the primary path; the email link stays as the
+                fallback (and the local-dev login). */}
+            <a className="site-auth-google" href="/api/auth/google">Continue with Google</a>
+            <span className="site-auth-note">or</span>
             <input
               type="email"
               value={email}
               placeholder="you@email.com"
-              autoFocus
               onChange={(e) => setEmail(e.target.value)}
             />
             <button type="submit">Send link</button>
