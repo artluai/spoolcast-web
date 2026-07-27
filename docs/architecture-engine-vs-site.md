@@ -56,6 +56,16 @@ cut line already exists: the site side needs only the publish handoff and the as
 - Deploys are independent: site side ships with the normal Pages deploy; the engine never
   deploys (it runs locally).
 
+## Planned clients (documented intent)
+
+A **CLI client** is wanted at/soon after launch, alongside the web UI. Design consequence
+today: anything a client needs must be an API, never a page — the CLI is just another
+consumer of the site-side APIs (auth, catalog, publish) and, once the engine is hosted,
+of the engine's job API. Auth for CLI: device-style login (CLI prints a link, user
+approves in the browser, CLI receives a token). **Payments never happen in the CLI** —
+credits are bought on the web (Stripe checkout in a browser, standard practice); the CLI
+only spends them via the same ledger. No card data ever touches the terminal.
+
 ## Related docs
 
 - `docs/business-model.md` — display layer vs (gated) money layer, marketplace framing.
