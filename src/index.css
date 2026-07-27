@@ -3171,3 +3171,5 @@ body.chat-pinned { padding-right: 380px; }
 .site-auth-google:hover { filter: brightness(1.08); }
 .site-create { color: var(--ink-2); text-decoration: none; font-size: 12.5px; border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 12px; }
 .site-create:hover { border-color: var(--accent); color: var(--ink); }
+.pp-link { color: var(--ink-2); text-decoration: none; }
+.pp-link:hover { color: var(--accent-2); }

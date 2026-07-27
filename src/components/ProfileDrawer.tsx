@@ -1,42 +1,58 @@
+import { useEffect, useState } from 'react'
+
+// The REAL account drawer. Everything here reflects the site session
+// (/api/auth/me) — no demo data. Plan/credits UI returns when the money
+// layer exists; until then the drawer only shows what is true.
+
+type User = { id: number; email: string; handle: string | null; name: string; role: string }
+
 export function ProfileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [checked, setChecked] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    void fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => setUser(out?.data?.user ?? null))
+      .catch(() => setUser(null))
+      .finally(() => setChecked(true))
+  }, [open])
+  const signOut = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    setUser(null)
+    window.location.href = '/watch'
+  }
+  const label = user?.name || user?.handle || user?.email || ''
   return (
     <>
       <button className={`profile-scrim ${open ? 'open' : ''}`} onClick={onClose} aria-label="Close profile" />
       <aside className={`profile-panel ${open ? 'open' : ''}`}>
         <div className="pp-head">
-          <div className="pp-avatar">R</div>
+          <div className="pp-avatar">{(label || '?').slice(0, 1).toUpperCase()}</div>
           <div>
-            <b>Ralph Xu</b>
-            <span>ralph@spoolcast.dev</span>
+            <b>{user ? label : 'Not signed in'}</b>
+            <span>{user ? user.email : ''}</span>
           </div>
           <button onClick={onClose}>×</button>
         </div>
-        <div className="credits-card">
-          <span>Credits</span>
-          <b>2,140 <em>/ 5,000 this month</em></b>
-          <i><u style={{ width: '42%' }} /></i>
-          <div><small>Resets May 28</small><button>Top up</button></div>
-        </div>
-        <section>
-          <h3>Plan</h3>
-          <p>Creator · $24/mo</p>
-          <small>5,000 credits · 4 active shows · billed monthly</small>
-        </section>
-        <section>
-          <h3>Defaults</h3>
-          {['Autopilot pauses on audit failures', 'Auto-approve mobile variant', 'Email when a step finishes'].map((item, i) => (
-            <div className="pp-row" key={item}>
-              <span>{item}<small>{i === 0 ? 'Recommended. Turn off only if the gates are trusted.' : i === 1 ? 'Skip the human gate when the vertical cut passes audits.' : 'One email per project, not per step.'}</small></span>
-              <button className={`toggle ${i !== 1 ? 'on' : ''}`} />
-            </div>
-          ))}
-        </section>
-        <section>
-          <h3>Account</h3>
-          <p>Manage API keys ›</p>
-          <p>Connected platforms ›</p>
-          <p>Sign out ›</p>
-        </section>
+        {user ? (
+          <>
+            <section>
+              <h3>Account</h3>
+              <p>{user.handle ? `@${user.handle}` : 'No handle yet'}</p>
+              <small>{user.role === 'admin' ? 'Admin — can publish global assets' : 'Creator account'}</small>
+            </section>
+            <section>
+              <p><a className="pp-link" href="#signout" onClick={(e) => { e.preventDefault(); void signOut() }}>Sign out ›</a></p>
+            </section>
+          </>
+        ) : checked ? (
+          <section>
+            <h3>Account</h3>
+            <p><a className="pp-link" href="/api/auth/google">Continue with Google ›</a></p>
+            <small>One account for watching and creating.</small>
+          </section>
+        ) : null}
       </aside>
     </>
   )

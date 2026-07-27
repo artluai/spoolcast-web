@@ -1,5 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SetupMode } from '../types'
+
+// Avatar letter comes from the REAL session (same-origin cookie); '?' when
+// signed out or when the auth functions aren't reachable (plain vite).
+function useAvatarLetter() {
+  const [letter, setLetter] = useState('?')
+  useEffect(() => {
+    void fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        const u = out?.data?.user
+        const label = u?.name || u?.handle || u?.email || ''
+        if (label) setLetter(String(label).slice(0, 1).toUpperCase())
+      })
+      .catch(() => {})
+  }, [])
+  return letter
+}
 
 export function Header({
   route,
@@ -44,6 +61,7 @@ export function Header({
 }) {
   // One menu instead of a row of header buttons — simpler, scales.
   const [menuOpen, setMenuOpen] = useState(false)
+  const avatarLetter = useAvatarLetter()
   const pick = (fn?: () => void) => () => {
     setMenuOpen(false)
     fn?.()
@@ -194,7 +212,7 @@ export function Header({
             ) : null}
           </span>
           <button className="avatar-btn" onClick={onProfile}>
-            R
+            {avatarLetter}
           </button>
         </div>
       ) : route === '/projects' || route === '/library' ? (
@@ -206,7 +224,7 @@ export function Header({
             Library
           </button>
           <button className="avatar-btn" onClick={onProfile}>
-            R
+            {avatarLetter}
           </button>
         </div>
       ) : null}
