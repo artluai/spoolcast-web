@@ -55,6 +55,11 @@ export function StepContent({
   }
   if (step.id === 'idea')
     return <IdeaBriefContent blankProject={blankProject} stepId={stepId} />
+  if (step.id === 'research') {
+    // Research brief: AI drafts (links fetched, web searched when allowed),
+    // the user reads/edits, approval gates. Approving empty = skip.
+    return <StageDraftEditor stageId={stepId} />
+  }
   if (step.id === 'goal')
     return <CoreMessageContent stepId={stepId} />
   if (step.id === 'plan') {

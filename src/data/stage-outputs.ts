@@ -8,6 +8,13 @@ export const STAGE_DRAFT_OUTPUTS: Record<
   string,
   { path: string; label: string; placeholder: string; aiDraft?: boolean; autoSuggest?: boolean; structured?: 'worldkit' | 'pacing' }
 > = {
+  research: {
+    path: 'working/research-brief.md',
+    label: 'Research brief',
+    aiDraft: true, // draft_research: user links always fetched; open web search only when allowed
+    placeholder:
+      '# Research Brief\n\nFacts with sources, misconceptions, hooks, and what it all means for this video.\nUse “Draft with AI” — or write your own research here. Approving with nothing here skips research for this video.',
+  },
   structure: {
     path: 'working/structure.md',
     label: 'Structure outline',

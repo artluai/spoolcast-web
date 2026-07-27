@@ -1666,6 +1666,31 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       : [], // ZERO DUMMY DATA RULE: Source material must come from the engine, not hardcoded mocks.
   )
 
+  // Research permission mirrors session.json — null until read, so the
+  // checkbox never flashes a default the engine might contradict.
+  const [webResearch, setWebResearch] = useState<boolean | null>(null)
+  useEffect(() => {
+    fetch(fileUrl('session.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        try {
+          const cfg = JSON.parse(out?.data?.content || '{}')
+          setWebResearch(cfg.allow_web_research !== false)
+        } catch {
+          setWebResearch(true)
+        }
+      })
+      .catch(() => setWebResearch(true))
+  }, [])
+  const toggleWebResearch = async (next: boolean) => {
+    setWebResearch(next)
+    await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_session_fields', fields: { allow_web_research: next } }),
+    }).catch(() => {})
+  }
+
   // FILES ARE TRUTH: list what is actually in source/ rather than only what
   // this browser tab uploaded. Uploads used to vanish from this step on
   // reload — they were on disk (the World Kit could map them via the same
@@ -1808,12 +1833,26 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
             <path d="M5 12h14" />
           </svg>
           Attach files
-          <input 
-            type="file" 
-            style={{ display: 'none' }} 
-            onChange={handleFileUpload} 
+          <input
+            type="file"
+            style={{ display: 'none' }}
+            onChange={handleFileUpload}
           />
         </label>
+
+        {/* Research permission (session.json allow_web_research). Links you
+            paste are fetched regardless — pasting one is an explicit request;
+            this only governs Spoolcast searching the open web on its own. */}
+        {webResearch !== null ? (
+          <label className="voice-pron-check" style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={webResearch}
+              onChange={(e) => void toggleWebResearch(e.target.checked)}
+            />
+            <span>Allow Spoolcast to search the web when researching this topic</span>
+          </label>
+        ) : null}
       </section>
     </div>
   )
