@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { apiUrl, getJson, postAction, sessionsUrl, templatesUrl } from '../lib/api'
 import { TEMPLATE_ART } from '../data/picker'
 
@@ -26,6 +27,14 @@ type EngineSession = {
   stage_count: number
 }
 
+const UNDECIDED_TEMPLATE: EngineTemplate = {
+  id: 'undecided',
+  name: 'Decide at step 1',
+  format: 'template picked later',
+  contract: 'base',
+  description: 'Start with the idea; pick the template at step 1 — or let AI pick it from the idea.',
+}
+
 const timeAgo = (epochSeconds?: number) => {
   if (!epochSeconds) return ''
   const s = Math.max(0, Date.now() / 1000 - epochSeconds)
@@ -37,11 +46,9 @@ const timeAgo = (epochSeconds?: number) => {
 const slugify = (v: string) => v.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-_]/g, '')
 
 export function PickerView({
-  onStandalone,
   onOpenSession,
   onScrolled,
 }: {
-  onStandalone: () => void
   onOpenSession: (id: string) => void
   onScrolled: (scrolled: boolean) => void
 }) {
@@ -50,6 +57,9 @@ export function PickerView({
   const [sessions, setSessions] = useState<EngineSession[]>([])
   const [engineDown, setEngineDown] = useState(false)
   const [creating, setCreating] = useState<EngineTemplate | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<EngineSession | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   // the picker mounts at the top, so the nav bar starts in its floating state
   useEffect(() => {
     onScrolled(false)
@@ -88,7 +98,7 @@ export function PickerView({
           <p className="lede">Pick up where you left off, or start something new.</p>
         </div>
 
-        <button className="blank-top solo" onClick={onStandalone}>
+        <button className="blank-top solo" onClick={() => setCreating(UNDECIDED_TEMPLATE)}>
           <span className="bt-glyph">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 5v14M5 12h14" />
@@ -117,6 +127,10 @@ export function PickerView({
                   pct={s.stage_count ? Math.round((s.done_stages / s.stage_count) * 100) : 0}
                   thumb={apiUrl('content', { path: `sessions/${s.id}/renders/${s.id}-thumbnail.png` })}
                   onClick={() => onOpenSession(s.id)}
+                  onDelete={() => {
+                    setDeleteError('')
+                    setDeleteTarget(s)
+                  }}
                 />
               ))}
             </div>
@@ -151,23 +165,9 @@ export function PickerView({
               the template at step 1 (by hand or let AI pick from the idea).
               The engine runs the session on the base contract until then. */}
           <PickerTile
-            tpl={{
-              id: 'undecided',
-              name: 'Decide at step 1',
-              format: 'template picked later',
-              contract: 'base',
-              description: 'Start with the idea; pick the template at step 1 — or let AI pick it from the idea. Locks once real work starts.',
-            }}
+            tpl={UNDECIDED_TEMPLATE}
             hidden={q.trim().length > 0 && !'decide later undecided idea first'.includes(q.trim().toLowerCase())}
-            onUse={() =>
-              setCreating({
-                id: 'undecided',
-                name: 'Decide at step 1',
-                format: 'template picked later',
-                contract: 'base',
-                description: 'The template is picked at step 1 — by hand, or AI picks it from the idea.',
-              })
-            }
+            onUse={() => setCreating(UNDECIDED_TEMPLATE)}
           />
         </div>
         {engineDown ? (
@@ -183,6 +183,52 @@ export function PickerView({
           onCancel={() => setCreating(null)}
           onCreated={onOpenSession}
         />
+      ) : null}
+      {deleteTarget ? (
+        <div
+          className="modal-scrim"
+          onClick={() => {
+            if (!deleting) setDeleteTarget(null)
+          }}
+        >
+          <div className="confirm-modal" onClick={(event) => event.stopPropagation()}>
+            <span className="need">PERMANENT DELETE</span>
+            <h3>Delete this project?</h3>
+            <p>
+              This permanently deletes its idea, attached files, drafts, generated media, approvals, and renders.
+              It cannot be undone.
+            </p>
+            <div className="check">
+              <b>{deleteTarget.id}</b>
+            </div>
+            {deleteError ? <p className="voice-error">{deleteError}</p> : null}
+            <div className="actions">
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button>
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true)
+                  setDeleteError('')
+                  const out = await postAction<{ deleted?: boolean }>({
+                    action: 'delete_session',
+                    session: deleteTarget.id,
+                  })
+                  setDeleting(false)
+                  if (out?.ok && out.data?.deleted) {
+                    setSessions((current) => current.filter((session) => session.id !== deleteTarget.id))
+                    setDeleteTarget(null)
+                  } else {
+                    setDeleteError(out?.message || out?.error || 'Could not delete the project.')
+                  }
+                }}
+              >
+                {deleting ? <span className="spin" /> : null}
+                {deleting ? 'Deleting…' : 'Delete project'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   )
@@ -384,6 +430,7 @@ function ResumeRow({
   pct,
   thumb,
   onClick,
+  onDelete,
 }: {
   title: string
   sub: string
@@ -391,30 +438,82 @@ function ResumeRow({
   pct: number
   thumb?: string
   onClick: () => void
+  onDelete: () => void
 }) {
+  const menuRef = useRef<HTMLButtonElement | null>(null)
+  const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+  const toggleMenu = () => {
+    if (menuPos) {
+      setMenuPos(null)
+      return
+    }
+    const rect = menuRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const vw = document.documentElement.clientWidth || window.innerWidth
+    const vh = document.documentElement.clientHeight || window.innerHeight
+    const left = Math.max(8, Math.min(rect.right - 184, vw - 192))
+    if (vh && rect.bottom + 90 > vh) {
+      setMenuPos({ left, bottom: vh - rect.top + 4 })
+    } else {
+      setMenuPos({ left, top: rect.bottom + 4 })
+    }
+  }
   return (
-    <button className="resume-row" onClick={onClick}>
-      {thumb ? (
-        <span className="r-thumb">
-          <img
-            src={thumb}
-            alt=""
-            loading="lazy"
-            onError={(e) => {
-              // no rendered thumbnail yet — drop the slot, keep the row
-              ;(e.currentTarget.parentElement as HTMLElement).style.display = 'none'
-            }}
-          />
+    <div className="resume-row">
+      <button className="resume-open" onClick={onClick}>
+        {thumb ? (
+          <span className="r-thumb">
+            <img
+              src={thumb}
+              alt=""
+              loading="lazy"
+              onError={(e) => {
+                // no rendered thumbnail yet — drop the slot, keep the row
+                ;(e.currentTarget.parentElement as HTMLElement).style.display = 'none'
+              }}
+            />
+          </span>
+        ) : null}
+        <span className="r-meta">
+          <span className="r-title">{title}</span>
+          <span className="r-sub">{sub}</span>
         </span>
-      ) : null}
-      <div className="r-meta">
-        <div className="r-title">{title}</div>
-        <div className="r-sub">{sub}</div>
-      </div>
-      <div className="r-prog">
-        <span className="r-step">{step}</span>
-        <span className="bar"><i style={{ width: `${pct}%` }} /></span>
-      </div>
-    </button>
+        <span className="r-prog">
+          <span className="r-step">{step}</span>
+          <span className="bar"><i style={{ width: `${pct}%` }} /></span>
+        </span>
+      </button>
+      <button
+        ref={menuRef}
+        type="button"
+        className="vp-row-menu"
+        aria-label={`Project actions for ${title}`}
+        title="Project actions"
+        onClick={toggleMenu}
+      >
+        ⋯
+      </button>
+      {menuPos
+        ? createPortal(
+            <>
+              <span className="vp-menu-backdrop" onClick={() => setMenuPos(null)} />
+              <span className="vp-menu" style={{ ...menuPos, minWidth: 184 }}>
+                <span className="vp-menu-h">{title}</span>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    setMenuPos(null)
+                    onDelete()
+                  }}
+                >
+                  Delete project
+                </button>
+              </span>
+            </>,
+            document.body,
+          )
+        : null}
+    </div>
   )
 }

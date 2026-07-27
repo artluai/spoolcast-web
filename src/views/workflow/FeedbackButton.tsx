@@ -31,6 +31,7 @@ export function FeedbackButton({
   alwaysOpen = false,
   historyRideAlong = true,
   allowFeedback = true,
+  allowRuleSave = true,
   aboveActions,
   runExtras,
   onRun,
@@ -60,6 +61,9 @@ export function FeedbackButton({
   // Deterministic AI/engine actions (render, TTS, media generation) use the
   // same house button but do not pretend a text note can affect the result.
   allowFeedback?: boolean
+  // Some actions improve only the current draft and have no meaningful
+  // connection to the project/series rulebook.
+  allowRuleSave?: boolean
   // Extra controls rendered on their own row between the textarea and the
   // action row (e.g. a host-owned checkbox).
   aboveActions?: ReactNode
@@ -250,25 +254,29 @@ export function FeedbackButton({
       />
       {aboveActions ? <div style={{ padding: '2px 10px 0' }}>{aboveActions}</div> : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px 10px' }}>
-        <label
-          title="Adds this to the series rulebook (Project Wiki) so EVERY future draft follows it — not just this one"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}
-        >
-          <input
-            type="checkbox"
-            checked={asRule}
-            onChange={(e) => setAsRule(e.target.checked)}
-            style={{ accentColor: 'var(--ink-2)', margin: 0 }}
-          />
-          also save as a permanent rule
-        </label>
-        <a
-          href={`/p/dev-log-12/rules?focus=${rulesFocus}`}
-          title="Open the rulebook this step works under"
-          style={{ color: 'var(--ink-3)', fontSize: 12, textDecoration: 'underline', textUnderlineOffset: 3 }}
-        >
-          view existing rules
-        </a>
+        {allowRuleSave ? (
+          <>
+            <label
+              title="Adds this to the series rulebook (Project Wiki) so EVERY future draft follows it — not just this one"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={asRule}
+                onChange={(e) => setAsRule(e.target.checked)}
+                style={{ accentColor: 'var(--ink-2)', margin: 0 }}
+              />
+              also save as a permanent rule
+            </label>
+            <a
+              href={`/p/dev-log-12/rules?focus=${rulesFocus}`}
+              title="Open the rulebook this step works under"
+              style={{ color: 'var(--ink-3)', fontSize: 12, textDecoration: 'underline', textUnderlineOffset: 3 }}
+            >
+              view existing rules
+            </a>
+          </>
+        ) : null}
         {ruleNote ? <span style={{ color: 'var(--amber)', fontSize: 12 }}>{ruleNote}</span> : null}
         <span style={{ flex: 1 }} />
         {!alwaysOpen && (
@@ -289,7 +297,7 @@ export function FeedbackButton({
           title={title}
           onClick={async () => {
             setRuleNote(null)
-            if (asRule && feedback.trim()) {
+            if (allowRuleSave && asRule && feedback.trim()) {
               if (ruleStep) {
                 // File into THIS step's rules so every future draft of the
                 // step obeys it (series first, template when no series).

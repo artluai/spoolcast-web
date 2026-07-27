@@ -1070,35 +1070,39 @@ export function WorkflowView({
           </div>
           <div className="detail-command-section">
             <div className="detail-command-bar">
-              <span className="step-ai-control">
-                <FeedbackButton
-                  label={activeStepAI?.label || 'Complete step with AI'}
-                  busy={Boolean(activeStepAI?.busy)}
-                  busyLabel="Working…"
-                  disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
-                  title={
-                    isBeyondBlocked
-                      ? 'Complete the earlier steps first'
-                      : activeStepAI?.disabledReason
-                        || (activeStepAI ? 'Complete only this step with AI; you still review and approve the result' : 'This step still needs a registered AI completion action')
-                  }
-                  placeholder={`Optional instructions for ${activeStep.name}…`}
-                  historyKey={`complete-step-${activeStepId.replace(/_/g, '-')}`}
-                  ruleStep={activeStepId}
-                  allowFeedback={Boolean(activeStepAI) && activeStepAI.acceptsInstructions !== false}
-                  runExtras={activeStepAI?.usesTextModel !== false ? (
-                    <ModelPicker
-                      model={activeStepAIModel}
-                      onChange={(model) => setStepAIModels((current) => ({ ...current, [activeStepId]: model }))}
-                      disabled={Boolean(activeStepAI?.busy)}
-                    />
-                  ) : undefined}
-                  onRun={(instructions) => {
-                    if (!activeStepAI || activeStepAI.disabled || isBeyondBlocked) return
-                    void activeStepAI.run({ instructions, model: activeStepAIModel })
-                  }}
-                />
-              </span>
+              {activeStepId !== 'input_intake' ? (
+                <span className="step-ai-control">
+                  <FeedbackButton
+                    label={activeStepAI?.label || 'Complete step with AI'}
+                    busy={Boolean(activeStepAI?.busy)}
+                    busyLabel="Working…"
+                    disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
+                    title={
+                      isBeyondBlocked
+                        ? 'Complete the earlier steps first'
+                        : activeStepAI?.disabledReason
+                          || activeStepAI?.title
+                          || (activeStepAI ? 'Complete only this step with AI; you still review and approve the result' : 'This step still needs a registered AI completion action')
+                    }
+                    placeholder={activeStepAI?.placeholder || `Optional instructions for ${activeStep.name}…`}
+                    historyKey={activeStepAI?.historyKey || `complete-step-${activeStepId.replace(/_/g, '-')}`}
+                    ruleStep={activeStepId}
+                    allowFeedback={Boolean(activeStepAI) && activeStepAI.acceptsInstructions !== false}
+                    allowRuleSave={activeStepAI?.allowRuleSave !== false}
+                    runExtras={activeStepAI?.usesTextModel !== false ? (
+                      <ModelPicker
+                        model={activeStepAIModel}
+                        onChange={(model) => setStepAIModels((current) => ({ ...current, [activeStepId]: model }))}
+                        disabled={Boolean(activeStepAI?.busy)}
+                      />
+                    ) : undefined}
+                    onRun={(instructions) => {
+                      if (!activeStepAI || activeStepAI.disabled || isBeyondBlocked) return
+                      void activeStepAI.run({ instructions, model: activeStepAIModel })
+                    }}
+                  />
+                </span>
+              ) : null}
               {activeStep.id === 'check' ? (
                 <>
                   <button

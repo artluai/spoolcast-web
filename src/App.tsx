@@ -162,6 +162,9 @@ function SpoolcastApp() {
   // The RAW series id behind showName (showName may be a display alias) — the
   // show-settings panel edits series/<id>/ files, so it needs the real id.
   const [seriesId, setSeriesId] = useState('')
+  // null = session config still loading; '' = a real undecided Step-1 session.
+  // Fog-of-war follows this field now that Start Blank no longer uses /p/new.
+  const [sessionTemplate, setSessionTemplate] = useState<string | null>(null)
   const [showSettingsOpen, setShowSettingsOpen] = useState(false)
   const [steps, setSteps] = useState(() => buildStepsFromContract(FALLBACK_CONTRACT, initialStandalone, null))
   const [gates, setGates] = useState(() => buildGates(FALLBACK_CONTRACT, initialStandalone, null))
@@ -240,6 +243,7 @@ function SpoolcastApp() {
     renderSentinelRef.current = null
     setApiStatus(null)
     setApiLoading(true)
+    setSessionTemplate(null)
     if (!routeSession || routeSession === 'new') {
       // Left a real session for the mock blank flow (or off the workflow):
       // rebuild the blank graph — no poll will reshape it, and the previous
@@ -250,10 +254,9 @@ function SpoolcastApp() {
     }
   }, [routeSession])
 
-  // FORMAT FORK (blank flow): until Step 01's narrator answer picks the
-  // format, the map's format-dependent stretch stays fogged. The answer is
-  // live store state, so the fog lifts the moment the user clicks — no save
-  // needed. Real sessions got their format from the template: never fogged.
+  // FORMAT FORK: until the template decides audio-first vs video-first, the
+  // format-dependent stretch stays fogged. This covers both the legacy
+  // /p/new mock and real engine-backed sessions with template: "".
   const narrator = useWorkflowStore((s) => s.s1.narrator)
   const fogState =
     routeSession === 'new'
@@ -262,7 +265,9 @@ function SpoolcastApp() {
         : narrator === 'no'
           ? ('video' as const)
           : ('undecided' as const)
-      : ('lifted' as const)
+      : sessionTemplate === '' || (sessionTemplate === null && contract.id === 'base')
+        ? ('undecided' as const)
+        : ('lifted' as const)
   useEffect(() => {
     if (routeSession !== 'new') return
     setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true, null, fogState))
@@ -276,11 +281,12 @@ function SpoolcastApp() {
   useEffect(() => {
     if (!routeSession || routeSession === 'new') return
     let cancelled = false
-    getFileJson<{ series?: unknown }>('session.json').then((cfg) => {
+    getFileJson<{ series?: unknown; template?: unknown }>('session.json').then((cfg) => {
       if (cancelled || cfg === null) return
       const series = typeof cfg.series === 'string' ? cfg.series : ''
       setShowName(series ? (showBySeries[series] ?? series) : 'standalone')
       setSeriesId(series)
+      setSessionTemplate(typeof cfg.template === 'string' ? cfg.template : '')
     })
     return () => {
       cancelled = true
@@ -391,7 +397,7 @@ function SpoolcastApp() {
           const data = await withUiProgress(await response.json())
           setApiStatus(data)
           // Update steps and gates with live API data to remove fake mock statuses
-          setSteps(buildStepsFromContract(contract, initialStandalone, data.data))
+          setSteps(buildStepsFromContract(contract, initialStandalone, data.data, fogState))
           setGates(buildGates(contract, initialStandalone, data.data))
           // FINAL RENDER TRUTH: the render audit's sentinel file. The render
           // script deletes it when a compile starts and the audit re-writes it
@@ -444,7 +450,7 @@ function SpoolcastApp() {
     // script runs) without a manual refresh.
     const interval = setInterval(fetchStatus, 5000)
     return () => clearInterval(interval)
-  }, [initialStandalone, routeSession, contract])
+  }, [initialStandalone, routeSession, contract, fogState])
 
   useEffect(() => {
     if (!apiLoading && apiStatus?.data?.workflow_graph?.nodes) {
@@ -520,20 +526,6 @@ function SpoolcastApp() {
     const timer = window.setTimeout(() => setToast(''), 2200)
     return () => window.clearTimeout(timer)
   }, [toast])
-
-  const resetBlank = (chat = false) => {
-    setOnboardSeed(null)
-    setOrigin('blank')
-    setSetupMode('standalone')
-    setShowName('standalone')
-    setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true))
-    setGates(buildGates(FALLBACK_CONTRACT, true))
-    setSelected('setup')
-    setAutopilot(false)
-    setChatTab('chat')
-    setChatState(chat ? 'floating' : 'closed')
-    setCustomChat(chat)
-  }
 
   // ENTRY SPINE, STEP 4: saving Project setup on the blank flow CREATES the
   // real video. The step-1 answers become engine truth — the narrator answer
@@ -736,10 +728,6 @@ function SpoolcastApp() {
             path="/projects"
             element={
               <PickerView
-                onStandalone={() => {
-                  resetBlank()
-                  navigate('/p/new')
-                }}
                 onOpenSession={(id) => {
                   // A REAL session: /p/:id is the identity — the session-switch
                   // effect resets per-session state and auto-nav picks the step.
@@ -1025,7 +1013,7 @@ function SpoolcastApp() {
                         if (r.ok) {
                           const apiData = await r.json()
                           setApiStatus(apiData)
-                          setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                          setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data, fogState))
                           setGates(buildGates(contract, initialStandalone, apiData.data))
                         }
                         return false
@@ -1148,7 +1136,7 @@ function SpoolcastApp() {
                             if (res2.ok) {
                               const apiData = await res2.json()
                               setApiStatus(apiData)
-                              setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                              setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data, fogState))
                               setGates(buildGates(contract, initialStandalone, apiData.data))
                             }
                           } catch { /* polling will catch up */ }
@@ -1162,7 +1150,7 @@ function SpoolcastApp() {
                     if (res.ok) {
                       const apiData = await res.json()
                       setApiStatus(apiData)
-                      setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data))
+                      setSteps(buildStepsFromContract(contract, initialStandalone, apiData.data, fogState))
                       setGates(buildGates(contract, initialStandalone, apiData.data))
                     }
                     // Only now start the background AI hand-off — the quick refresh

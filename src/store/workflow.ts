@@ -77,6 +77,10 @@ export type StepAIAction = {
   busy: boolean
   disabled?: boolean
   disabledReason?: string
+  title?: string
+  placeholder?: string
+  historyKey?: string
+  allowRuleSave?: boolean
   usesTextModel?: boolean
   acceptsInstructions?: boolean
   run: (request: StepAIRequest) => void | Promise<void>

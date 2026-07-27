@@ -3,12 +3,14 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, sessionsUrl, statusUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
 import { useWorkflowStore, type Goal, type S1 } from '../../store/workflow'
+import { FeedbackButton } from './FeedbackButton'
+import { ModelPicker } from './ModelPicker'
 
 const VOICE_RULES_ID = 'series:spoolcast-devlog:voice'
 const WORLD_KIT_PRONUNCIATION_HEADER = '## Pronunciation / TTS Rules'
@@ -1505,7 +1507,7 @@ type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock
 // "let AI pick" from the idea already written. Invisible once decided; the
 // engine's lock rule refuses changes after work starts, so this bar only
 // ever appears while changing is still legal.
-export function TemplatePickerBar() {
+export function TemplatePickerBar({ idea = '' }: { idea?: string }) {
   type Tpl = { id: string; name?: string; format?: string; description?: string }
   const [tpls, setTpls] = useState<Tpl[]>([])
   const [current, setCurrent] = useState<string | null>(null)
@@ -1533,7 +1535,9 @@ export function TemplatePickerBar() {
     ]).then(([sess, reg]) => {
       if (!live) return
       try {
-        setCurrent(String(JSON.parse(sess?.data?.content || '{}')?.template || ''))
+        const templateId = String(JSON.parse(sess?.data?.content || '{}')?.template || '')
+        setCurrent(templateId)
+        setChoice((existing) => existing || templateId)
       } catch {
         setCurrent('')
       }
@@ -1543,7 +1547,7 @@ export function TemplatePickerBar() {
       live = false
     }
   }, [])
-  if (current === null || current !== '' || tpls.length === 0) return null
+  if (current === null || tpls.length === 0) return null
 
   const post = async (body: Record<string, unknown>) => {
     const r = await fetch(actionUrl(), {
@@ -1553,10 +1557,22 @@ export function TemplatePickerBar() {
     })
     return r.json().catch(() => null)
   }
+  const persistIdea = async () => {
+    if (!idea.trim()) return true
+    const content = btoa(unescape(encodeURIComponent(`# Video idea\n\n${idea.trim()}\n`)))
+    const out = await post({ action: 'upload_file', filename: 'idea-brief.md', content })
+    if (out?.ok) return true
+    setNote(out?.message || out?.error || 'Could not save the idea before using the template.')
+    return false
+  }
   const apply = async (id: string) => {
-    if (!id) return
+    if (!id || id === current) return
     setBusy('apply')
     setNote('')
+    if (!(await persistIdea())) {
+      setBusy('')
+      return
+    }
     const out = await post({ action: 'apply_template', template: id })
     if (out?.ok && cast?.id) {
       // The suggested creator rides along with the template so "apply" means
@@ -1576,6 +1592,10 @@ export function TemplatePickerBar() {
   const suggest = async () => {
     setBusy('suggest')
     setNote('')
+    if (!(await persistIdea())) {
+      setBusy('')
+      return
+    }
     const out = await post({ action: 'suggest_template', allow_cost: true })
     if (out?.ok && out?.data?.template) {
       setChoice(out.data.template)
@@ -1594,11 +1614,13 @@ export function TemplatePickerBar() {
   return (
     <div className="panel-flat" style={{ marginBottom: 14 }}>
       <div className="ch">
-        <h3>Template — not decided yet</h3>
-        <span>picks the step list; locks once work starts</span>
+        <h3>{current ? `Template — ${current}` : 'Template — not decided yet'}</h3>
+        <span>picks the step list; changes lock once later work starts</span>
       </div>
       <p className="vp-hint" style={{ margin: '0 0 10px' }}>
-        Pick the video's template now, or write the idea below first and let AI pick from it.
+        {current
+          ? 'Choose a different template only while this project is still at Step 1.'
+          : 'Pick the video’s template now, or let AI pick from the idea above.'}
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {tpls.map((t) => (
@@ -1616,8 +1638,17 @@ export function TemplatePickerBar() {
         <button type="button" className="vp-undo vp-aimap" disabled={!!busy} onClick={suggest}>
           ✦ {busy === 'suggest' ? 'Reading the idea…' : 'Let AI pick from the idea'}
         </button>
-        <button type="button" className="vp-save" disabled={!choice || !!busy} onClick={() => void apply(choice)}>
-          {busy === 'apply' ? 'Applying…' : `Apply${choice ? ` ${choice}` : ''}`}
+        <button
+          type="button"
+          className="vp-save"
+          disabled={!choice || (!!current && choice === current) || !!busy}
+          onClick={() => void apply(choice)}
+        >
+          {busy === 'apply'
+            ? 'Applying…'
+            : current && choice === current
+              ? 'Currently applied'
+              : `Apply${choice ? ` ${choice}` : ' template'}`}
         </button>
       </div>
       {note ? <p className="vp-hint" style={{ margin: '10px 0 0' }}>{note}</p> : null}
@@ -1658,10 +1689,329 @@ export function TemplatePickerBar() {
   )
 }
 
+type StepOneKitItem = {
+  name: string
+  image_path?: string
+  global_path?: string
+  image_scope?: string
+  scope?: string
+}
+
+const displayId = (id: string) =>
+  id
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const featuringNames = (idea: string) => {
+  const line = idea.split(/\r?\n/).find((entry) => /^\s*Featuring\s*:/i.test(entry))
+  return (line?.replace(/^\s*Featuring\s*:\s*/i, '') || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+}
+
+const withFeaturingNames = (idea: string, names: string[]) => {
+  const withoutFeaturing = idea
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*Featuring\s*:/i.test(line))
+    .join('\n')
+    .trimEnd()
+  if (!names.length) return withoutFeaturing
+  return `${withoutFeaturing}${withoutFeaturing ? '\n\n' : ''}Featuring: ${names.join(', ')}`
+}
+
+function StepOneAdvanced({
+  idea,
+  onIdeaChange,
+}: {
+  idea: string
+  onIdeaChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [template, setTemplate] = useState('')
+  const [series, setSeries] = useState('')
+  const [seriesOptions, setSeriesOptions] = useState<string[]>([])
+  const [seriesChoice, setSeriesChoice] = useState('')
+  const [joiningSeries, setJoiningSeries] = useState(false)
+  const [seriesError, setSeriesError] = useState('')
+  const [webResearch, setWebResearch] = useState<boolean | null>(null)
+  const [kit, setKit] = useState<StepOneKitItem[]>([])
+  const [kitLoading, setKitLoading] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(sessionsUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([sessionOut, sessionsOut]) => {
+      if (!live) return
+      try {
+        const cfg = JSON.parse(sessionOut?.data?.content || '{}')
+        setTemplate(String(cfg.template || ''))
+        setSeries(String(cfg.series || ''))
+        setWebResearch(cfg.allow_web_research !== false)
+      } catch {
+        setWebResearch(true)
+      }
+      const sessions = sessionsOut?.data?.sessions
+      if (Array.isArray(sessions)) {
+        setSeriesOptions(
+          [...new Set(
+            sessions
+              .map((entry: { series?: string | null }) => String(entry.series || '').trim())
+              .filter(Boolean),
+          )].sort(),
+        )
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open || !series) return
+    let live = true
+    setKitLoading(true)
+    fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!live) return
+        const items = out?.data?.kit
+        setKit(
+          Array.isArray(items)
+            ? items.filter((item: StepOneKitItem) => (
+                item.image_scope === 'show'
+                || /show|template/i.test(String(item.scope || ''))
+              ))
+            : [],
+        )
+      })
+      .catch(() => {
+        if (live) setKit([])
+      })
+      .finally(() => {
+        if (live) setKitLoading(false)
+      })
+    return () => {
+      live = false
+    }
+  }, [open, series])
+
+  const joinSeries = async () => {
+    if (!seriesChoice || joiningSeries) return
+    setJoiningSeries(true)
+    setSeriesError('')
+    const response = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'join_series',
+        series: seriesChoice,
+      }),
+    }).catch(() => null)
+    const out = response ? await response.json().catch(() => null) : null
+    setJoiningSeries(false)
+    if (response?.ok && out?.ok) {
+      setSeries(seriesChoice)
+    } else {
+      setSeriesError(out?.message || out?.error || 'Could not join this series.')
+    }
+  }
+
+  const toggleWebResearch = async (next: boolean) => {
+    setWebResearch(next)
+    await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'set_session_fields',
+        fields: { allow_web_research: next },
+      }),
+    }).catch(() => {})
+  }
+
+  const selectedFeatures = featuringNames(idea)
+  const selectedSet = new Set(selectedFeatures)
+  const imageKit = kit.filter((item) => item.name && (item.global_path || item.image_path))
+
+  return (
+    <>
+      {template || series ? (
+        <p className="vp-hint" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '22px 0 0' }}>
+          {template ? (
+            <span>
+              Template: {displayId(template)} ·{' '}
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                style={{
+                  border: 0,
+                  padding: 0,
+                  background: 'none',
+                  color: 'var(--accent-2)',
+                  font: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                change
+              </button>
+            </span>
+          ) : null}
+          {series ? <span>Series: {series}</span> : null}
+        </p>
+      ) : null}
+
+      <details
+        className="vp-section"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary className="vp-section-sum">
+          <span className="vp-sec-title">Advanced</span>
+          <span className="vp-section-count">TEMPLATE · SERIES · WORLD KIT · WEB</span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <TemplatePickerBar idea={idea} />
+
+          <div className="panel-flat" style={{ marginBottom: 14 }}>
+            <div className="ch">
+              <h3>Series</h3>
+              <span>{series ? 'read-only once joined' : 'optional show settings and shared references'}</span>
+            </div>
+            {series ? (
+              <p className="vp-hint" style={{ margin: 0 }}>
+                This project belongs to <b>{series}</b>. Changing shows mid-project is not supported.
+              </p>
+            ) : seriesOptions.length ? (
+              <>
+                <label className="cs-field">
+                  <b>Join an existing series</b>
+                  <select value={seriesChoice} onChange={(event) => setSeriesChoice(event.target.value)}>
+                    <option value="">Choose a series…</option>
+                    {seriesOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="vp-hint" style={{ margin: '8px 0 10px' }}>
+                  The series fills only settings this project has not already chosen.
+                </p>
+                <button
+                  type="button"
+                  className="vp-save"
+                  disabled={!seriesChoice || joiningSeries}
+                  onClick={() => void joinSeries()}
+                >
+                  {joiningSeries ? 'Joining…' : 'Join series'}
+                </button>
+                {seriesError ? <p className="voice-error">{seriesError}</p> : null}
+              </>
+            ) : (
+              <p className="vp-hint" style={{ margin: 0 }}>No existing series are available yet.</p>
+            )}
+          </div>
+
+          {series ? (
+            <div className="panel-flat" style={{ marginBottom: 14 }}>
+              <div className="ch">
+                <h3>World Kit</h3>
+                <span>shared show and template references</span>
+              </div>
+              {kitLoading ? (
+                <p className="vp-hint" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                  <span className="spin" />
+                  Loading shared references…
+                </p>
+              ) : imageKit.length ? (
+                <>
+                  <p className="vp-hint" style={{ margin: '0 0 10px' }}>
+                    Choose anything this video should feature. The names are added to the idea brief.
+                  </p>
+                  <div className="vp-ref-chips" style={{ marginBottom: 0 }}>
+                    {imageKit.map((item) => {
+                      const selected = selectedSet.has(item.name)
+                      const src = item.global_path
+                        ? globalContentUrl(item.global_path)
+                        : contentUrl(item.image_path || '')
+                      return (
+                        <button
+                          key={item.name}
+                          type="button"
+                          className={`vp-ref-chip ${selected ? 'on' : ''}`}
+                          onClick={() => {
+                            const next = selected
+                              ? selectedFeatures.filter((name) => name !== item.name)
+                              : [...selectedFeatures, item.name]
+                            onIdeaChange(withFeaturingNames(idea, next))
+                          }}
+                        >
+                          <img src={src} alt="" />
+                          <span>{item.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="vp-hint" style={{ margin: 0 }}>
+                  This series does not have shared World Kit images yet.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          <div className="panel-flat">
+            <div className="ch">
+              <h3>Web research</h3>
+              <span>runs in the background after Step 1</span>
+            </div>
+            {webResearch !== null ? (
+              <label className="voice-pron-check">
+                <input
+                  type="checkbox"
+                  checked={webResearch}
+                  onChange={(event) => void toggleWebResearch(event.target.checked)}
+                />
+                <span>Allow Spoolcast to search the web when researching this topic</span>
+              </label>
+            ) : null}
+            <p className="vp-hint" style={{ margin: 0 }}>
+              Links pasted in the idea are always read; this setting only controls finding additional sources.
+            </p>
+          </div>
+        </div>
+      </details>
+    </>
+  )
+}
+
 export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boolean; stepId: string }) {
   const brief = useWorkflowStore((s) => s.ideaBrief)
   const setIdeaBrief = useWorkflowStore((s) => s.setIdeaBrief)
-  const onBriefChange = (value: string) => setIdeaBrief(stepId, value)
+  const stageProcess = useWorkflowStore((s) => s.stageProcesses[stepId] ?? null)
+  const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
+  const session = activeSession()
+  const improveJobStorageKey = `spoolcast:improve-idea-job:${session}`
+  const improveProposalStorageKey = `spoolcast:improve-idea-proposal:${session}`
+  const [improveJobId, setImproveJobId] = useState(() => localStorage.getItem(improveJobStorageKey) || '')
+  const [improvedPrompt, setImprovedPrompt] = useState(() => localStorage.getItem(improveProposalStorageKey) || '')
+  const [improveError, setImproveError] = useState<string | null>(null)
+  const [improveModel, setImproveModel] = useState(DEFAULT_MODEL_ID)
+  const improving = Boolean(improveJobId)
+    || Boolean(stageProcess && ['queued', 'running'].includes(stageProcess.status))
+  const onBriefChange = (value: string) => {
+    localStorage.removeItem(improveProposalStorageKey)
+    setImprovedPrompt('')
+    setImproveError(null)
+    setIdeaBrief(stepId, value)
+  }
   const [files, setFiles] = useState<SourceFile[]>(
     blankProject
       ? []
@@ -1669,6 +2019,127 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
   )
   const [researchBrief, setResearchBrief] = useState('')
   const [researchRunning, setResearchRunning] = useState(false)
+
+  const improveIdea = useCallback(async (instructions: string, model: string) => {
+    const idea = brief.trim()
+    if (!idea || improving) return
+    setImproveError(null)
+    localStorage.removeItem(improveProposalStorageKey)
+    setImprovedPrompt('')
+    try {
+      const response = await fetch(jobsUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: 'local',
+          kind: 'improve_idea',
+          idea,
+          feedback: instructions,
+          model,
+          reasoning: draftReasoning(model),
+          allow_cost: true,
+        }),
+      })
+      const queued = await response.json().catch(() => null)
+      if (!response.ok || queued?.ok === false || !queued?.data?.id) {
+        setImproveError(queued?.message || queued?.error || 'Could not start the prompt improvement.')
+        return
+      }
+
+      const jobId = String(queued.data.id)
+      localStorage.setItem(improveJobStorageKey, jobId)
+      setImproveJobId(jobId)
+      setStageProcess(stepId, {
+        stageId: stepId,
+        jobId,
+        status: 'queued',
+        label: 'AI is improving the video prompt…',
+      })
+    } catch {
+      setImproveError('Could not reach the engine. Your original idea is unchanged.')
+    }
+  }, [brief, improveJobStorageKey, improveProposalStorageKey, improving, session, setStageProcess, stepId])
+
+  // The paid call lives in the durable engine queue. The job id is also kept
+  // locally so leaving Step 1 (or remounting it) resumes the same poll instead
+  // of starting over or losing the proposal.
+  useEffect(() => {
+    if (!improveJobId) return
+    let cancelled = false
+    let attempts = 0
+    const poll = async () => {
+      attempts += 1
+      try {
+        const response = await fetch(jobsUrl(improveJobId), { cache: 'no-store' })
+        const out = await response.json().catch(() => null)
+        const job = out?.data
+        if (cancelled) return
+        if (!response.ok || out?.ok === false) {
+          throw new Error(out?.message || out?.error || 'Could not check the prompt improvement.')
+        }
+        if (job?.status === 'done') {
+          const proposal = String(job?.result?.improved_prompt || '').trim()
+          localStorage.removeItem(improveJobStorageKey)
+          setImproveJobId('')
+          setStageProcess(stepId, null)
+          if (!proposal) {
+            setImproveError('The AI did not return a usable improved prompt.')
+          } else {
+            localStorage.setItem(improveProposalStorageKey, proposal)
+            setImprovedPrompt(proposal)
+          }
+          return
+        }
+        if (job?.status === 'failed') {
+          const message = job?.message || job?.result?.message || job?.error || 'Prompt improvement failed.'
+          localStorage.removeItem(improveJobStorageKey)
+          setImproveJobId('')
+          setImproveError(message)
+          setStageProcess(stepId, {
+            stageId: stepId,
+            jobId: improveJobId,
+            status: 'failed',
+            label: 'Prompt improvement failed',
+            error: message,
+          })
+          return
+        }
+        if (attempts >= 600) {
+          localStorage.removeItem(improveJobStorageKey)
+          setImproveJobId('')
+          setImproveError('Prompt improvement timed out. Your original idea is unchanged.')
+          setStageProcess(stepId, null)
+          return
+        }
+        if (!stageProcess || stageProcess.jobId !== improveJobId || stageProcess.status !== job.status) {
+          setStageProcess(stepId, {
+            stageId: stepId,
+            jobId: improveJobId,
+            status: job.status === 'queued' ? 'queued' : 'running',
+            label: 'AI is improving the video prompt…',
+          })
+        }
+      } catch (error) {
+        if (!cancelled && attempts >= 3) {
+          setImproveError(error instanceof Error ? error.message : 'Could not check the prompt improvement.')
+        }
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [
+    improveJobId,
+    improveJobStorageKey,
+    improveProposalStorageKey,
+    setStageProcess,
+    stageProcess,
+    stepId,
+  ])
 
   // Research starts as Step 1 is left. If the user returns, show its quiet
   // background state and the resulting read-only brief here — never as a
@@ -1714,31 +2185,6 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       window.clearInterval(timer)
     }
   }, [])
-
-  // Research permission mirrors session.json — null until read, so the
-  // checkbox never flashes a default the engine might contradict.
-  const [webResearch, setWebResearch] = useState<boolean | null>(null)
-  useEffect(() => {
-    fetch(fileUrl('session.json'))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((out) => {
-        try {
-          const cfg = JSON.parse(out?.data?.content || '{}')
-          setWebResearch(cfg.allow_web_research !== false)
-        } catch {
-          setWebResearch(true)
-        }
-      })
-      .catch(() => setWebResearch(true))
-  }, [])
-  const toggleWebResearch = async (next: boolean) => {
-    setWebResearch(next)
-    await fetch(actionUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_session_fields', fields: { allow_web_research: next } }),
-    }).catch(() => {})
-  }
 
   // FILES ARE TRUTH: list what is actually in source/ rather than only what
   // this browser tab uploaded. Uploads used to vanish from this step on
@@ -1819,9 +2265,10 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
   }
 
   return (
-    <div className="idea-v2">
-      {/* Undecided sessions pick their template here — invisible otherwise. */}
-      {!blankProject ? <TemplatePickerBar /> : null}
+    <div
+      className="idea-v2"
+      style={improving ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+    >
       <h3 className="idea-q">What's this video about?</h3>
 
       <textarea
@@ -1829,19 +2276,69 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         rows={5}
         value={brief}
         onChange={(event) => onBriefChange(event.target.value)}
-        placeholder="A short explanation of the idea, topic, opinion, or story this video should turn into."
+        placeholder="Describe the idea, topic, opinion, or story this video should become. Paste any relevant links here too."
       />
 
-      <div className="idea-helpers">
-        <a>Generate angles</a>
-        <a>Ask clarifying questions</a>
-        <a>Turn notes into a thesis</a>
+      <div className="step-ai-control" style={{ marginTop: 12 }}>
+        <FeedbackButton
+          label="Improve prompt with AI"
+          busy={improving}
+          busyLabel="Improving…"
+          disabled={!brief.trim()}
+          title={brief.trim()
+            ? 'Make this idea clearer and more useful across the full video workflow'
+            : 'Write the video idea first'}
+          placeholder="Optional notes about what the improved prompt should emphasize or preserve…"
+          historyKey={`improve-prompt-${stepId.replace(/_/g, '-')}`}
+          ruleStep={stepId}
+          allowRuleSave={false}
+          runExtras={(
+            <ModelPicker
+              model={improveModel}
+              onChange={setImproveModel}
+              disabled={improving}
+            />
+          )}
+          onRun={(instructions) => void improveIdea(instructions, improveModel)}
+        />
       </div>
+
+      {improveError ? <p className="voice-error">{improveError}</p> : null}
+      {improvedPrompt ? (
+        <div className="check">
+          <span className="eyebrow">AI-SUGGESTED IMPROVEMENT</span>
+          <div className="md-preview" style={{ marginTop: 10, whiteSpace: 'pre-wrap' }}>
+            {improvedPrompt}
+          </div>
+          <div className="actions">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(improveProposalStorageKey)
+                setImprovedPrompt('')
+              }}
+            >
+              Keep original
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setIdeaBrief(stepId, improvedPrompt)
+                localStorage.removeItem(improveProposalStorageKey)
+                setImprovedPrompt('')
+              }}
+            >
+              Use improved prompt
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <section className="idea-sources">
         <span className="eyebrow">SOURCE MATERIAL</span>
         <p className="idea-sources-caption">
-          Links, notes, transcripts, screenshots, and reference files can attach here after the idea is clear.
+          Attach notes, transcripts, screenshots, and reference files. Paste links in the video idea above.
         </p>
 
         {files.length ? (
@@ -1889,19 +2386,6 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
           />
         </label>
 
-        {/* Research permission (session.json allow_web_research). Links you
-            paste are fetched regardless — pasting one is an explicit request;
-            this only governs Spoolcast searching the open web on its own. */}
-        {webResearch !== null ? (
-          <label className="voice-pron-check" style={{ marginTop: 10 }}>
-            <input
-              type="checkbox"
-              checked={webResearch}
-              onChange={(e) => void toggleWebResearch(e.target.checked)}
-            />
-            <span>Allow Spoolcast to search the web when researching this topic</span>
-          </label>
-        ) : null}
         {researchRunning ? (
           <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 0' }}>
             <span className="spin" />
@@ -1929,6 +2413,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
           </details>
         ) : null}
       </section>
+      {!blankProject ? <StepOneAdvanced idea={brief} onIdeaChange={onBriefChange} /> : null}
     </div>
   )
 }

@@ -70,14 +70,10 @@ const foldTargets = (contract: WorkflowContract): Record<string, string> => {
   return map
 }
 
-// FORMAT FORK (blank flow only). Until Step 01's narrator answer picks the
-// format, the map must not pretend to know it: the shared spine renders
-// normally, the format-dependent stretch renders FOGGED. 'undecided' = ghost
-// fork + dimmed tail; 'video' = narrator said no — narration stage drops out
-// and the tail stays ghost until create-on-save stamps the Ad template (the
-// blank map is drawn from the explainer fallback contract, so it can't
-// honestly draw the ad stages before the real session exists); 'lifted' =
-// format known, normal map.
+// FORMAT FORK. Until Step 1 picks a template, the map must not pretend to know
+// audio-first vs video-first: the shared spine renders normally and the
+// format-dependent stretch renders FOGGED. This applies to both the legacy
+// blank mock and real engine-backed sessions with template: "".
 export type FogState = 'lifted' | 'undecided' | 'video'
 
 // Which engine stages the answer decides, for the explainer/fallback shape.

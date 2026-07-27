@@ -2668,14 +2668,16 @@ body.chat-pinned { padding-right: 380px; }
 /* one module, dense terminal-style rows; scrolls if the backlog is long so it
    never pushes the templates off-screen */
 .tpl-picker .resume-list{border-radius:12px;background:var(--panel);overflow:hidden auto;max-height:236px;margin-bottom:28px;padding:4px}
-.tpl-picker .resume-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer;border:0;border-radius:8px;background:none;padding:9px 10px;transition:background .12s}
+.tpl-picker .resume-row{display:flex;align-items:center;width:100%;text-align:left;border:0;border-radius:8px;background:none;transition:background .12s}
 .tpl-picker .resume-row:last-child{border-bottom:0}
 .tpl-picker .resume-row:hover{background:var(--panel-hi)}
+.tpl-picker .resume-open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-align:left;cursor:pointer;border:0;background:none;color:inherit;padding:9px 10px;font:inherit}
+.tpl-picker .resume-row>.vp-row-menu{margin-right:10px}
 .tpl-picker .resume-row .r-thumb{flex:none;width:42px;height:42px;border-radius:8px;overflow:hidden;background:var(--bg-4)}
 .tpl-picker .resume-row .r-thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.tpl-picker .resume-row .r-meta{flex:1;min-width:0}
-.tpl-picker .resume-row .r-title{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tpl-picker .resume-row .r-sub{color:var(--ink-3);font-family:var(--mono);font-size:10.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpl-picker .resume-row .r-meta{display:block;flex:1;min-width:0}
+.tpl-picker .resume-row .r-title{display:block;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpl-picker .resume-row .r-sub{display:block;color:var(--ink-3);font-family:var(--mono);font-size:10.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tpl-picker .resume-row .r-prog{flex:none;display:flex;align-items:center;gap:9px;width:148px}
 .tpl-picker .resume-row .r-step{font-family:var(--mono);font-size:10px;color:var(--ink-2);flex:none}
 .tpl-picker .resume-row .bar{flex:1;height:4px;border-radius:3px;background:var(--bg-4);overflow:hidden}
