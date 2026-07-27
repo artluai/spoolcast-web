@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Route, Routes, useParams } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom'
 
 // The PUBLIC viewer site (display layer). Own chrome — none of the editor
 // header belongs here. Data comes from /api/site/* (Pages Functions + D1),
@@ -87,6 +87,8 @@ function SiteHeader() {
         <b>Spoolcast</b>
       </Link>
       <div className="site-auth">
+        {/* The editor's front door — /projects is the maker side. */}
+        <Link className="site-create" to="/projects">+ Create</Link>
         {user ? (
           <>
             <span className="site-auth-who">{user.handle ? `@${user.handle}` : user.email}</span>
@@ -292,6 +294,7 @@ export default function SiteView() {
       <SiteHeader />
       <main className="site-main">
         <Routes>
+          <Route path="/" element={<Navigate to="/watch" replace />} />
           <Route path="/watch" element={<SiteHome />} />
           <Route path="/watch/s/:slug" element={<SiteSeries />} />
           <Route path="/watch/v/:slug" element={<SitePlayer />} />

@@ -28,7 +28,7 @@ import { ProfileDrawer } from './components/ProfileDrawer'
 import { SavePointsModal } from './components/SavePointsModal'
 import { ShowSettingsModal } from './components/ShowSettingsModal'
 import { LibraryView } from './views/LibraryView'
-import { LoginView, SignupModal } from './views/LoginView'
+import { SignupModal } from './views/LoginView'
 import { OnboardingView } from './views/OnboardingView'
 import { PickerView } from './views/PickerView'
 import { WorkflowView } from './views/workflow/WorkflowView'
@@ -135,7 +135,9 @@ function App() {
 // editor's hook tree never renders conditionally (rules of hooks).
 function RouteSplit() {
   const route = useLocation().pathname
-  if (route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/')) {
+  // The watch feed IS the front door ('/'), YouTube-style; the editor lives
+  // behind the site's Create button.
+  if (route === '/' || route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/')) {
     return <SiteView />
   }
   return <SpoolcastApp />
@@ -182,6 +184,18 @@ function SpoolcastApp() {
   // mock auth: returning users sign in at the login screen; first-timers go
   // through onboarding and are gated into signing up before generation runs.
   const [signedIn, setSignedIn] = useState(false)
+  // ONE account system: the editor recognizes the site's session cookie when
+  // both are served from the same origin (pages dev / production). Under
+  // plain vite there are no auth functions — the fetch fails and the old
+  // signup-gate behavior remains.
+  useEffect(() => {
+    void fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (out?.data?.user) setSignedIn(true)
+      })
+      .catch(() => {})
+  }, [])
   const [pendingFinish, setPendingFinish] = useState<{ seed: OnboardSeed; auto: boolean } | null>(
     null,
   )
@@ -708,18 +722,10 @@ function SpoolcastApp() {
       {header}
       <main>
         <Routes>
-          <Route
-            path="/"
-            element={
-              <LoginView
-                onFirstTime={() => navigate('/setup')}
-                onGoogle={() => {
-                  setSignedIn(true)
-                  navigate('/projects')
-                }}
-              />
-            }
-          />
+          {/* ONE login for all of Spoolcast — it lives on the site header
+              (/watch). The editor's old mock login screen is gone; the root
+              path is handled by RouteSplit and lands on the watch feed. */}
+          <Route path="/" element={<Navigate to="/watch" replace />} />
           <Route
             path="/setup"
             element={
