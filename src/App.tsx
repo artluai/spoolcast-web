@@ -34,6 +34,7 @@ import { PickerView } from './views/PickerView'
 import { WorkflowView } from './views/workflow/WorkflowView'
 import { WorldKitView } from './views/workflow/WorldKit'
 import { RulesView } from './views/RulesView'
+import StudioView from './views/StudioView'
 import SiteView from './views/site/SiteView'
 
 type ApiArtifact = {
@@ -152,7 +153,9 @@ function SpoolcastApp() {
   // api.ts seam, which resolves to this. Set during render, before any
   // session-scoped child mounts and fetches. '/p/new' is the mock blank flow —
   // api.ts maps it to the dev fallback session.
-  const routeSession = /^\/p\/([^/]+)/.exec(route)?.[1] ?? null
+  // /studio/:id (the chain manager) anchors the same engine session seam as
+  // /p/:id — rules/settings resolution is always relative to a project.
+  const routeSession = /^\/(?:p|studio)\/([^/]+)/.exec(route)?.[1] ?? null
   setActiveSession(routeSession)
   const initialStandalone = route.startsWith('/p/new')
   const [setupMode, setSetupMode] = useState<SetupMode>(initialStandalone ? 'standalone' : 'series')
@@ -1185,6 +1188,8 @@ function SpoolcastApp() {
             path="/library"
             element={<LibraryView onScrolled={setHeaderScrolled} />}
           />
+          <Route path="/studio" element={<StudioView onToast={setToast} />} />
+          <Route path="/studio/:id" element={<StudioView onToast={setToast} />} />
           <Route
             path="/p/:id/world-kit"
             element={<WorldKitView castData={castData} showName={showName} blank={showName === 'standalone'} />}

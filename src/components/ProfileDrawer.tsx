@@ -92,6 +92,11 @@ export function ProfileDrawer({ open, onClose }: { open: boolean; onClose: () =>
               </small>
             </section>
             <section>
+              <h3>Studio</h3>
+              <p><a className="pp-link" href="/studio">Settings &amp; rules chain ›</a></p>
+              <small>Everything configurable, labeled by the level it comes from.</small>
+            </section>
+            <section>
               <p><a className="pp-link" href="#signout" onClick={(e) => { e.preventDefault(); void signOut() }}>Sign out ›</a></p>
             </section>
           </>
