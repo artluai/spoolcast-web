@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { appendUserRule, removeUserRules, saveRuleContent, USER_RULES_HEADER } from '../lib/rules'
-import { actionUrl, activeSession, apiUrl } from '../lib/api'
+import { actionUrl, activeSession, apiUrl, TENANT } from '../lib/api'
+import { ResolvedRules } from '../components/ResolvedRules'
 
 // Split a section body into prose chunks and individual bullet rules, so each
 // rule can get its own hover actions (edit / remove) while prose stays prose.
@@ -66,7 +67,7 @@ export function RulesView() {
   const params = useParams()
   const [rules, setRules] = useState<RuleFile[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string>('')
+  const [selected, setSelected] = useState<string>('effective')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -190,7 +191,7 @@ export function RulesView() {
   }
 
   useEffect(() => {
-    fetch(apiUrl('rules', { session: activeSession() }))
+    fetch(apiUrl('rules', { session: activeSession(), tenant: TENANT }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.rules)) {
@@ -206,7 +207,7 @@ export function RulesView() {
                 ? list.find((r) => r.scope === 'series' && r.id.endsWith(':rules'))
                 : list.find((r) => r.id === focus)
           if (target) setSelected(target.id)
-          else if (list.length > 0) setSelected(list[0].id)
+          else setSelected('effective')
         } else setError('The engine did not return the rulebooks.')
       })
       .catch(() => setError('Could not reach the engine — is it running?'))
@@ -257,7 +258,7 @@ export function RulesView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: activeSession(),
-          tenant: 'local',
+          tenant: TENANT,
           action: 'set_rule_file',
           rule_id: active.id,
           content: draft,
@@ -315,19 +316,18 @@ export function RulesView() {
           <div>
             <div className="eyebrow">Project Wiki</div>
             <div className="title-row">
-              <h1>The rulebooks the AI works under</h1>
+              <h1>The rules the AI works under</h1>
             </div>
             <p>
-              Every AI draft gets the relevant rulebook pasted into its instructions, and the
-              validators enforce the checkable parts in code. Editing a rulebook here changes
-              behavior from the very next draft — no restart needed.
+              Effective rules combine the Global defaults with this template, series, and video.
+              Narrower changes stay local and never rewrite a parent unexpectedly.
             </p>
           </div>
         </div>
 
         {error ? <p style={{ color: 'var(--red)' }}>{error}</p> : null}
         {!rules && !error ? <p className="label">Loading the rulebooks from the engine…</p> : null}
-        {rules && !rules.some((r) => r.scope === 'series') ? (
+        {selected !== 'effective' && rules && !rules.some((r) => r.scope === 'series') ? (
           // No series layer yet: only the GLOBAL law shows. Without this line,
           // the global rulebooks read as some other project's wiki.
           <p className="label" style={{ color: 'var(--ink-3)' }}>
@@ -337,9 +337,29 @@ export function RulesView() {
         ) : null}
 
         {rules ? (
-          <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+          <div className="rules-page-layout">
             {/* Left: rulebook list + section nav */}
-            <div style={{ width: 260, flexShrink: 0, position: 'sticky', top: 16 }}>
+            <div className="rules-page-sidebar">
+              <button
+                type="button"
+                onClick={() => { setSelected('effective'); setEditing(false); setNote(null); setSearch('') }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  background: selected === 'effective' ? 'var(--bg-3, rgba(255,255,255,.04))' : 'none',
+                  border: 'none', borderLeft: selected === 'effective' ? '2px solid var(--ink-2)' : '2px solid transparent',
+                  color: selected === 'effective' ? 'var(--ink)' : 'var(--ink-2)',
+                  padding: '8px 10px', cursor: 'pointer', textAlign: 'left', fontSize: 13,
+                }}
+              >
+                <span style={{ flex: 1 }}>
+                  Effective rules
+                  <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 11 }}>Global → template → series → video</span>
+                </span>
+                <span style={chip}>default</span>
+              </button>
+              <div className="vp-menu-h" style={{ borderBottom: 0, margin: '12px 0 2px', paddingLeft: 10 }}>
+                LARGER RULEBOOKS
+              </div>
               {rules.map((r) => (
                 <button
                   key={r.id}
@@ -397,7 +417,17 @@ export function RulesView() {
 
             {/* Right: the rulebook itself */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              {active ? (
+              {selected === 'effective' ? (
+                <>
+                  <div className="rules-effective-head">
+                    <div>
+                      <span className="eyebrow">Effective merged rules</span>
+                      <h2>Defaults, with this project’s overrides</h2>
+                    </div>
+                  </div>
+                  <ResolvedRules />
+                </>
+              ) : active ? (
                 <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     <code style={{ color: 'var(--ink-3)', fontSize: 12 }}>{active.file}</code>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { appendUserRule, SERIES_RULES_ID } from '../../lib/rules'
-import { postAction } from '../../lib/api'
+import { activeSession, postAction } from '../../lib/api'
 
 /**
  * The house control for every AI re-draft/re-suggest action:
@@ -269,7 +269,7 @@ export function FeedbackButton({
               also save as a permanent rule
             </label>
             <a
-              href={`/p/dev-log-12/rules?focus=${rulesFocus}`}
+              href={`/p/${activeSession()}/rules?focus=${rulesFocus}`}
               title="Open the rulebook this step works under"
               style={{ color: 'var(--ink-3)', fontSize: 12, textDecoration: 'underline', textUnderlineOffset: 3 }}
             >

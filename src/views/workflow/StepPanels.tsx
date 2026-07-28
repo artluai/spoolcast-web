@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -736,7 +736,7 @@ export function NarrationContent() {
     const [sessionRes, worldKitRes, rulesRes] = await Promise.all([
       fetch(fileUrl('session.json')),
       fetch(fileUrl('working/world-kit.md')),
-      fetch(apiUrl('rules', { session })),
+      fetch(apiUrl('rules', { session, tenant: TENANT })),
     ])
     const sessionOut = await sessionRes.json().catch(() => null)
     const worldKitOut = await worldKitRes.json().catch(() => null)
@@ -3060,7 +3060,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
         }
       })
       .catch(() => {})
-    fetch(apiUrl('rules', { session: activeSession() }))
+    fetch(apiUrl('rules', { session: activeSession(), tenant: TENANT }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
         if (out?.ok && Array.isArray(out.data?.rules)) {
