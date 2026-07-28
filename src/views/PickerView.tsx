@@ -70,10 +70,9 @@ export function PickerView({
       const tplList = tpl?.data?.templates ?? []
       setTemplates(tplList)
       setEngineDown(!tpl?.ok)
-      // Openable = built on a contract the template registry (and so this UI)
-      // knows. Other content roots (e.g. the news show) are different products.
-      const known = new Set(tplList.map((t) => t.contract))
-      setSessions((ses?.data?.sessions ?? []).filter((s) => known.has(s.contract)))
+      // The engine owns project eligibility. Every project-aware UI consumes
+      // this exact registry instead of applying its own visibility rules.
+      setSessions(ses?.data?.sessions ?? [])
     })
     return () => {
       cancelled = true

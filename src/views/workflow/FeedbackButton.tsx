@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { appendUserRule, SERIES_RULES_ID } from '../../lib/rules'
 import { activeSession, postAction } from '../../lib/api'
 
 /**
@@ -47,8 +46,8 @@ export function FeedbackButton({
   rulesFocus?: string
   // Persist notes under this snippet name (lowercase/dash) to enable history.
   historyKey?: string
-  // Engine stage id: "save as a permanent rule" files into THIS step's rules
-  // (series scope, template as fallback) instead of the legacy series rulebook.
+  // Engine stage id: "save as a permanent rule" files into THIS step's
+  // canonical layered rules (series scope, video scope for standalone work).
   ruleStep?: string
   // Render the notebox permanently (no collapsed pill, no ▴) — for hosts that
   // put the control inside their own collapsible section.
@@ -257,7 +256,7 @@ export function FeedbackButton({
         {allowRuleSave ? (
           <>
             <label
-              title="Adds this to the series rulebook (Project Wiki) so EVERY future draft follows it — not just this one"
+              title="Adds this to the series when this project has one, otherwise to this video"
               style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer' }}
             >
               <input
@@ -298,24 +297,35 @@ export function FeedbackButton({
           onClick={async () => {
             setRuleNote(null)
             if (allowRuleSave && asRule && feedback.trim()) {
-              if (ruleStep) {
-                // File into THIS step's rules so every future draft of the
-                // step obeys it (series first, template when no series).
-                const id = feedback.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'rule'
-                let res2 = await postAction({ action: 'set_rule', scope: 'series', id, step: ruleStep, text: feedback.trim() })
-                if (!res2?.ok) {
-                  res2 = await postAction({ action: 'set_rule', scope: 'template', id, step: ruleStep, text: feedback.trim() })
-                }
-                if (!res2?.ok) {
-                  setRuleNote(res2?.error || 'Could not save the rule.')
-                  return // don't run on a failed rule save — the user asked for both
-                }
-              } else {
-                const res = await appendUserRule(SERIES_RULES_ID, feedback)
-                if (!res.ok) {
-                  setRuleNote(res.error)
-                  return // don't run on a failed rule save — the user asked for both
-                }
+              if (!ruleStep) {
+                setRuleNote('This AI control has no rule context.')
+                return
+              }
+              // Ask the canonical resolver which layers this project has.
+              // Template/global edits remain explicit choices in the Rules
+              // page and are never guessed here.
+              const ruleContext = await postAction<{
+                context?: { series?: string }
+              }>({
+                action: 'get_rules',
+                step: ruleStep,
+              })
+              if (!ruleContext?.ok) {
+                setRuleNote(ruleContext?.message || ruleContext?.error || 'Could not read the project rules.')
+                return
+              }
+              const scope = ruleContext.data?.context?.series ? 'series' : 'video'
+              const id = feedback.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'rule'
+              const saved = await postAction({
+                action: 'set_rule',
+                scope,
+                id,
+                step: ruleStep,
+                text: feedback.trim(),
+              })
+              if (!saved?.ok) {
+                setRuleNote(saved?.message || saved?.error || 'Could not save the rule.')
+                return // don't run on a failed rule save — the user asked for both
               }
             }
             run(feedback)

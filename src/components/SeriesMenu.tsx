@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { postAction, sessionsUrl } from '../lib/api'
-
-type SessionRow = {
-  series?: string
-  template?: string
-  series_template?: string
-}
+import { postAction, seriesUrl } from '../lib/api'
 
 type SeriesOption = {
   id: string
-  template: string
+  template?: string
 }
 
 const displayId = (id: string) =>
@@ -44,28 +38,12 @@ export function SeriesMenu({
   useEffect(() => {
     if (!open) return
     let live = true
-    fetch(sessionsUrl())
+    fetch(seriesUrl())
       .then((response) => (response.ok ? response.json() : null))
       .then((out) => {
         if (!live) return
-        const rows = Array.isArray(out?.data?.sessions) ? out.data.sessions as SessionRow[] : []
-        const bySeries = new Map<string, Set<string>>()
-        rows.forEach((row) => {
-          const id = String(row.series || '').trim()
-          if (!id) return
-          const templates = bySeries.get(id) ?? new Set<string>()
-          const template = String(row.template || row.series_template || '').trim()
-          if (template) templates.add(template)
-          bySeries.set(id, templates)
-        })
-        setOptions(
-          [...bySeries.entries()]
-            .map(([id, templates]) => ({
-              id,
-              template: templates.size === 1 ? [...templates][0] : '',
-            }))
-            .sort((a, b) => a.id.localeCompare(b.id)),
-        )
+        const rows = Array.isArray(out?.data?.series) ? out.data.series as SeriesOption[] : []
+        setOptions(rows.sort((a, b) => a.id.localeCompare(b.id)))
       })
       .catch(() => {
         if (live) setOptions([])

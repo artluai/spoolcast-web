@@ -5,8 +5,6 @@
 
 import { actionUrl, activeSession, apiUrl, TENANT } from './api'
 
-export const SERIES_RULES_ID = 'series:spoolcast-devlog:rules' // session-id debt, like elsewhere
-
 export const USER_RULES_HEADER = '## User-added rules'
 
 export type RuleResult = { ok: true; content: string } | { ok: false; error: string }
