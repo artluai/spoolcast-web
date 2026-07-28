@@ -26,17 +26,20 @@ type ProjectOption = {
   id: string
   series?: string
   template?: string
+  modified_at?: number
 }
 
 type SeriesOption = {
   id: string
   name?: string
   template?: string
+  modified_at?: number
 }
 
 type TemplateOption = {
   id: string
   name?: string
+  modified_at?: number
 }
 
 const displayId = (id: string) =>
@@ -66,7 +69,13 @@ export function WorldKitShareMenu({
   onToast: (message: string) => void
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
-  const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+  const menuRef = useRef<HTMLSpanElement | null>(null)
+  const [menuPos, setMenuPos] = useState<{
+    left: number
+    top?: number
+    bottom?: number
+    maxHeight: number
+  } | null>(null)
   const [mode, setMode] = useState<'menu' | 'targets' | 'series' | 'template'>('menu')
   const [context, setContext] = useState<Context>({
     project: activeSession(),
@@ -117,6 +126,15 @@ export function WorldKitShareMenu({
   }, [refId])
 
   const open = menuPos !== null
+  const scrollMenuToTop = () => {
+    window.requestAnimationFrame(() => {
+      if (menuRef.current) menuRef.current.scrollTop = 0
+    })
+  }
+  const showMode = (nextMode: 'menu' | 'targets' | 'series' | 'template') => {
+    setMode(nextMode)
+    scrollMenuToTop()
+  }
   const toggle = () => {
     if (open) {
       setMenuPos(null)
@@ -129,12 +147,24 @@ export function WorldKitShareMenu({
     const left = viewportWidth
       ? Math.max(8, Math.min(rect.left, viewportWidth - 374))
       : rect.left
-    setMenuPos(
-      viewportHeight && rect.bottom + 460 > viewportHeight
-        ? { left, bottom: viewportHeight - rect.top + 4 }
-        : { left, top: rect.bottom + 4 },
-    )
+    const gap = 8
+    const spaceAbove = Math.max(0, rect.top - gap)
+    const spaceBelow = Math.max(0, viewportHeight - rect.bottom - gap)
+    const openAbove = viewportHeight > 0 && spaceBelow < 320 && spaceAbove > spaceBelow
+    const availableHeight = openAbove ? spaceAbove : spaceBelow
+    setMenuPos(openAbove
+      ? {
+          left,
+          bottom: viewportHeight - rect.top + gap,
+          maxHeight: Math.min(520, availableHeight),
+        }
+      : {
+          left,
+          top: rect.bottom + gap,
+          maxHeight: viewportHeight ? Math.min(520, availableHeight) : 520,
+        })
     setMode('menu')
+    scrollMenuToTop()
     setError('')
     setQuery('')
     setName('')
@@ -286,22 +316,66 @@ export function WorldKitShareMenu({
     onToast(`Created ${displayId(id)} and shared “${refId}” with it.`)
   }
 
+  const recentTargets = useMemo(() => [
+    ...series
+      .filter((item) => item.id !== context.series && Number(item.modified_at || 0) > 0)
+      .map((item) => ({
+        targetType: 'series' as const,
+        targetId: item.id,
+        label: `Series · ${item.name || displayId(item.id)}`,
+        detail: item.template ? `${displayId(item.template)} template` : 'Series',
+        modifiedAt: Number(item.modified_at || 0),
+      })),
+    ...templates
+      .filter((item) => item.id !== context.template && Number(item.modified_at || 0) > 0)
+      .map((item) => ({
+        targetType: 'template' as const,
+        targetId: item.id,
+        label: `Template · ${item.name || displayId(item.id)}`,
+        detail: 'Every project using this template',
+        modifiedAt: Number(item.modified_at || 0),
+      })),
+  ].sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, 5), [
+    context.series,
+    context.template,
+    series,
+    templates,
+  ])
+
   const targetRows = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const matches = (id: string, label = '') =>
       !needle || `${id} ${displayId(id)} ${label}`.toLowerCase().includes(needle)
+    const recentKeys = new Set(
+      recentTargets.map((item) => `${item.targetType}:${item.targetId}`),
+    )
     return {
+      series: series.filter(
+        (item) =>
+          item.id !== context.series
+          && matches(item.id, item.name)
+          && (needle || !recentKeys.has(`series:${item.id}`)),
+      ),
+      templates: templates.filter(
+        (item) =>
+          item.id !== context.template
+          && matches(item.id, item.name)
+          && (needle || !recentKeys.has(`template:${item.id}`)),
+      ),
       projects: projects.filter(
         (item) => item.id !== context.project && matches(item.id),
       ),
-      series: series.filter(
-        (item) => item.id !== context.series && matches(item.id, item.name),
-      ),
-      templates: templates.filter(
-        (item) => item.id !== context.template && matches(item.id, item.name),
-      ),
     }
-  }, [context.project, context.series, context.template, projects, query, series, templates])
+  }, [
+    context.project,
+    context.series,
+    context.template,
+    projects,
+    query,
+    recentTargets,
+    series,
+    templates,
+  ])
 
   const targetButton = (
     targetType: Share['target_type'],
@@ -329,12 +403,12 @@ export function WorldKitShareMenu({
     <>
       <span className="vp-menu-backdrop" onClick={() => setMenuPos(null)} />
       <span
+        ref={menuRef}
         className="vp-menu"
         style={{
           ...menuPos,
           width: 360,
           maxWidth: 'calc(100vw - 16px)',
-          maxHeight: 'min(520px, calc(100vh - 24px))',
           overflowY: 'auto',
         }}
       >
@@ -386,18 +460,18 @@ export function WorldKitShareMenu({
               </>
             ) : null}
             <span className="vp-menu-div" />
-            <button type="button" onClick={() => setMode('targets')}>
+            <button type="button" onClick={() => showMode('targets')}>
               Share with another project, series, or template
               <small>{shareCount ? 'Add or change destinations' : 'No additional sharing yet'}</small>
             </button>
-            <button type="button" onClick={() => { setMode('series'); setName('') }}>
+            <button type="button" onClick={() => { showMode('series'); setName('') }}>
               Create new series and share
               <small>The current project stays where it is</small>
             </button>
             <button
               type="button"
               disabled={!context.template}
-              onClick={() => { setMode('template'); setName('') }}
+              onClick={() => { showMode('template'); setName('') }}
             >
               Duplicate template and share
               <small>{context.template ? `Starts from ${displayId(context.template)}` : 'This project has no template'}</small>
@@ -405,29 +479,29 @@ export function WorldKitShareMenu({
           </>
         ) : mode === 'targets' ? (
           <>
-            <button type="button" className="series-menu-back" onClick={() => setMode('menu')}>
-              ← Share with
-            </button>
-            <span className="vp-menu-h">ADDITIONAL SHARING</span>
-            <span className="series-menu-form">
-              <input
-                autoFocus
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Find a project, series, or template"
-              />
+            <span className="world-kit-share-search-head">
+              <button type="button" className="series-menu-back" onClick={() => showMode('menu')}>
+                ← Share with
+              </button>
+              <span className="vp-menu-h">ADDITIONAL SHARING</span>
+              <span className="series-menu-form">
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Find a project, series, or template"
+                />
+              </span>
             </span>
-            {targetRows.projects.length ? (
+            {!query.trim() && recentTargets.length ? (
               <>
-                <span className="series-menu-empty">PROJECTS</span>
-                {targetRows.projects.map((item) =>
+                <span className="series-menu-empty">RECENTS</span>
+                {recentTargets.map((item) =>
                   targetButton(
-                    'project',
-                    item.id,
-                    displayId(item.id),
-                    [item.series && `${displayId(item.series)} series`, item.template && `${displayId(item.template)} template`]
-                      .filter(Boolean)
-                      .join(' · ') || 'Standalone project',
+                    item.targetType,
+                    item.targetId,
+                    item.label,
+                    item.detail,
                   ),
                 )}
               </>
@@ -458,13 +532,31 @@ export function WorldKitShareMenu({
                 )}
               </>
             ) : null}
-            {!targetRows.projects.length && !targetRows.series.length && !targetRows.templates.length ? (
+            {targetRows.projects.length ? (
+              <>
+                <span className="series-menu-empty">PROJECTS</span>
+                {targetRows.projects.map((item) =>
+                  targetButton(
+                    'project',
+                    item.id,
+                    displayId(item.id),
+                    [item.series && `${displayId(item.series)} series`, item.template && `${displayId(item.template)} template`]
+                      .filter(Boolean)
+                      .join(' · ') || 'Standalone project',
+                  ),
+                )}
+              </>
+            ) : null}
+            {(query.trim() || !recentTargets.length)
+              && !targetRows.projects.length
+              && !targetRows.series.length
+              && !targetRows.templates.length ? (
               <span className="series-menu-empty">No matching destinations.</span>
             ) : null}
           </>
         ) : (
           <>
-            <button type="button" className="series-menu-back" onClick={() => setMode('menu')}>
+            <button type="button" className="series-menu-back" onClick={() => showMode('menu')}>
               ← Share with
             </button>
             <span className="vp-menu-h">
