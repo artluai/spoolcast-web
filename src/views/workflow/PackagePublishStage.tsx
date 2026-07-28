@@ -379,11 +379,12 @@ export function PackagePublishStage({
       <section className="pkg-section">
         <span className="eyebrow">Title &amp; description</span>
         <div className="pkg-gen-row">
-          <span className="pkg-meta">
+          <button type="button" disabled={metaGen === 'working'} onClick={() => generateMeta('')}>
             {metaGen === 'working'
-              ? (<><span className="spin" /> Drafting title and description…</>)
-              : 'Use the step AI control above to draft or revise these fields from the script and series rules.'}
-          </span>
+              ? (<><span className="spin" /> Drafting…</>)
+              : metaGen === 'ready' ? '✦ Regenerate title & description' : '✦ Generate title & description'}
+          </button>
+          <span className="pkg-meta">drafted from the script, series rules, and the rules below</span>
         </div>
         {/* ADVANCED: what else gets drafted and where the video ships. The
             choices feed the next generation run, not the saved file. */}
@@ -494,8 +495,13 @@ export function PackagePublishStage({
       <section className="pkg-section">
         <span className="eyebrow">Thumbnail</span>
         <div className="pkg-gen-row">
+          <button type="button" disabled={thumb.gen === 'working'} onClick={() => generateThumbs('')}>
+            {thumb.gen === 'working'
+              ? (<><span className="spin" /> Generating…</>)
+              : thumb.versions.length ? '✦ Regenerate thumbnails' : '✦ Generate thumbnails'}
+          </button>
           <label className="pkg-count">
-            <select value={thumbCount} onChange={(e) => setThumbCount(Number(e.target.value))} disabled={thumb.gen === 'working'}>
+            <select className="sc-select" value={thumbCount} onChange={(e) => setThumbCount(Number(e.target.value))} disabled={thumb.gen === 'working'}>
               {Array.from({ length: MAX_THUMBS }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
@@ -503,7 +509,7 @@ export function PackagePublishStage({
             candidates
           </label>
           {thumb.gen !== 'ready' ? (
-            <span className="pkg-meta">one image per drafted concept · accurate + attention-grabbing per series rules</span>
+            <span className="pkg-meta">one image per drafted concept</span>
           ) : null}
         </div>
         <RulesPanel
