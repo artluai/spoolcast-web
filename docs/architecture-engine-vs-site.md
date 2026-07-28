@@ -68,5 +68,8 @@ only spends them via the same ledger. No card data ever touches the terminal.
 
 ## Related docs
 
+- `../spoolcast/docs/source-of-truth.md` — canonical storage/resolver per concept AND
+  the settings model (three kinds × six levels, chain-manager UI plan). Read it before
+  touching anything configurable.
 - `docs/business-model.md` — display layer vs (gated) money layer, marketplace framing.
 - `../spoolcast/PIPELINE.md` — the engine's own pipeline documentation.
