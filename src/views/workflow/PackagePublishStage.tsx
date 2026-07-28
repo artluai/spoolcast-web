@@ -251,6 +251,49 @@ export function PackagePublishStage({
     })
   }
 
+  // PUBLISH TO SPOOLCAST: push the finished render to the signed-in account's
+  // public page via the site API (/api/publish/video). Works when the editor
+  // is served from the site origin (pages dev / production); under plain vite
+  // the API isn't there and the button reports that instead of pretending.
+  const [pubState, setPubState] = useState<'idle' | 'working' | 'done'>('idle')
+  const [pubPublic, setPubPublic] = useState(true)
+  const [pubNote, setPubNote] = useState('')
+  const publishToSite = async () => {
+    if (!title.trim()) {
+      onToast('Draft or type a title first — the site listing needs one.')
+      return
+    }
+    setPubState('working')
+    setPubNote('')
+    try {
+      const me = await fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      if (!me?.data?.user) throw new Error('Sign in on the site first (avatar in the header).')
+      const video = await fetch(downloadUrl(`renders/${activeSession()}-1.0x.mp4`))
+      if (!video.ok) throw new Error('Could not read the finished render from the engine.')
+      const cfg = await getFileJson<{ series?: string }>('session.json')
+      const series = String(cfg?.series || '').trim()
+      const query = new URLSearchParams({
+        slug: activeSession(),
+        title: title.trim(),
+        description,
+        public: pubPublic ? '1' : '0',
+        ...(series ? { series, series_title: series.replace(/-/g, ' ') } : {}),
+      })
+      const out = await fetch(`/api/publish/video?${query}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'video/mp4' },
+        body: await video.blob(),
+      }).then((r) => r.json()).catch(() => null)
+      if (!out?.ok) throw new Error(out?.data?.error || 'The site did not accept the upload.')
+      setPubState('done')
+      setPubNote(`Live at ${out.data.url}${out.data.public ? '' : ' (private — flip it public any time)'}`)
+      onToast('Published to your Spoolcast page.')
+    } catch (error) {
+      setPubState('idle')
+      setPubNote(error instanceof Error ? error.message : 'Publishing failed.')
+    }
+  }
+
   // Clicking a candidate opens it at full size first (feed-size tiles hide
   // detail); "Use as cover" inside the preview does the actual pick.
   const [previewVersion, setPreviewVersion] = useState<number | null>(null)
@@ -521,6 +564,22 @@ export function PackagePublishStage({
             </div>
           </div>
         ) : null}
+      </section>
+
+      <section className="pkg-section">
+        <span className="eyebrow">Publish to Spoolcast</span>
+        <div className="pkg-actions">
+          <label className="pkg-check">
+            <input type="checkbox" checked={pubPublic} onChange={(e) => setPubPublic(e.target.checked)} />
+            Public on my page
+          </label>
+          <button type="button" disabled={pubState === 'working'} onClick={() => void publishToSite()}>
+            {pubState === 'working' ? (<><span className="spin" /> Uploading…</>) : pubState === 'done' ? 'Publish again' : 'Publish'}
+          </button>
+          <span className="pkg-meta">
+            {pubNote || 'Uploads the finished render to your creator page under your account.'}
+          </span>
+        </div>
       </section>
 
       {/* EXPORT FOR EDITOR — hidden for now: the FCPXML/bundle exports are a
