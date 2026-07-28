@@ -96,12 +96,21 @@ function ChoiceMenu<T extends string>({
 
 export function ResolvedRules({
   step,
+  forAction,
+  addToken,
   compact = false,
   hidden = false,
   onCountChange,
   onToast,
 }: {
   step?: string
+  // Narrow to ONE writing action's rule audience (engine get_rules
+  // for_action) — e.g. the publish step's title/desc panel vs its thumbnail
+  // panel share a stage but keep separate rule sets.
+  forAction?: string
+  // The applies_to token new/edited rules get by default (e.g.
+  // 'packaging-copy'), so panel-added rules stay inside this audience.
+  addToken?: string
   compact?: boolean
   hidden?: boolean
   onCountChange?: (count: number) => void
@@ -112,7 +121,7 @@ export function ResolvedRules({
   const [context, setContext] = useState<RulesPayload['context']>({})
   const [error, setError] = useState('')
   const [targetScope, setTargetScope] = useState<RuleScope>('video')
-  const [targetApplies, setTargetApplies] = useState(step ? `stage:${step}` : 'writing')
+  const [targetApplies, setTargetApplies] = useState(addToken ?? (step ? `stage:${step}` : 'writing'))
   const [newText, setNewText] = useState('')
   const [editing, setEditing] = useState<{ id: string; text: string; applies: string } | null>(null)
   const [disabling, setDisabling] = useState<{ id: string; reason: string } | null>(null)
@@ -121,7 +130,11 @@ export function ResolvedRules({
   const [suggestions, setSuggestions] = useState<{ id: string; text: string }[]>([])
 
   const load = async () => {
-    const out = await postAction<RulesPayload>({ action: 'get_rules', ...(step ? { step } : {}) })
+    const out = await postAction<RulesPayload>({
+      action: 'get_rules',
+      ...(step ? { step } : {}),
+      ...(forAction ? { for_action: forAction } : {}),
+    })
     if (!out?.ok) {
       setError(out?.error || 'Could not load rules from the engine.')
       return

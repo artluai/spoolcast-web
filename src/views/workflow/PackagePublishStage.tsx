@@ -3,6 +3,17 @@ import { Pill } from '../../components/common/Pill'
 import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { RulesPanel } from './RulesPanel'
+
+// Advanced generation options: what else to draft and where the video ships.
+// These become draft_video_meta CLI flags; the drafted extras come back in
+// working/video-meta.json alongside title/description.
+const PLATFORMS = [
+  { id: 'youtube', label: 'YouTube' },
+  { id: 'tiktok', label: 'TikTok' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'x', label: 'X' },
+] as const
 
 // Word-timed upload captions produced by the engine's build_timepoints job
 // (ROADMAP item 8): aligns each chunk's narration to its mp3 with Whisper,
@@ -28,7 +39,16 @@ const thumbOptionPath = (v: number) => `renders/thumbnail-options/${activeSessio
 // the per-platform approval gate stays on the map.
 
 type GenState = 'idle' | 'working' | 'ready'
-type VideoMeta = { title?: string; description?: string; thumbnail_prompt?: string; thumbnail_prompts?: string[] }
+type VideoMeta = {
+  title?: string
+  description?: string
+  synopsis?: string
+  tags?: string[]
+  target_platforms?: string[]
+  platforms?: Record<string, { title?: string; description?: string }>
+  thumbnail_prompt?: string
+  thumbnail_prompts?: string[]
+}
 type ThumbState = {
   gen: GenState
   versions: number[] // candidate versions found on disk (1-based)
@@ -126,16 +146,40 @@ export function PackagePublishStage({
   const [metaModel] = useState(DEFAULT_MODEL_ID)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [synopsis, setSynopsis] = useState('')
+  const [tags, setTags] = useState('')
+  const [platformMeta, setPlatformMeta] = useState<Record<string, { title?: string; description?: string }>>({})
+  // Advanced generation options (persisted per browser — they describe the
+  // user's publishing habits, not one video).
+  const [advOpen, setAdvOpen] = useState(false)
+  const [wantSynopsis, setWantSynopsis] = useState(() => localStorage.getItem('pkgAdvSynopsis') === '1')
+  const [wantTags, setWantTags] = useState(() => localStorage.getItem('pkgAdvTags') === '1')
+  const [targets, setTargets] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('pkgAdvTargets') || '[]') } catch { return [] }
+  })
+  const [perPlatform, setPerPlatform] = useState(() => localStorage.getItem('pkgAdvPerPlatform') === '1')
+  useEffect(() => {
+    localStorage.setItem('pkgAdvSynopsis', wantSynopsis ? '1' : '0')
+    localStorage.setItem('pkgAdvTags', wantTags ? '1' : '0')
+    localStorage.setItem('pkgAdvTargets', JSON.stringify(targets))
+    localStorage.setItem('pkgAdvPerPlatform', perPlatform ? '1' : '0')
+  }, [wantSynopsis, wantTags, targets, perPlatform])
   const [thumb, setThumb] = useState<ThumbState>({ gen: 'idle', versions: [], chosen: null, cover: false, finalizing: null, bust: 0 })
   const [thumbCount, setThumbCount] = useState(3)
   const hasMetaRef = useRef(false)
+  const applyMeta = (meta: VideoMeta) => {
+    setTitle(meta.title || '')
+    setDescription(meta.description || '')
+    setSynopsis(meta.synopsis || '')
+    setTags((meta.tags || []).join(', '))
+    setPlatformMeta(meta.platforms || {})
+    hasMetaRef.current = true
+    setMetaGen('ready')
+  }
   const loadMeta = async (announce: boolean) => {
     const meta = await getFileJson<VideoMeta>(META_PATH)
     if (!meta?.title) return false
-    setTitle(meta.title)
-    setDescription(meta.description || '')
-    hasMetaRef.current = true
-    setMetaGen('ready')
+    applyMeta(meta)
     if (announce) onToast('Title & description drafted from the script — edit freely.')
     return true
   }
@@ -145,10 +189,7 @@ export function PackagePublishStage({
     let alive = true
     getFileJson<VideoMeta>(META_PATH).then((meta) => {
       if (!alive || !meta?.title) return
-      setTitle(meta.title)
-      setDescription(meta.description || '')
-      hasMetaRef.current = true
-      setMetaGen('ready')
+      applyMeta(meta)
     })
     Promise.all([
       urlOk(contentUrl(thumbPath())),
@@ -164,10 +205,14 @@ export function PackagePublishStage({
   }, [])
   const generateMeta = (guidance: string, requestedModel = metaModel) => {
     setMetaGen('working')
+    const extrasList = [...(wantSynopsis ? ['synopsis'] : []), ...(wantTags ? ['tags'] : [])]
     const extra = [
       '--model', requestedModel,
       ...(draftReasoning(requestedModel) ? ['--reasoning', draftReasoning(requestedModel)!] : []),
       ...(guidance.trim() ? ['--guidance', guidance.trim()] : []),
+      ...(extrasList.length ? ['--extras', extrasList.join(',')] : []),
+      ...(targets.length ? ['--platforms', targets.join(',')] : []),
+      ...(targets.length && perPlatform ? ['--per-platform'] : []),
     ]
     void runEngineJob({ action: 'draft_video_meta', extra_args: extra }, (succeeded) => {
       if (!succeeded) {
@@ -297,6 +342,66 @@ export function PackagePublishStage({
               : 'Use the step AI control above to draft or revise these fields from the script and series rules.'}
           </span>
         </div>
+        {/* ADVANCED: what else gets drafted and where the video ships. The
+            choices feed the next generation run, not the saved file. */}
+        <button
+          type="button"
+          className="utility-disclosure-toggle"
+          aria-expanded={advOpen}
+          onClick={() => setAdvOpen((v) => !v)}
+        >
+          <span>{advOpen ? '▾' : '▸'}</span> ADVANCED — extras &amp; platforms
+        </button>
+        {advOpen ? (
+          <div className="pkg-advanced">
+            <label className="pkg-check">
+              <input type="checkbox" checked={wantSynopsis} onChange={(e) => setWantSynopsis(e.target.checked)} />
+              Also generate a synopsis
+            </label>
+            <label className="pkg-check">
+              <input type="checkbox" checked={wantTags} onChange={(e) => setWantTags(e.target.checked)} />
+              Also generate search tags
+            </label>
+            <div className="pkg-platforms">
+              <span className="pkg-meta">Ships to:</span>
+              {PLATFORMS.map((p) => (
+                <label className="pkg-check" key={p.id}>
+                  <input
+                    type="checkbox"
+                    checked={targets.includes(p.id)}
+                    onChange={(e) =>
+                      setTargets((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((t) => t !== p.id)))
+                    }
+                  />
+                  {p.label}
+                </label>
+              ))}
+            </div>
+            <label className="pkg-check" title="Draft a separate title and description tuned to each checked platform">
+              <input
+                type="checkbox"
+                checked={perPlatform}
+                disabled={!targets.length}
+                onChange={(e) => setPerPlatform(e.target.checked)}
+              />
+              Separate text per platform
+            </label>
+          </div>
+        ) : null}
+        <RulesPanel
+          step="package_widescreen"
+          forAction="draft_video_meta"
+          addToken="packaging-copy"
+          title="RULES FOR TITLE & DESCRIPTION"
+          onToast={onToast}
+        />
+        {/* The prose rulebooks are separate inputs the drafter also obeys —
+            named here so nobody hunts for why output follows unseen rules. */}
+        <p className="pkg-rulebooks">
+          Also applies: <b>Global</b> rulebook SHIPPING.md “Packaging” (read-only) ·{' '}
+          <b>Series</b> rulebook “Packaging” section (edit in Show settings) — the series
+          section wins where they overlap.
+        </p>
         {metaGen === 'ready' ? (
           <div className="pkg-fields">
             <label className="st-field">
@@ -307,6 +412,38 @@ export function PackagePublishStage({
               <span>Description</span>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
             </label>
+            {synopsis ? (
+              <label className="st-field">
+                <span>Synopsis</span>
+                <textarea value={synopsis} onChange={(e) => setSynopsis(e.target.value)} rows={3} />
+              </label>
+            ) : null}
+            {tags ? (
+              <label className="st-field">
+                <span>Tags</span>
+                <input value={tags} onChange={(e) => setTags(e.target.value)} />
+              </label>
+            ) : null}
+            {Object.entries(platformMeta).map(([pid, m]) => (
+              <div className="pkg-platform-block" key={pid}>
+                <span className="eyebrow">{PLATFORMS.find((p) => p.id === pid)?.label ?? pid}</span>
+                <label className="st-field">
+                  <span>Title</span>
+                  <input
+                    value={m.title || ''}
+                    onChange={(e) => setPlatformMeta((cur) => ({ ...cur, [pid]: { ...cur[pid], title: e.target.value } }))}
+                  />
+                </label>
+                <label className="st-field">
+                  <span>Description</span>
+                  <textarea
+                    value={m.description || ''}
+                    rows={3}
+                    onChange={(e) => setPlatformMeta((cur) => ({ ...cur, [pid]: { ...cur[pid], description: e.target.value } }))}
+                  />
+                </label>
+              </div>
+            ))}
           </div>
         ) : null}
       </section>
@@ -326,6 +463,17 @@ export function PackagePublishStage({
             <span className="pkg-meta">one image per drafted concept · accurate + attention-grabbing per series rules</span>
           ) : null}
         </div>
+        <RulesPanel
+          step="package_widescreen"
+          forAction="generate_thumbnails"
+          addToken="thumbnail"
+          title="RULES FOR THUMBNAILS"
+          onToast={onToast}
+        />
+        <p className="pkg-rulebooks">
+          Also applies: <b>Global</b> thumbnail rules in SHIPPING.md (read-only) ·{' '}
+          <b>Series</b> visual language from its “Packaging” section.
+        </p>
         {thumb.versions.length ? (
           <>
             <div className="s1-style-grid pkg-thumbs">

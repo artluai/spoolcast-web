@@ -5,10 +5,14 @@ import { ResolvedRules } from '../../components/ResolvedRules'
 // rule component. The engine owns merge logic, provenance, and permissions.
 export function RulesPanel({
   step,
+  forAction,
+  addToken,
   onToast,
   title,
 }: {
   step: string
+  forAction?: string
+  addToken?: string
   onToast?: (message: string) => void
   title?: string
 }) {
@@ -29,6 +33,8 @@ export function RulesPanel({
       </button>
       <ResolvedRules
         step={step}
+        forAction={forAction}
+        addToken={addToken}
         compact
         hidden={!open}
         onCountChange={setOnCount}

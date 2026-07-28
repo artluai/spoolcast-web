@@ -3334,3 +3334,12 @@ body.chat-pinned { padding-right: 380px; }
 .pp-handle-form button:hover { border-color: var(--accent); color: var(--ink); }
 .pp-handle-form small { flex-basis: 100%; color: var(--ink-3); }
 .pp-handle-note { color: var(--red, #e5534b) !important; }
+
+/* Publish step: advanced generation options + platform variants. */
+.pkg-advanced { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); margin: 8px 0; }
+.pkg-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.pkg-check input { accent-color: var(--accent); }
+.pkg-platforms { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pkg-platform-block { border-top: 1px dashed var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pkg-rulebooks { margin: 4px 0 8px; font-size: 11.5px; color: var(--ink-3); }
+.pkg-rulebooks b { color: var(--ink-2); font-weight: 600; }
