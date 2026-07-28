@@ -67,6 +67,15 @@ export const renderInfoUrl = (session = activeSession()) => apiUrl('render-info'
 export const actionUrl = () => apiUrl('action')
 export const jobsUrl = (jobId?: string) => (jobId ? apiUrl(`jobs/${jobId}`) : apiUrl('jobs'))
 export const researchJobStorageKey = (session = activeSession()) => `spoolcast:research-job:${session}`
+export const SESSION_CONFIGURATION_CHANGED = 'spoolcast:session-configuration-changed'
+
+/** Tell mounted session views to re-read session.json and the engine contract.
+ *  The event carries no copied configuration: the engine remains the truth. */
+export function notifySessionConfigurationChanged(session = activeSession()): void {
+  window.dispatchEvent(new CustomEvent(SESSION_CONFIGURATION_CHANGED, {
+    detail: { session },
+  }))
+}
 
 // Entry spine: the real project list, the template registry, and the session's
 // contract — the workflow builds its steps from THIS, not a bundled mirror.

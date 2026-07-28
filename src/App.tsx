@@ -16,7 +16,7 @@ import {
   stageToStepMap,
   type WorkflowContract,
 } from './lib/workflow-graph'
-import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, researchJobStorageKey, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
+import { actionUrl, activeSession, contractUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, researchJobStorageKey, SESSION_CONFIGURATION_CHANGED, sessionsUrl, setActiveSession, statusUrl } from './lib/api'
 import { STAGE_DRAFT_OUTPUTS } from './data/stage-outputs'
 import { useWorkflowStore } from './store/workflow'
 import { AutopilotRunner } from './components/AutopilotRunner'
@@ -165,6 +165,7 @@ function SpoolcastApp() {
   // null = session config still loading; '' = a real undecided Step-1 session.
   // Fog-of-war follows this field now that Start Blank no longer uses /p/new.
   const [sessionTemplate, setSessionTemplate] = useState<string | null>(null)
+  const [sessionConfigurationVersion, setSessionConfigurationVersion] = useState(0)
   const [showSettingsOpen, setShowSettingsOpen] = useState(false)
   const [steps, setSteps] = useState(() => buildStepsFromContract(FALLBACK_CONTRACT, initialStandalone, null))
   const [gates, setGates] = useState(() => buildGates(FALLBACK_CONTRACT, initialStandalone, null))
@@ -225,6 +226,16 @@ function SpoolcastApp() {
   // route change to that id is an ADOPTION, not a switch — the drafts typed
   // on /p/new belong to the new session and must survive.
   const adoptSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    const refreshSessionConfiguration = (event: Event) => {
+      const changedSession = (event as CustomEvent<{ session?: string }>).detail?.session
+      if (changedSession && changedSession !== routeSession) return
+      setSessionConfigurationVersion((version) => version + 1)
+    }
+    window.addEventListener(SESSION_CONFIGURATION_CHANGED, refreshSessionConfiguration)
+    return () => window.removeEventListener(SESSION_CONFIGURATION_CHANGED, refreshSessionConfiguration)
+  }, [routeSession])
+
   useEffect(() => {
     if (prevSessionRef.current === routeSession) return
     const isFirstMount = prevSessionRef.current === undefined
@@ -291,7 +302,7 @@ function SpoolcastApp() {
     return () => {
       cancelled = true
     }
-  }, [routeSession])
+  }, [routeSession, sessionConfigurationVersion])
 
   // The contract is re-fetched per session — the engine copy is the single
   // source of truth (kills the bundled-mirror drift risk).
@@ -335,7 +346,7 @@ function SpoolcastApp() {
     return () => {
       cancelled = true
     }
-  }, [routeSession])
+  }, [routeSession, sessionConfigurationVersion])
 
   // Fetch real status from local API while a session route is open
   useEffect(() => {

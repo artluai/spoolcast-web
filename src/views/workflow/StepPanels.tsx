@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, notifySessionConfigurationChanged, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { styleThumbs } from '../../data/cast'
@@ -1509,14 +1509,18 @@ type SourceFile = { id: string; name: string; meta: string; kind: 'doc' | 'clock
 // ever appears while changing is still legal.
 export function TemplatePickerBar({
   idea = '',
+  current = '',
   chosenBySeries = false,
   seriesName = '',
   lockedReason = '',
+  onApplied,
 }: {
   idea?: string
+  current?: string
   chosenBySeries?: boolean
   seriesName?: string
   lockedReason?: string
+  onApplied?: (template: string) => void
 }) {
   type Tpl = {
     id: string
@@ -1525,31 +1529,24 @@ export function TemplatePickerBar({
     thumbnail?: string
   }
   const [tpls, setTpls] = useState<Tpl[]>([])
-  const [current, setCurrent] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
   const thumbnailUrl = (path: string) =>
     /^https?:\/\//i.test(path) ? path : globalContentUrl(path)
   useEffect(() => {
     let live = true
-    Promise.all([
-      fetch(fileUrl('session.json')).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(templatesUrl()).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([sess, reg]) => {
+    fetch(templatesUrl())
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then((reg) => {
       if (!live) return
-      try {
-        const templateId = String(JSON.parse(sess?.data?.content || '{}')?.template || '')
-        setCurrent(templateId)
-      } catch {
-        setCurrent('')
-      }
       setTpls(reg?.data?.templates ?? [])
     })
     return () => {
       live = false
     }
   }, [])
-  if (current === null || tpls.length === 0) return null
+  if (tpls.length === 0) return null
 
   const post = async (body: Record<string, unknown>) => {
     const r = await fetch(actionUrl(), {
@@ -1583,9 +1580,9 @@ export function TemplatePickerBar({
       await post({ action: 'use_global_asset', slug: castId })
     }
     if (out?.ok) {
-      // The template changes the contract and the step list wholesale — a
-      // full reload is the honest refresh.
-      window.location.reload()
+      onApplied?.(String(out?.data?.template || id))
+      notifySessionConfigurationChanged()
+      setBusy('')
     } else {
       setNote(out?.message || out?.error || 'Could not apply the template.')
       setBusy('')
@@ -1673,6 +1670,13 @@ type StepOneKitItem = {
   scope?: string
 }
 
+type StepOneKitAttachment = {
+  id: string
+  name: string
+  src: string
+  meta: string
+}
+
 type StepOneSeries = {
   id: string
   name?: string
@@ -1715,9 +1719,11 @@ const withFeaturingNames = (idea: string, names: string[]) => {
 function StepOneAdvanced({
   idea,
   onIdeaChange,
+  onKitSelectionChange,
 }: {
   idea: string
   onIdeaChange: (value: string) => void
+  onKitSelectionChange: (items: StepOneKitAttachment[]) => void
 }) {
   const [open, setOpen] = useState(false)
   const [template, setTemplate] = useState('')
@@ -1766,8 +1772,14 @@ function StepOneAdvanced({
   }, [])
 
   useEffect(() => {
-    if (!open || !series) return
+    if (!series) {
+      setKit([])
+      setKitLoading(false)
+      return
+    }
     let live = true
+    setKit([])
+    setKitLoading(true)
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
@@ -1791,7 +1803,7 @@ function StepOneAdvanced({
     return () => {
       live = false
     }
-  }, [open, series])
+  }, [series])
 
   const joinSeries = async (seriesId: string) => {
     if (!seriesId || joiningSeries || seriesId === series) return
@@ -1810,7 +1822,11 @@ function StepOneAdvanced({
     const out = response ? await response.json().catch(() => null) : null
     setJoiningSeries('')
     if (response?.ok && out?.ok) {
-      window.location.reload()
+      setKit([])
+      onIdeaChange(withFeaturingNames(idea, []))
+      setSeries(String(out?.data?.series || seriesId))
+      setTemplate(String(out?.data?.template || ''))
+      notifySessionConfigurationChanged()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not join this series.')
     }
@@ -1832,7 +1848,11 @@ function StepOneAdvanced({
     const out = response ? await response.json().catch(() => null) : null
     setJoiningSeries('')
     if (response?.ok && out?.ok) {
-      window.location.reload()
+      setKit([])
+      onIdeaChange(withFeaturingNames(idea, []))
+      setSeries('')
+      setTemplate(String(out?.data?.template || ''))
+      notifySessionConfigurationChanged()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not make this project standalone.')
     }
@@ -1856,7 +1876,23 @@ function StepOneAdvanced({
     const out = response ? await response.json().catch(() => null) : null
     setJoiningSeries('')
     if (response?.ok && out?.ok) {
-      window.location.reload()
+      const nextSeries = String(out?.data?.series || seriesId)
+      setKit([])
+      onIdeaChange(withFeaturingNames(idea, []))
+      setSeries(nextSeries)
+      setTemplate(String(out?.data?.template || template))
+      setSeriesOptions((current) => (
+        current.some((option) => option.id === nextSeries)
+          ? current
+          : [...current, {
+              id: nextSeries,
+              name: newSeriesName.trim() || displayId(nextSeries),
+              template: String(out?.data?.template || template),
+            }]
+      ))
+      setCreatingSeries(false)
+      setNewSeriesName('')
+      notifySessionConfigurationChanged()
     } else {
       setSeriesError(out?.message || out?.error || 'Could not create this series.')
     }
@@ -1881,6 +1917,23 @@ function StepOneAdvanced({
   const imageKit = kit.filter((item) => item.name && (item.global_path || item.image_path))
   const seriesThumbnailUrl = (path: string) =>
     /^https?:\/\//i.test(path) ? path : globalContentUrl(path)
+  useEffect(() => {
+    const selectedNames = new Set(featuringNames(idea))
+    onKitSelectionChange(
+      kit
+        .filter((item) => selectedNames.has(item.name) && (item.global_path || item.image_path))
+        .map((item) => ({
+          id: `world-kit:${item.name}`,
+          name: item.name,
+          src: item.global_path
+            ? globalContentUrl(item.global_path)
+            : contentUrl(item.image_path || ''),
+          meta: /template/i.test(String(item.scope || ''))
+            ? 'World Kit · template reference'
+            : `World Kit · ${displayId(series)} series`,
+        })),
+    )
+  }, [idea, kit, onKitSelectionChange, series])
 
   return (
     <>
@@ -2011,9 +2064,14 @@ function StepOneAdvanced({
 
           <TemplatePickerBar
             idea={idea}
+            current={template}
             chosenBySeries={!!series}
             seriesName={series}
             lockedReason={lockedReason}
+            onApplied={(nextTemplate) => {
+              setTemplate(nextTemplate)
+              onIdeaChange(withFeaturingNames(idea, []))
+            }}
           />
 
           {series ? (
@@ -2118,8 +2176,10 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       ? []
       : [], // ZERO DUMMY DATA RULE: Source material must come from the engine, not hardcoded mocks.
   )
-  const [researchBrief, setResearchBrief] = useState('')
-  const [researchRunning, setResearchRunning] = useState(false)
+  const [kitAttachments, setKitAttachments] = useState<StepOneKitAttachment[]>([])
+  const handleKitSelectionChange = useCallback((items: StepOneKitAttachment[]) => {
+    setKitAttachments(items)
+  }, [])
 
   const improveIdea = useCallback(async (instructions: string, model: string) => {
     const idea = brief.trim()
@@ -2241,51 +2301,6 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
     stageProcess,
     stepId,
   ])
-
-  // Research starts as Step 1 is left. If the user returns, show its quiet
-  // background state and the resulting read-only brief here — never as a
-  // workflow stage, blocker, or approval screen.
-  useEffect(() => {
-    let cancelled = false
-    const storageKey = researchJobStorageKey()
-    const loadBrief = async () => {
-      const response = await fetch(fileUrl('working/research-brief.md'), { cache: 'no-store' })
-      const out = await response.json().catch(() => null)
-      if (!cancelled) {
-        setResearchBrief(out?.ok && out.data?.exists && typeof out.data.content === 'string' ? out.data.content : '')
-      }
-    }
-    const refreshResearch = async () => {
-      const storedJob = sessionStorage.getItem(storageKey)
-      if (!storedJob) {
-        if (!cancelled) setResearchRunning(false)
-        await loadBrief()
-        return
-      }
-      if (!cancelled) setResearchRunning(true)
-      await loadBrief()
-      if (storedJob === 'pending') return
-      const response = await fetch(jobsUrl(storedJob))
-      const out = await response.json().catch(() => null)
-      const status = out?.data?.status
-      if (status === 'done') {
-        sessionStorage.removeItem(storageKey)
-        if (!cancelled) setResearchRunning(false)
-        await loadBrief()
-      } else if (!response.ok || out?.ok === false || status === 'failed') {
-        sessionStorage.removeItem(storageKey)
-        if (!cancelled) setResearchRunning(false)
-      }
-    }
-    void refreshResearch().catch(() => {
-      if (!cancelled) setResearchRunning(false)
-    })
-    const timer = window.setInterval(() => void refreshResearch().catch(() => {}), 3000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [])
 
   // FILES ARE TRUTH: list what is actually in source/ rather than only what
   // this browser tab uploaded. Uploads used to vanish from this step on
@@ -2483,7 +2498,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       ) : null}
 
       <section className="idea-sources compact">
-        {files.length ? (
+        {files.length || kitAttachments.length ? (
           <div className="file-list">
             {files.map((file) => (
               <div className={`file-row ${file.kind === 'image' ? 'has-thumb' : ''}`} key={file.id}>
@@ -2512,37 +2527,35 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
                 </button>
               </div>
             ))}
+            {kitAttachments.map((item) => (
+              <div className="file-row has-thumb" key={item.id}>
+                <img className="file-thumb" src={item.src} alt="" loading="lazy" />
+                <span className="file-meta-col">
+                  <span className="file-name">{item.name}</span>
+                  <span className="file-size">{item.meta}</span>
+                </span>
+                <button
+                  type="button"
+                  className="file-remove"
+                  onClick={() => onBriefChange(withFeaturingNames(
+                    brief,
+                    featuringNames(brief).filter((name) => name !== item.name),
+                  ))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
           </div>
         ) : null}
-
-        {researchRunning ? (
-          <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 0' }}>
-            <span className="spin" />
-            <span>Researching in the background…</span>
-          </p>
-        ) : null}
-        {researchBrief ? (
-          <details className="vp-section">
-            <summary className="vp-section-sum">
-              <span className="vp-sec-title">Research brief</span>
-              <span className="vp-section-count">READY</span>
-            </summary>
-            <div
-              className="md-preview"
-              style={{
-                marginTop: 12,
-                border: '1px solid var(--line, #2a3142)',
-                borderRadius: 8,
-                padding: '4px 16px',
-              }}
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(marked.parse(researchBrief, { async: false }) as string),
-              }}
-            />
-          </details>
-        ) : null}
       </section>
-      {!blankProject ? <StepOneAdvanced idea={brief} onIdeaChange={onBriefChange} /> : null}
+      {!blankProject ? (
+        <StepOneAdvanced
+          idea={brief}
+          onIdeaChange={onBriefChange}
+          onKitSelectionChange={handleKitSelectionChange}
+        />
+      ) : null}
     </div>
   )
 }
@@ -2556,7 +2569,138 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
+  const [researchBrief, setResearchBrief] = useState('')
+  const [researchEditing, setResearchEditing] = useState(false)
+  const [researchRunning, setResearchRunning] = useState(false)
+  const [researchSaving, setResearchSaving] = useState(false)
+  const [researchError, setResearchError] = useState<string | null>(null)
+  const [researchAiOpen, setResearchAiOpen] = useState(false)
+  const [researchNotes, setResearchNotes] = useState('')
+  const [researchModel, setResearchModel] = useState(DEFAULT_MODEL_ID)
+  const [researchUpdateRequested, setResearchUpdateRequested] = useState(false)
   const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
+
+  const loadResearchBrief = useCallback(async () => {
+    const response = await fetch(fileUrl('working/research-brief.md'), { cache: 'no-store' })
+    const out = await response.json().catch(() => null)
+    if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
+      setResearchBrief(out.data.content)
+    }
+  }, [])
+  useEffect(() => {
+    void loadResearchBrief().catch(() => {})
+  }, [loadResearchBrief])
+
+  const saveResearchBrief = useCallback(async (content: string) => {
+    setResearchSaving(true)
+    setResearchError(null)
+    try {
+      const response = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: TENANT,
+          action: 'set_research_brief',
+          content,
+        }),
+      })
+      const out = await response.json().catch(() => null)
+      if (!response.ok || out?.ok === false) {
+        setResearchError(out?.message || out?.error || 'Could not save the research brief.')
+        return false
+      }
+      return true
+    } catch {
+      setResearchError('Could not reach the engine. The research edit was not saved.')
+      return false
+    } finally {
+      setResearchSaving(false)
+    }
+  }, [])
+
+  const updateResearchWithAi = useCallback(async (instructions: string, model: string) => {
+    if (researchRunning || researchSaving) return
+    if (researchBrief.trim() && !(await saveResearchBrief(researchBrief))) return
+    setResearchError(null)
+    setResearchRunning(true)
+    setResearchUpdateRequested(true)
+    const storageKey = researchJobStorageKey()
+    sessionStorage.setItem(storageKey, 'pending')
+    try {
+      const response = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: TENANT,
+          action: 'draft_research',
+          allow_cost: true,
+          force: true,
+          model,
+          reasoning: draftReasoning(model),
+          feedback: instructions.trim(),
+        }),
+      })
+      const out = await response.json().catch(() => null)
+      const jobId = out?.data?.id
+      if (!response.ok || out?.ok === false || !jobId) {
+        sessionStorage.removeItem(storageKey)
+        setResearchRunning(false)
+        setResearchUpdateRequested(false)
+        setResearchError(out?.message || out?.error || 'Could not start the research update.')
+        return
+      }
+      sessionStorage.setItem(storageKey, String(jobId))
+    } catch {
+      sessionStorage.removeItem(storageKey)
+      setResearchRunning(false)
+      setResearchUpdateRequested(false)
+      setResearchError('Could not reach the engine. The current research brief is unchanged.')
+    }
+  }, [researchBrief, researchRunning, researchSaving, saveResearchBrief])
+
+  // Step 1 queues research without waiting. Step 2 owns its readable/editable
+  // home and follows that same durable job after navigation or a remount.
+  useEffect(() => {
+    let cancelled = false
+    const storageKey = researchJobStorageKey()
+    const refreshResearch = async () => {
+      const storedJob = sessionStorage.getItem(storageKey)
+      if (!storedJob) {
+        if (!cancelled) setResearchRunning(false)
+        return
+      }
+      if (!cancelled) setResearchRunning(true)
+      if (storedJob === 'pending') return
+      const response = await fetch(jobsUrl(storedJob), { cache: 'no-store' })
+      const out = await response.json().catch(() => null)
+      const status = out?.data?.status
+      if (status === 'done') {
+        sessionStorage.removeItem(storageKey)
+        if (!cancelled) {
+          setResearchRunning(false)
+          setResearchUpdateRequested(false)
+        }
+        await loadResearchBrief()
+      } else if (!response.ok || out?.ok === false || status === 'failed') {
+        sessionStorage.removeItem(storageKey)
+        if (!cancelled) {
+          setResearchRunning(false)
+          if (researchUpdateRequested) {
+            setResearchError(out?.data?.message || out?.message || out?.error || 'Research update failed.')
+          }
+          setResearchUpdateRequested(false)
+        }
+      }
+    }
+    void refreshResearch().catch(() => {})
+    const timer = window.setInterval(() => void refreshResearch().catch(() => {}), 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [loadResearchBrief, researchUpdateRequested])
 
   // CANDIDATES CONVENTION: working/core-message-candidates.json is THE
   // candidates artifact for every template's lock stage (the drafter writes
@@ -2700,6 +2844,127 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
 
   return (
     <div className="idea-v2">
+      <details className="vp-section">
+        <summary className="vp-section-sum">
+          <span className="vp-sec-title">Research from Step 1</span>
+          <span className="vp-section-count">
+            {researchRunning ? 'RESEARCHING' : researchBrief.trim() ? 'READY' : 'NOT READY'}
+          </span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
+          {researchRunning ? (
+            <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
+              <span className="spin" />
+              <span>Research is updating in the background. You can continue working.</span>
+            </p>
+          ) : null}
+          {researchBrief.trim() && !researchEditing ? (
+            <div
+              className="md-preview"
+              title="Click to edit"
+              onClick={() => {
+                if (!researchRunning) setResearchEditing(true)
+              }}
+              style={{
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 8,
+                padding: '4px 16px',
+                cursor: researchRunning ? 'default' : 'text',
+                opacity: researchRunning ? 0.4 : 1,
+                pointerEvents: researchRunning ? 'none' : 'auto',
+              }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(marked.parse(researchBrief, { async: false }) as string),
+              }}
+            />
+          ) : researchEditing ? (
+            <textarea
+              className="raw-source-textarea"
+              autoFocus
+              value={researchBrief}
+              onChange={(event) => setResearchBrief(event.target.value)}
+              onBlur={() => {
+                setResearchEditing(false)
+                void saveResearchBrief(researchBrief)
+              }}
+              style={{
+                width: '100%',
+                minHeight: 240,
+                boxSizing: 'border-box',
+                resize: 'vertical',
+                background: 'transparent',
+                color: 'var(--ink-1, inherit)',
+                border: '1px solid var(--line, #2a3142)',
+                borderRadius: 8,
+                padding: 12,
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            />
+          ) : (
+            <p className="vp-hint" style={{ margin: 0 }}>
+              {researchRunning
+                ? 'The brief will appear here when it is ready.'
+                : 'No research brief was created for this project.'}
+            </p>
+          )}
+          {researchBrief.trim() ? (
+            <span className="label" style={{ display: 'block', marginTop: 6 }}>
+              {researchEditing ? 'Click away to save.' : 'Click the text to edit the raw markdown.'}
+            </span>
+          ) : null}
+          {researchError ? <p className="voice-error">{researchError}</p> : null}
+          <div className="step1-input-actions">
+            <span className={`vg-split-action ${researchAiOpen ? 'open' : ''}`}>
+              <button
+                type="button"
+                className="vg-split-toggle"
+                disabled={researchRunning || researchSaving}
+                title="Add optional notes or choose a model"
+                aria-label="Open research update options"
+                onClick={() => setResearchAiOpen((value) => !value)}
+              >
+                {researchAiOpen ? '▴' : '▾'}
+              </button>
+              <button
+                type="button"
+                className="vp-undo vg-split-main"
+                disabled={researchRunning || researchSaving}
+                onClick={() => void updateResearchWithAi('', researchModel)}
+              >
+                {researchRunning ? <><span className="spin" /> Updating research…</> : '✦ Update research with AI'}
+              </button>
+            </span>
+          </div>
+          {researchAiOpen ? (
+            <div className="vg-regen-note-panel step1-improve-panel">
+              <textarea
+                value={researchNotes}
+                onChange={(event) => setResearchNotes(event.target.value)}
+                placeholder="Optional directions for what the updated research should add, verify, or preserve…"
+                rows={3}
+              />
+              <div className="vp-edit-actions step1-improve-actions">
+                <ModelPicker
+                  model={researchModel}
+                  onChange={setResearchModel}
+                  disabled={researchRunning}
+                />
+                <button
+                  type="button"
+                  className="vp-save"
+                  disabled={researchRunning || researchSaving}
+                  onClick={() => void updateResearchWithAi(researchNotes, researchModel)}
+                >
+                  {researchRunning ? <><span className="spin" /> Updating…</> : '✦ Update research'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </details>
+
       <h3 className="idea-q">What should the viewer walk away believing?</h3>
 
       {needRewind && (
