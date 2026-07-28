@@ -20,7 +20,7 @@ credits, payments. Lives in:
 | Public pages `/watch`, `/u/:handle` | `src/views/site/SiteView.tsx` (own chrome, routed by `RouteSplit` in `App.tsx`) |
 | API | `functions/api/site/` — Cloudflare Pages Functions |
 | Database | Cloudflare D1 `spoolcast-site` — schema in `site/schema.sql` |
-| Media | Cloudflare R2 `spoolcast-videos` (published videos), `spoolcast-assets` (global asset library: characters, templates) |
+| Media | Cloudflare R2 `spoolcast-videos` (published videos), `spoolcast-assets` (global asset library: characters, templates), `spoolcast-content-mirror` (private per-user mirror of the engine's content root under `users/<uid>/…` — see `../spoolcast/docs/storage-seam.md`) |
 | Publishing | `site/publish.py` — pushes one finished file + metadata to R2 + D1; `site/publish_template.py` — admin publishes a global template through `/api/admin/templates/publish` |
 
 ## The boundary rule
