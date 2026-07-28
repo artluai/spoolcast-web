@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { postAction } from '../lib/api'
 
-export type RuleScope = 'global' | 'template' | 'series' | 'video'
+export type RuleScope = 'global' | 'user' | 'template' | 'series' | 'video'
 
 type Permission = { available: boolean; can_edit: boolean; reason?: string }
 type RuleChainItem = {
@@ -30,12 +30,13 @@ type RulesPayload = {
 
 const SCOPE_LABEL: Record<RuleScope, string> = {
   global: 'Global',
+  user: 'My account',
   template: 'Template',
   series: 'Series',
   video: 'This video',
 }
 
-const SCOPE_ORDER: RuleScope[] = ['global', 'template', 'series', 'video']
+const SCOPE_ORDER: RuleScope[] = ['global', 'user', 'template', 'series', 'video']
 
 const slugify = (text: string) =>
   text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 42) || 'rule'
