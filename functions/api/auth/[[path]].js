@@ -158,6 +158,40 @@ export async function onRequest({ env, request, params }) {
     })
   }
 
+  if (route === 'handle' && request.method === 'POST') {
+    // Pick (or change) the account's @handle. The handle names the public
+    // creator page too, so the namespace is shared between users and creators:
+    // taken means taken in either table, unless it's already this user's.
+    const user = await sessionUser(env, request)
+    if (!user) return json({ error: 'Sign in first.' }, 401)
+    const body = await request.json().catch(() => ({}))
+    const handle = String(body.handle || '').trim().toLowerCase()
+    const name = String(body.name || '').trim().slice(0, 60)
+    if (!/^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(handle)) {
+      return json({ error: 'Handles are 3–30 characters: letters, numbers, hyphens.' }, 400)
+    }
+    const userClash = await env.DB.prepare(
+      `SELECT id FROM users WHERE handle = ? AND id != ?`,
+    ).bind(handle, user.id).first()
+    const creatorClash = await env.DB.prepare(
+      `SELECT id FROM creators WHERE handle = ? AND (user_id IS NULL OR user_id != ?)`,
+    ).bind(handle, user.id).first()
+    if (userClash || creatorClash) return json({ error: 'That handle is taken.' }, 409)
+    await env.DB.prepare(`UPDATE users SET handle = ?, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?`)
+      .bind(handle, name, user.id).run()
+    // The public creator page: claim it, or create it on first pick. Old
+    // handle rows stay linked by user_id, so renames carry the page over.
+    const mine = await env.DB.prepare(`SELECT id FROM creators WHERE user_id = ?`).bind(user.id).first()
+    if (mine) {
+      await env.DB.prepare(`UPDATE creators SET handle = ?, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?`)
+        .bind(handle, name, mine.id).run()
+    } else {
+      await env.DB.prepare(`INSERT INTO creators (handle, name, user_id) VALUES (?, ?, ?)`)
+        .bind(handle, name || handle, user.id).run()
+    }
+    return json({ handle })
+  }
+
   if (route === 'logout' && request.method === 'POST') {
     const t = readCookie(request, 'sc_session')
     if (t) await env.DB.prepare(`DELETE FROM web_sessions WHERE token = ?`).bind(t).run()

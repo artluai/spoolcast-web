@@ -3324,3 +3324,13 @@ body.chat-pinned { padding-right: 380px; }
   .resolved-rule-edit-actions .rule-choice-btn { width: 100%; text-align: left; }
   .rule-choice-wrap .vp-menu { position: fixed; inset: auto 16px 16px; width: auto; max-height: min(60vh, 420px); }
 }
+
+/* Handle picker in the profile drawer. */
+.pp-handle-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pp-handle-form span { color: var(--ink-3); }
+.pp-handle-form input { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--ink); border-radius: 6px; padding: 6px 10px; font-size: 12.5px; width: 160px; }
+.pp-handle-form input:focus { outline: none; border-color: var(--accent); }
+.pp-handle-form button { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+.pp-handle-form button:hover { border-color: var(--accent); color: var(--ink); }
+.pp-handle-form small { flex-basis: 100%; color: var(--ink-3); }
+.pp-handle-note { color: var(--red, #e5534b) !important; }

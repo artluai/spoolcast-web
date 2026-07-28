@@ -9,6 +9,23 @@ type User = { id: number; email: string; handle: string | null; name: string; ro
 export function ProfileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [user, setUser] = useState<User | null>(null)
   const [checked, setChecked] = useState(false)
+  const [handleDraft, setHandleDraft] = useState('')
+  const [handleNote, setHandleNote] = useState('')
+  const [editingHandle, setEditingHandle] = useState(false)
+  const saveHandle = async () => {
+    setHandleNote('')
+    const r = await fetch('/api/auth/handle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle: handleDraft }),
+    }).then((x) => x.json()).catch(() => null)
+    if (!r?.ok) {
+      setHandleNote(r?.data?.error || 'Could not save the handle.')
+      return
+    }
+    setUser((u) => (u ? { ...u, handle: r.data.handle } : u))
+    setEditingHandle(false)
+  }
   useEffect(() => {
     if (!open) return
     void fetch('/api/auth/me')
@@ -39,7 +56,33 @@ export function ProfileDrawer({ open, onClose }: { open: boolean; onClose: () =>
           <>
             <section>
               <h3>Account</h3>
-              <p>{user.handle ? `@${user.handle}` : 'No handle yet'}</p>
+              {user.handle && !editingHandle ? (
+                <p>
+                  @{user.handle}{' '}
+                  <a
+                    className="pp-link"
+                    href="#edit-handle"
+                    onClick={(e) => { e.preventDefault(); setHandleDraft(user.handle || ''); setEditingHandle(true) }}
+                  >
+                    change ›
+                  </a>
+                </p>
+              ) : (
+                <form
+                  className="pp-handle-form"
+                  onSubmit={(e) => { e.preventDefault(); void saveHandle() }}
+                >
+                  <span>@</span>
+                  <input
+                    value={handleDraft}
+                    placeholder="pick-a-handle"
+                    onChange={(e) => setHandleDraft(e.target.value.toLowerCase())}
+                  />
+                  <button type="submit">Save</button>
+                  {handleNote && <small className="pp-handle-note">{handleNote}</small>}
+                  {!user.handle && <small>Your public page will live at /u/&lt;handle&gt;.</small>}
+                </form>
+              )}
               <small>
                 {user.role === 'admin' ? (
                   <a className="pp-link" href="/admin">Admin — manage global assets ›</a>
