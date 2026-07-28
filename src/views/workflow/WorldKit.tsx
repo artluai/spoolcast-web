@@ -1,108 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { CastGrid } from '../../components/CastGrid'
 import { castByShow } from '../../data/cast'
-import { FORMAT_TEMPLATE_NAMES, WORLD_KIT_SCOPES, WORLD_KIT_SECTIONS } from '../../data/worldkit'
-
-export function WorldKitPanel({
-  castData,
-  showName,
-  onManage,
-  compact = false,
-  blank = false,
-}: {
-  castData: (typeof castByShow)['spoolcast dev log']
-  showName: string
-  onManage?: () => void
-  compact?: boolean
-  // Blank/standalone project: no show behind it — every section starts empty
-  // instead of borrowing the devlog's mock references.
-  blank?: boolean
-}) {
-  const [scopes, setScopes] = useState<Record<string, string>>(() =>
-    Object.fromEntries(WORLD_KIT_SECTIONS.map((s) => [s.id, s.scope])),
-  )
-  // the format template (series pipeline), NOT the visual style
-  const templateName = FORMAT_TEMPLATE_NAMES[showName] ?? 'format template'
-  const scopeLabels: Record<string, string> = {
-    Episode: 'Episode only',
-    Show: `Show: ${showName}`,
-    Template: `Template: ${templateName}`,
-  }
-  return (
-    <div className="wk-panel">
-      <div className="wk-note">
-        <span>
-          Source of truth: <code>working/world-kit.md</code> · Cast manifest: <code>cast.txt</code>
-        </span>
-        <span className="wk-flex">Each beat pulls whatever references it needs — there's no fixed recipe.</span>
-      </div>
-      <div className="wk-grid">
-        {WORLD_KIT_SECTIONS.map((sec) => (
-          <div className={`wk-card ${sec.locked ? 'wk-card-locked' : ''}`} key={sec.id}>
-            <div className="wk-card-head">
-              <div className="wk-card-meta">
-                <h3>{sec.name}</h3>
-                <p>{sec.desc}</p>
-              </div>
-              {sec.locked ? (
-                <span className="wk-locked-tag">Step 01</span>
-              ) : (
-                <label className="wk-scope" title="Where this reference can be reused">
-                  <span>Share</span>
-                  <select
-                    value={scopes[sec.id]}
-                    onChange={(e) => setScopes((p) => ({ ...p, [sec.id]: e.target.value }))}
-                  >
-                    {WORLD_KIT_SCOPES.map((o) => (
-                      <option key={o} value={o}>{scopeLabels[o]}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-            {sec.locked ? (
-              !blank && sec.image ? (
-                <div className="wk-style">
-                  <img src={sec.image} alt="" />
-                  <span>{sec.caption}</span>
-                </div>
-              ) : (
-                <div className="wk-empty">
-                  {blank ? 'No style anchor yet — set it in Project setup (Step 01).' : 'No style reference set'}
-                </div>
-              )
-            ) : sec.cast ? (
-              castData.chars.length ? (
-                <>
-                  <CastGrid castData={castData} compact={compact} />
-                  {onManage ? (
-                    <button className="wk-manage" onClick={onManage}>Manage cast →</button>
-                  ) : null}
-                </>
-              ) : (
-                <div className="wk-empty">No recurring cast yet — characters join here during World Kit (Step 05).</div>
-              )
-            ) : blank ? (
-              <div className="wk-empty">Nothing here yet — references land during World Kit (Step 05).</div>
-            ) : (
-              <div className="wk-items">
-                {sec.items?.map((it) => (
-                  <span className="wk-item" key={it}>{it}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
+import { fileUrl, postAction } from '../../lib/api'
+import { useWorkflowStore } from '../../store/workflow'
+import { WorldKitEditor } from './WorldKitEditor'
 
 export function WorldKitView({
-  castData,
   showName,
-  blank = false,
 }: {
   castData: (typeof castByShow)['spoolcast dev log']
   showName: string
@@ -110,24 +14,96 @@ export function WorldKitView({
 }) {
   const navigate = useNavigate()
   const params = useParams()
+  const stageId = 'world_kit'
+  const draft = useWorkflowStore((state) => state.stageDrafts[stageId] ?? '')
+  const seedStageDraft = useWorkflowStore((state) => state.seedStageDraft)
+  const clearDirty = useWorkflowStore((state) => state.clearDirty)
+  const dirty = useWorkflowStore((state) => state.dirtySteps[stageId] ?? false)
+  const [loading, setLoading] = useState(!draft)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (draft) return
+    let live = true
+    fetch(fileUrl('working/world-kit.md'))
+      .then((response) => (response.ok ? response.json() : null))
+      .then(async (out) => {
+        if (!live) return
+        let content = String(out?.data?.content || '')
+        if (!content) {
+          const inherited = await postAction<{ content?: string }>({
+            action: 'inherit_world_kit',
+          })
+          content = String(inherited?.data?.content || '')
+        }
+        if (content) seedStageDraft(stageId, content)
+      })
+      .catch(() => {
+        if (live) setMessage('Could not load the World Kit.')
+      })
+      .finally(() => {
+        if (live) setLoading(false)
+      })
+    return () => {
+      live = false
+    }
+  }, [draft, seedStageDraft])
+
+  const save = async () => {
+    if (!draft || saving) return
+    setSaving(true)
+    setMessage('')
+    const out = await postAction({
+      action: 'set_stage_output',
+      stage_id: stageId,
+      path: 'working/world-kit.md',
+      content: draft,
+    })
+    setSaving(false)
+    if (out?.ok) {
+      clearDirty(stageId)
+      setMessage('World Kit saved.')
+    } else {
+      setMessage(out?.error || out?.message || 'Could not save the World Kit.')
+    }
+  }
+
   return (
     <section className="cast-view">
       <div className="cast-wrap">
         <div className="cast-head">
-          <button className="back-btn" onClick={() => navigate(`/p/${params.id ?? 'dev-log-06'}`)}>←</button>
-          <div>
+          <button
+            type="button"
+            className="back-btn"
+            onClick={() => navigate(`/p/${params.id ?? 'new'}`)}
+          >
+            ←
+          </button>
+          <div style={{ flex: 1 }}>
             <div className="eyebrow">World Kit · {showName}</div>
             <div className="title-row">
-              <h1>Visual references for this episode</h1>
-              <button>+ New reference</button>
+              <h1>Visual references for this project</h1>
+              <button
+                type="button"
+                disabled={!draft || saving || !dirty}
+                onClick={() => void save()}
+              >
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
             <p>
-              Style, cast, environments, props, screens, motion, and beat-specific refs — each with
-              its own reuse scope.{castData.style ? ` Style library: ${castData.style}.` : ' No style picked yet.'}
+              Style, cast, environments, props, screens, motion, and beat-specific references.
+              Open any asset to control where it can be shared.
             </p>
+            {message ? <p className="series-menu-error">{message}</p> : null}
           </div>
         </div>
-        <WorldKitPanel castData={castData} showName={showName} blank={blank} />
+        {loading ? (
+          <div className="wk-empty"><span className="spin" /> Loading World Kit…</div>
+        ) : (
+          <WorldKitEditor stageId={stageId} onToast={setMessage} />
+        )}
       </div>
     </section>
   )

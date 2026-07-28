@@ -4,14 +4,9 @@ import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '..
 import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl, postAction } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import GlobalCharacterPicker from './GlobalCharacterPicker'
+import { WorldKitShareMenu } from './WorldKitShareMenu'
 import { useWorkflowStore } from '../../store/workflow'
 
-// Scope tokens (stored in the md) ↔ human labels shown in the per-item picker.
-const SCOPE_OPTIONS = [
-  { value: 'episode-only', label: 'This episode only (default)' },
-  { value: 'show-shared', label: 'Series — affects future episodes' },
-  { value: 'template-shared', label: 'Format template — affects every show on it' },
-]
 const isSharedScope = (scope: string) => /show|template|format/i.test(scope)
 
 const SECTION_BLURBS: Record<string, string> = {
@@ -828,10 +823,11 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     if (sec.kind === 'table') sec.rows[ri][ci] = v
                     apply(d)
                   }
-                  const setScope = async (value: string) => {
+                  const setScope = async (value: string): Promise<boolean> => {
+                    snapshot()
                     const d = structuredClone(doc!)
                     const sec = d.sections[si]
-                    if (sec.kind !== 'table') return
+                    if (sec.kind !== 'table') return false
                     sec.rows[ri][scopeIdx] = value
                     apply(d)
                     const out = await postAction({
@@ -842,16 +838,19 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     })
                     if (out?.ok) {
                       toast(
-                        isSharedScope(value)
-                          ? `“${row[refIdx]}” is now shared with this series.`
-                          : `“${row[refIdx]}” now belongs to this episode only.`,
+                        /template/i.test(value)
+                          ? `“${row[refIdx]}” is now shared with the ${activeSession()} project's template.`
+                          : /show|series/i.test(value)
+                            ? `“${row[refIdx]}” is now shared with this project's series.`
+                            : `“${row[refIdx]}” is now available to this project only.`,
                       )
+                      return true
                     } else {
                       toast(`Engine: ${out?.error || out?.message || 'could not save the World Kit scope.'}`)
+                      return false
                     }
                   }
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
-                  const scopeKnown = SCOPE_OPTIONS.some((o) => o.value === scope)
                   const fieldRows = (
                     <>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -883,21 +882,17 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                               </label>
                             )}
                             {scopeIdx >= 0 && (
-                              <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                                SAVE TO
-                                <select
-                                  value={scope}
-                                  onFocus={snapshot}
-                                  onChange={(e) => void setScope(e.target.value)}
-                                  className="sc-select"
-                                  style={{ display: 'block', marginTop: 3, color: isSharedScope(scope) ? 'var(--amber)' : undefined }}
-                                >
-                                  {!scopeKnown && <option value={scope}>{scope}</option>}
-                                  {SCOPE_OPTIONS.map((o) => (
-                                    <option key={o.value} value={o.value}>{o.label}</option>
-                                  ))}
-                                </select>
-                              </label>
+                              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                                <span>SHARE WITH</span>
+                                <span style={{ display: 'block', marginTop: 3 }}>
+                                  <WorldKitShareMenu
+                                    refId={row[refIdx]}
+                                    scope={scope}
+                                    onScopeChange={setScope}
+                                    onToast={toast}
+                                  />
+                                </span>
+                              </div>
                             )}
                             {/* The section's OTHER columns (Linked to, Source,
                                 Group, Variant of…) — every cell is editable,
