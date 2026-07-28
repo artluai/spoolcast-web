@@ -23,7 +23,7 @@ import {
   type TimedImage,
 } from '../../lib/pacing-md'
 import { parseScreenplay, type Clip } from '../../lib/screenplay-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, downloadUrl, fileUrl, jobsUrl, templatesUrl } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, downloadUrl, fileUrl, globalContentUrl, jobsUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
@@ -287,7 +287,17 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // THE KIT, AS OBJECTS: every World Kit reference — kind, description, and
   // its picked image when one exists. OBJECT-FIRST: a prompt-only ref is a
   // real kit object and gets a real card; it just has no image yet.
-  type KitObject = { name: string; kind: string; notes: string; image_path: string; group?: string; variant_of?: string; active_prompt?: string; active_model?: string }
+  type KitObject = { name: string; kind: string; notes: string; image_path: string; global_path?: string; scope?: string; group?: string; variant_of?: string; active_prompt?: string; active_model?: string }
+  // SHOW-TIER IMAGES: an item whose picture lives in the series store (no
+  // session copy) carries it as a content-root path. Normalize to a
+  // sentinel so every 'has image' truthiness check keeps working, and
+  // route through the right URL builder at render time.
+  const withShowImages = (arr: KitObject[]) => arr.map((k) => (
+    !k.image_path && k.global_path ? { ...k, image_path: k.global_path } : k
+  ))
+  // series/ and global/ image paths are CONTENT-ROOT relative (the show's
+  // kit store and the shared library); everything else is session-relative.
+  const kitSrc = (p: string) => (/^(series|global)\//.test(p) ? globalContentUrl(p) : contentUrl(p))
   const [rawKit, setKit] = useState<KitObject[]>([])
   // THE KIT THE BOARD SEES = engine file + unsaved step-5 draft overlaid.
   // Linking audio in the World Kit shows here immediately, no save required.
@@ -308,7 +318,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       .then((out) => {
         if (!live) return
         if (!Array.isArray(out?.data?.kit)) return
-        const kitArr = out.data.kit as KitObject[]
+        const kitArr = withShowImages(out.data.kit as KitObject[])
         const srcArr = (Array.isArray(out.data.images) ? out.data.images : []) as { path: string; ref?: string }[]
         setKit(kitArr)
         setSrcPool(srcArr)
@@ -329,7 +339,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                 const im = new Image()
                 im.onload = () => resolve([m.key, im.naturalHeight / im.naturalWidth || 1.25])
                 im.onerror = reject
-                im.src = contentUrl(m.path)
+                im.src = kitSrc(m.path)
               }),
           ),
         ).then((results) => {
@@ -935,7 +945,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   const [lightbox, setLightbox] = useState('')
   const refetchKit = async () => {
     const out = await fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 })).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-    if (Array.isArray(out?.data?.kit)) setKit(out.data.kit)
+    if (Array.isArray(out?.data?.kit)) setKit(withShowImages(out.data.kit))
     if (Array.isArray(out?.data?.images)) setSrcPool(out.data.images)
     return (out?.data?.kit ?? []) as KitObject[]
   }
@@ -1431,7 +1441,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           <span title="Hide this reference (Show all brings it back)" onClick={() => persistHidden([...hiddenRefs, k.name])}>✕</span>
         </span>
         {k.image_path ? (
-          <img src={contentUrl(k.image_path)} alt={shownName} loading="lazy" onLoad={noteRatio(k.name)} />
+          <img src={kitSrc(k.image_path)} alt={shownName} loading="lazy" onLoad={noteRatio(k.name)} />
         ) : (
           <span className="vp-map-prompttext">{k.notes || 'Prompt-only reference — no image yet.'}</span>
         )}
@@ -2212,7 +2222,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                           })
                         }
                       >
-                        <img src={contentUrl(kr.image_path)} alt="" />
+                        <img src={kitSrc(kr.image_path)} alt="" />
                         <span>{kr.name}</span>
                       </button>
                     )
@@ -2770,7 +2780,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                                       </span>
                                       <span className="vp-map-attname">{name}</span>
                                     </div>
-                                    <img src={contentUrl(obj.image_path)} alt={name} title="Click to view large" onLoad={noteRatio(name)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} />
+                                    <img src={kitSrc(obj.image_path)} alt={name} title="Click to view large" onLoad={noteRatio(name)} onClick={(e) => { e.stopPropagation(); setLightbox(obj.image_path) }} />
                                     <div className="vp-map-att-ov">
                                       <button type="button" className={`vp-map-ffbtn ${ff === name ? 'on' : ''}`} title="The video OPENS on this exact image (kie first-frame mode — other references can't attach as images and ride along as prompt text instead)" onClick={() => setFirstFrame(img.id, name)}>
                                         {ff === name ? '✓ 1st frame' : 'Set as 1st frame'}
@@ -3283,7 +3293,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
                       title={on ? `Detach ${k.name} from ${attachFor}` : `Attach ${k.name} to ${attachFor}`}
                       onClick={() => toggleMapRef(attachFor, k.name)}
                     >
-                      {k.image_path ? <img src={contentUrl(k.image_path)} alt="" /> : null}
+                      {k.image_path ? <img src={kitSrc(k.image_path)} alt="" /> : null}
                       <span>{k.name}</span>
                     </button>
                   )
@@ -3298,7 +3308,7 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       })() : null}
       {lightbox ? (
             <div className="vp-var-overlay" onClick={() => setLightbox('')}>
-              <img className="vp-lightbox" src={contentUrl(lightbox)} alt="" />
+              <img className="vp-lightbox" src={kitSrc(lightbox)} alt="" />
             </div>
           ) : null}
         </div>

@@ -405,7 +405,7 @@ export function VariantModule({
               {/* A global item's sheet is a CONTENT-ROOT path, not
                   session-relative — contentUrl would 404 on it. */}
               <img
-                src={base.image_path.startsWith('global/') ? globalContentUrl(base.image_path) : contentUrl(base.image_path)}
+                src={/^(series|global)\//.test(base.image_path) ? globalContentUrl(base.image_path) : contentUrl(base.image_path)}
                 alt={base.name}
               />
               <small>base</small>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { castByShow } from '../../data/cast'
 import { parseWorldKit, serializeWorldKit, type WKDoc, type WKSection } from '../../lib/worldkit-md'
-import { actionUrl, activeSession, apiUrl, contentUrl, globalContentUrl, postAction } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, postAction } from '../../lib/api'
 import { RefImagePanel } from './RefImagePanel'
 import GlobalCharacterPicker from './GlobalCharacterPicker'
 import { WorldKitShareMenu } from './WorldKitShareMenu'
@@ -84,6 +84,39 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // the library and the engine resolves it. Keep the resolved text (and the
   // content-root image path) so the panel can show what the row actually means.
   const [globalMeta, setGlobalMeta] = useState<Record<string, { notes: string; image: string }>>({})
+  // Which kit item (if any) is the session's STYLE ANCHOR — its image rides
+  // into every generation as a reference (session.json style_reference).
+  const [anchorRef, setAnchorRef] = useState('')
+  const [anchorBusy, setAnchorBusy] = useState(false)
+  useEffect(() => {
+    fetch(fileUrl('session.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        try {
+          setAnchorRef(String(JSON.parse(out?.data?.content || '{}')?.style_reference_ref || ''))
+        } catch { /* leave unset */ }
+      })
+      .catch(() => {})
+  }, [])
+  const setStyleAnchor = async (ref: string) => {
+    setAnchorBusy(true)
+    try {
+      const r = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: activeSession(), tenant: 'local', action: 'set_style_anchor', ref }),
+      })
+      const out = await r.json().catch(() => null)
+      if (out?.ok) {
+        setAnchorRef(ref)
+        onToast?.(ref ? `“${ref}” is now the style anchor — its image rides into every generation.` : 'Style anchor cleared.')
+      } else {
+        onToast?.(`Engine: ${out?.error || 'could not set the style anchor.'}`)
+      }
+    } finally {
+      setAnchorBusy(false)
+    }
+  }
   useEffect(() => {
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
@@ -1095,6 +1128,27 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                             {!/^(voice|music|ambience|sfx|audio)\b/i.test(kindIdx >= 0 ? row[kindIdx] : '') && (
                               <button style={btn} onClick={() => setExpanded(null)}>Done</button>
                             )}
+                            {activeRefImages[row[refIdx]] ? (
+                              anchorRef === row[refIdx] ? (
+                                <button
+                                  style={{ ...btn, color: 'var(--accent-2)', borderColor: 'var(--accent)' }}
+                                  disabled={anchorBusy}
+                                  title="This image is the session's style anchor — attached to every generation. Click to clear."
+                                  onClick={() => void setStyleAnchor('')}
+                                >
+                                  ★ Style anchor
+                                </button>
+                              ) : (
+                                <button
+                                  style={btn}
+                                  disabled={anchorBusy}
+                                  title="Use this item's image as the session's look — attached to every generation as a reference"
+                                  onClick={() => void setStyleAnchor(row[refIdx])}
+                                >
+                                  {anchorBusy ? 'Uploading…' : '☆ Set as style anchor'}
+                                </button>
+                              )
+                            ) : null}
                             {confirmRemove === expanded ? (
                               <>
                                 <span style={{ color: 'var(--amber)', fontSize: 12 }}>
