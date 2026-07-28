@@ -142,6 +142,19 @@ export function WorldKitShareMenu({
   }
 
   const currentKind = scopeKind(scope)
+  const shareName = (share: Share) => {
+    if (share.target_type === 'series') {
+      const match = series.find((item) => item.id === share.target_id)
+      return match?.name || displayId(share.target_id)
+    }
+    if (share.target_type === 'template') {
+      const match = templates.find((item) => item.id === share.target_id)
+      return match?.name || displayId(share.target_id)
+    }
+    return displayId(share.target_id)
+  }
+  const shareLabel = (share: Share) =>
+    `${share.target_type === 'project' ? 'Project' : share.target_type === 'series' ? 'Series' : 'Template'} · ${shareName(share)}`
   const defaultLabel =
     currentKind === 'series'
       ? `Series · ${context.series ? displayId(context.series) : 'No series'}`
@@ -149,6 +162,12 @@ export function WorldKitShareMenu({
         ? `Template · ${context.template ? displayId(context.template) : 'No template'}`
         : 'This project only'
   const shareCount = context.shares.length
+  const triggerLabel =
+    shareCount === 1
+      ? `${defaultLabel} + ${shareName(context.shares[0])}`
+      : shareCount > 1
+        ? `${defaultLabel} +${shareCount}`
+        : defaultLabel
 
   const chooseScope = async (nextScope: string) => {
     if (busy) return
@@ -353,10 +372,23 @@ export function WorldKitShareMenu({
                 <small>Default template · every project using it</small>
               </button>
             ) : null}
+            {context.shares.length ? (
+              <>
+                <span className="series-menu-empty">ALSO SHARED WITH</span>
+                {context.shares.map((share) =>
+                  targetButton(
+                    share.target_type,
+                    share.target_id,
+                    shareLabel(share),
+                    'Additional access · click to remove',
+                  ),
+                )}
+              </>
+            ) : null}
             <span className="vp-menu-div" />
             <button type="button" onClick={() => setMode('targets')}>
               Share with another project, series, or template
-              <small>{shareCount ? `${shareCount} additional ${shareCount === 1 ? 'share' : 'shares'}` : 'No additional sharing yet'}</small>
+              <small>{shareCount ? 'Add or change destinations' : 'No additional sharing yet'}</small>
             </button>
             <button type="button" onClick={() => { setMode('series'); setName('') }}>
               Create new series and share
@@ -484,7 +516,7 @@ export function WorldKitShareMenu({
         onClick={toggle}
         style={{ whiteSpace: 'nowrap', maxWidth: 290, overflow: 'hidden', textOverflow: 'ellipsis' }}
       >
-        {defaultLabel}{shareCount ? ` · +${shareCount}` : ''} ▾
+        {triggerLabel} ▾
       </button>
       {menu ? createPortal(menu, document.body) : null}
     </span>
