@@ -191,7 +191,7 @@ task is unowned until someone claims it on the board.
   - plain: Episodes look like a show
   - why: Series pages render like a streaming shelf instead of blank text cards.
 
-- [ ] **[CODEX]** Direct-to-R2 upload path for publishes to bypass the ~100 MB Pages request cap
+- [x] **[CODEX]** Direct-to-R2 upload path for publishes to bypass the ~100 MB Pages request cap
   - plain: Big episodes upload fine
   - why: A full-length episode at reasonable bitrate does not fit through the current API.
 

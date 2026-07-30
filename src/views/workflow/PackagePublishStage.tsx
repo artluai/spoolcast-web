@@ -69,6 +69,9 @@ type SeriesDefaults = {
   description?: string
 }
 
+const MULTIPART_THRESHOLD = 90 * 1024 * 1024
+const MULTIPART_PART_SIZE = 8 * 1024 * 1024
+
 const videoShape = (blob: Blob) => new Promise<{ duration: number; width: number; height: number }>((resolve, reject) => {
   const video = document.createElement('video')
   const objectUrl = URL.createObjectURL(blob)
@@ -96,6 +99,74 @@ const videoShape = (blob: Blob) => new Promise<{ duration: number; width: number
   }
   video.src = objectUrl
 })
+
+const publishMetadata = (
+  poster: Blob,
+  shape: { duration: number; width: number; height: number },
+) => {
+  const form = new FormData()
+  form.append('poster', poster, `${activeSession()}-thumbnail.png`)
+  form.append('duration_s', String(shape.duration))
+  form.append('width', String(shape.width))
+  form.append('height', String(shape.height))
+  return form
+}
+
+const responseJson = async (response: Response) => {
+  const out = await response.json().catch(() => null)
+  if (!response.ok || !out?.ok) {
+    throw new Error(out?.data?.error || 'The site did not accept the upload.')
+  }
+  return out
+}
+
+const publishLargeVideo = async (
+  video: Blob,
+  poster: Blob,
+  shape: { duration: number; width: number; height: number },
+  query: URLSearchParams,
+) => {
+  const multipartQuery = new URLSearchParams(query)
+  multipartQuery.set('content_type', video.type || 'video/mp4')
+  let uploadId = ''
+  try {
+    const started = await responseJson(await fetch(
+      `/api/publish/video/multipart/start?${multipartQuery}`,
+      { method: 'POST' },
+    ))
+    uploadId = started.data.upload_id
+    const parts: Array<{ partNumber: number; etag: string }> = []
+    for (let offset = 0, partNumber = 1; offset < video.size; offset += MULTIPART_PART_SIZE, partNumber += 1) {
+      const partQuery = new URLSearchParams(multipartQuery)
+      partQuery.set('upload_id', uploadId)
+      partQuery.set('part_number', String(partNumber))
+      const uploaded = await responseJson(await fetch(
+        `/api/publish/video/multipart/part?${partQuery}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: video.slice(offset, offset + MULTIPART_PART_SIZE),
+        },
+      ))
+      parts.push(uploaded.data)
+    }
+    const completeQuery = new URLSearchParams(multipartQuery)
+    completeQuery.set('upload_id', uploadId)
+    const form = publishMetadata(poster, shape)
+    form.append('parts', JSON.stringify(parts))
+    return await responseJson(await fetch(
+      `/api/publish/video/multipart/complete?${completeQuery}`,
+      { method: 'POST', body: form },
+    ))
+  } catch (error) {
+    if (uploadId) {
+      const abortQuery = new URLSearchParams(multipartQuery)
+      abortQuery.set('upload_id', uploadId)
+      await fetch(`/api/publish/video/multipart/abort?${abortQuery}`, { method: 'POST' }).catch(() => null)
+    }
+    throw error
+  }
+}
 
 export function PackagePublishStage({
   stageId,
@@ -346,17 +417,17 @@ export function PackagePublishStage({
           ...(seriesDescription ? { series_description: seriesDescription } : {}),
         } : {}),
       })
-      const form = new FormData()
-      form.append('video', video, `${activeSession()}-1.0x.mp4`)
-      form.append('poster', poster, `${activeSession()}-thumbnail.png`)
-      form.append('duration_s', String(shape.duration))
-      form.append('width', String(shape.width))
-      form.append('height', String(shape.height))
-      const out = await fetch(`/api/publish/video?${query}`, {
-        method: 'POST',
-        body: form,
-      }).then((r) => r.json()).catch(() => null)
-      if (!out?.ok) throw new Error(out?.data?.error || 'The site did not accept the upload.')
+      let out
+      if (video.size > MULTIPART_THRESHOLD) {
+        out = await publishLargeVideo(video, poster, shape, query)
+      } else {
+        const form = publishMetadata(poster, shape)
+        form.append('video', video, `${activeSession()}-1.0x.mp4`)
+        out = await responseJson(await fetch(`/api/publish/video?${query}`, {
+          method: 'POST',
+          body: form,
+        }))
+      }
       setPubState('done')
       setPubNote(`Live at ${out.data.url}${out.data.public ? '' : ' (private — flip it public any time)'}`)
       onToast('Published to your Spoolcast page.')
