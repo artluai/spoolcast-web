@@ -1300,9 +1300,90 @@ function Step01DoneRow({
   )
 }
 
+type SetupSuggestion = {
+  target_length_s?: number
+  aspect_ratio?: string
+  shot_medium?: string
+}
+
+function useSetupAISuggestion(stepId: string) {
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
+  const storeSetS1 = useWorkflowStore((s) => s.setS1)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const [error, setError] = useState('')
+
+  const suggest = useCallback(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setError('')
+    try {
+      const response = await fetch(actionUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: activeSession(),
+          tenant: TENANT,
+          action: 'suggest_setup',
+          allow_cost: true,
+        }),
+      })
+      const out = await response.json().catch(() => null)
+      if (!response.ok || out?.ok === false) {
+        setError(out?.message || out?.error || 'Could not suggest the project setup.')
+        return
+      }
+      const suggestion = (out?.data || {}) as SetupSuggestion
+      storeSetS1(stepId, (current) => {
+        const output =
+          suggestion.aspect_ratio === '9:16'
+            ? '916'
+            : suggestion.aspect_ratio === '16:9'
+              ? '169'
+              : suggestion.aspect_ratio === '1:1'
+                ? '11'
+                : current.output
+        const length = Number(suggestion.target_length_s)
+        const medium = ['video', 'image', 'mix'].includes(String(suggestion.shot_medium))
+          ? String(suggestion.shot_medium)
+          : current.medium
+        return {
+          ...current,
+          output,
+          length: Number.isFinite(length) && length > 0 ? length : current.length,
+          medium,
+          editing: '',
+        }
+      })
+    } catch {
+      setError('Could not reach the engine.')
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }, [stepId, storeSetS1])
+
+  useEffect(() => {
+    registerStepAIAction(stepId, {
+      stageId: stepId,
+      label: 'Complete step with AI',
+      busy,
+      busyLabel: 'Choosing project settings…',
+      usesTextModel: false,
+      acceptsInstructions: false,
+      run: suggest,
+    })
+    return () => registerStepAIAction(stepId, null)
+  }, [busy, registerStepAIAction, stepId, suggest])
+
+  return error
+}
+
 export function Step01Flow({ stepId }: { stepId: string }) {
   const s1 = useWorkflowStore((s) => s.s1)
   const storeSetS1 = useWorkflowStore((s) => s.setS1)
+  const setupAIError = useSetupAISuggestion(stepId)
   const setS1: React.Dispatch<React.SetStateAction<S1>> = (updater) => storeSetS1(stepId, updater)
   const active =
     s1.editing ||
@@ -1496,6 +1577,7 @@ export function Step01Flow({ stepId }: { stepId: string }) {
           />
         </div>
       ) : null}
+      {setupAIError ? <p className="voice-error">Engine: {setupAIError}</p> : null}
     </div>
   )
 }
@@ -3289,6 +3371,7 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
 // from session.json, voice + series rules from the engine's rulebooks) and
 // expand in place for detail. Per-episode fields (length) sit below.
 export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; showName: string; onOpenCast: () => void }) {
+  const setupAIError = useSetupAISuggestion(stepId)
   const [open, setOpen] = useState<string | null>(null)
   const [styleId, setStyleId] = useState('')
   const [series, setSeries] = useState('')
@@ -3461,6 +3544,7 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       ))}
       <div className="eyebrow" style={{ margin: '22px 0 2px' }}>This episode</div>
       <EpisodeSettings stepId={stepId} />
+      {setupAIError ? <p className="voice-error">Engine: {setupAIError}</p> : null}
     </div>
   )
 }

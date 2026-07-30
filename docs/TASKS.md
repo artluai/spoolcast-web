@@ -87,7 +87,7 @@ task is unowned until someone claims it on the board.
   - plain: Rules fix the draft, not block it
   - why: Step 04 stops erroring out; a compliant draft appears without a human retry.
 
-- [ ] **[CODEX]** Fix the Project setup step so "Complete step with AI" is clickable
+- [x] **[CODEX]** Fix the Project setup step so "Complete step with AI" is clickable
   - plain: Un-stick the setup button
   - why: Step 03 can be AI-completed like every other step.
 
