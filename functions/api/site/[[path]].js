@@ -6,6 +6,7 @@
 //   GET /api/site/s/:slug     → { series, creator, videos: [...] }
 //   GET /api/site/v/:slug     → { video, creator, series, siblings: [...] }
 //   PATCH /api/site/v/:slug   → toggle the owner's video public/private
+//   PATCH /api/site/u/:handle → update the owner's bio and avatar URL
 //   GET /api/site/templates   → { templates: [...] } (live global templates)
 
 import { sessionUser } from '../_auth.js'
@@ -171,12 +172,35 @@ export async function onRequestGet({ env, request, params }) {
 export async function onRequestPatch({ env, request, params }) {
   const parts = Array.isArray(params.path) ? params.path : [params.path]
   const [route, arg] = parts
-  if (route !== 'v' || !arg) return json({ error: 'unknown route' }, 404, true)
+  if (!arg || !['u', 'v'].includes(route)) return json({ error: 'unknown route' }, 404, true)
 
   const user = await sessionUser(env, request)
   if (!user) return json({ error: 'Sign in first.' }, 401, true)
   const creator = await env.DB.prepare(`SELECT * FROM creators WHERE user_id = ?`).bind(user.id).first()
   if (!creator) return json({ error: 'Creator profile not found.' }, 404, true)
+
+  if (route === 'u') {
+    if (creator.handle !== arg) {
+      return json({ error: 'You can only edit your own profile.' }, 403, true)
+    }
+    const body = await request.json().catch(() => ({}))
+    const bio = String(body.bio ?? '').trim().slice(0, 500)
+    const avatarUrl = String(body.avatar_url ?? '').trim().slice(0, 2000)
+    if (avatarUrl) {
+      try {
+        const url = new URL(avatarUrl)
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error('unsupported protocol')
+      } catch {
+        return json({ error: 'Avatar must be a valid http:// or https:// image URL.' }, 400, true)
+      }
+    }
+    await env.DB.prepare(`UPDATE creators SET bio = ?, avatar_url = ? WHERE id = ?`)
+      .bind(bio, avatarUrl, creator.id)
+      .run()
+    const updated = await env.DB.prepare(`SELECT * FROM creators WHERE id = ?`).bind(creator.id).first()
+    return json({ creator: publicCreator(updated) }, 200, true)
+  }
+
   const video = await env.DB.prepare(`SELECT * FROM videos WHERE slug = ?`).bind(arg).first()
   if (!video) return json({ error: 'Video not found.' }, 404, true)
   if (video.creator_id !== creator.id) {

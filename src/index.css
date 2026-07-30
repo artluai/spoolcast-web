@@ -3267,7 +3267,21 @@ body.chat-pinned { padding-right: 380px; }
 .site-card-manage { flex: 0 0 232px; min-width: 0; }
 .site-card-manage > .site-card { display: block; }
 .site-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px 0; }
-.site-owner-note { color: var(--ink-2); font-size: 12.5px; margin: 10px 0 0; }
+.site-owner-note { flex-basis: 100%; color: var(--ink-2); font-size: 12.5px; margin: 10px 0 0; }
+.site-profile-hero { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.site-profile-avatar { position: relative; flex: 0 0 72px; width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--line-2); border-radius: 50%; background: var(--bg-3); color: var(--ink-2); font-size: 24px; font-weight: 600; }
+.site-profile-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.site-profile-copy { flex: 1 1 280px; min-width: 0; }
+.site-profile-edit-btn { margin-top: 12px; }
+.site-profile-form { flex: 1 0 100%; display: grid; gap: 12px; max-width: 640px; padding-top: 6px; }
+.site-profile-form label { display: grid; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.site-profile-form input, .site-profile-form textarea { width: 100%; box-sizing: border-box; background: var(--bg-2); border: 1px solid var(--line-2); color: var(--ink); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; resize: vertical; }
+.site-profile-form input:focus, .site-profile-form textarea:focus { outline: none; border-color: var(--accent); }
+.site-profile-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.site-profile-form-actions button[type="submit"] { border-color: var(--accent); color: var(--ink); }
+@media (max-width: 560px) {
+  .site-profile-avatar { flex-basis: 56px; width: 56px; height: 56px; font-size: 20px; }
+}
 .admin-cast .site-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
 .admin-cast .site-card img { aspect-ratio: 3 / 4; }
 

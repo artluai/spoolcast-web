@@ -249,6 +249,10 @@ function SiteProfile() {
   const [loaded, setLoaded] = useState(false)
   const [changingId, setChangingId] = useState<number | null>(null)
   const [note, setNote] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [draftBio, setDraftBio] = useState('')
+  const [draftAvatar, setDraftAvatar] = useState('')
   useEffect(() => {
     void getSite<{
       creator: Creator
@@ -257,10 +261,32 @@ function SiteProfile() {
       owner: boolean
     }>(`u/${handle}`).then((d) => {
       setData(d)
+      setDraftBio(d?.creator.bio || '')
+      setDraftAvatar(d?.creator.avatar_url || '')
       setLoaded(true)
     })
   }, [handle])
   if (!data) return loaded ? <p className="site-empty">No such creator.</p> : null
+  const saveProfile = async () => {
+    setSavingProfile(true)
+    setNote('')
+    const response = await fetch(`/api/site/u/${data.creator.handle}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bio: draftBio, avatar_url: draftAvatar }),
+    }).catch(() => null)
+    const out = await response?.json().catch(() => null)
+    if (!response?.ok || !out?.data?.creator) {
+      setNote(out?.data?.error || 'Could not save your profile.')
+    } else {
+      setData((current) => current && { ...current, creator: out.data.creator })
+      setDraftBio(out.data.creator.bio || '')
+      setDraftAvatar(out.data.creator.avatar_url || '')
+      setEditing(false)
+      setNote('Profile saved.')
+    }
+    setSavingProfile(false)
+  }
   const setVisibility = async (video: Video, isPublic: boolean) => {
     setChangingId(video.id)
     setNote('')
@@ -284,13 +310,73 @@ function SiteProfile() {
   const loose = data.videos.filter((v) => !data.series.some((s) => s.id === v.series_id))
   return (
     <>
-      <section className="site-hero">
-        <h1>{data.creator.name}</h1>
-        <p className="site-hero-by">
-          @{data.creator.handle}
-          {data.owner ? ' · Your dashboard' : ''}
-        </p>
-        {data.creator.bio && <p className="site-hero-desc">{data.creator.bio}</p>}
+      <section className="site-hero site-profile-hero">
+        <div className="site-profile-avatar" aria-hidden="true">
+          <span>{data.creator.name.slice(0, 1).toUpperCase()}</span>
+          {data.creator.avatar_url && (
+            <img
+              src={data.creator.avatar_url}
+              alt=""
+              onError={(event) => { event.currentTarget.hidden = true }}
+            />
+          )}
+        </div>
+        <div className="site-profile-copy">
+          <h1>{data.creator.name}</h1>
+          <p className="site-hero-by">
+            @{data.creator.handle}
+            {data.owner ? ' · Your dashboard' : ''}
+          </p>
+          {data.creator.bio && <p className="site-hero-desc">{data.creator.bio}</p>}
+          {data.owner && !editing && (
+            <button type="button" className="admin-btn site-profile-edit-btn" onClick={() => setEditing(true)}>
+              Edit profile
+            </button>
+          )}
+        </div>
+        {data.owner && editing && (
+          <form
+            className="site-profile-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveProfile()
+            }}
+          >
+            <label>
+              <span>Bio</span>
+              <textarea
+                value={draftBio}
+                maxLength={500}
+                rows={4}
+                placeholder="Tell viewers about your work."
+                onChange={(event) => setDraftBio(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Avatar image URL</span>
+              <input
+                type="url"
+                value={draftAvatar}
+                maxLength={2000}
+                placeholder="https://…"
+                onChange={(event) => setDraftAvatar(event.target.value)}
+              />
+            </label>
+            <div className="site-profile-form-actions">
+              <button type="button" className="admin-btn" disabled={savingProfile} onClick={() => {
+                setDraftBio(data.creator.bio || '')
+                setDraftAvatar(data.creator.avatar_url || '')
+                setEditing(false)
+                setNote('')
+              }}>
+                Cancel
+              </button>
+              <button type="submit" className="admin-btn" disabled={savingProfile}>
+                {savingProfile ? 'Saving…' : 'Save profile'}
+              </button>
+            </div>
+          </form>
+        )}
         {note && <p className="site-owner-note" role="status">{note}</p>}
       </section>
       {data.series.map((s) => {

@@ -206,7 +206,7 @@ task is unowned until someone claims it on the board.
   - plain: Private unless you say so
   - why: Ad makers do not accidentally publish client work to their public profile.
 
-- [ ] **[CODEX]** Creator profile editing: bio and avatar; the columns exist and nothing writes
+- [x] **[CODEX]** Creator profile editing: bio and avatar; the columns exist and nothing writes
   them
   - plain: Creators own their page
   - why: The public profile looks like a creator's page, not an empty stub.
