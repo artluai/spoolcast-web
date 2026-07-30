@@ -201,7 +201,7 @@ task is unowned until someone claims it on the board.
   - plain: Manage your own videos
   - why: The private-use half of the product (ads, client work) becomes actually usable.
 
-- [ ] **[CODEX]** Private-by-default publishing for non-show work; the endpoint defaults private
+- [x] **[CODEX]** Private-by-default publishing for non-show work; the endpoint defaults private
   but the editor button currently flips it public
   - plain: Private unless you say so
   - why: Ad makers do not accidentally publish client work to their public profile.

@@ -252,11 +252,11 @@ export function PackagePublishStage({
   }
 
   // PUBLISH TO SPOOLCAST: push the finished render to the signed-in account's
-  // public page via the site API (/api/publish/video). Works when the editor
+  // creator page via the site API (/api/publish/video). Works when the editor
   // is served from the site origin (pages dev / production); under plain vite
   // the API isn't there and the button reports that instead of pretending.
   const [pubState, setPubState] = useState<'idle' | 'working' | 'done'>('idle')
-  const [pubPublic, setPubPublic] = useState(true)
+  const [pubPublic, setPubPublic] = useState(false)
   const [pubNote, setPubNote] = useState('')
   const publishToSite = async () => {
     if (!title.trim()) {
