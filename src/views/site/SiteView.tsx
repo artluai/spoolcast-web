@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import AdminView from './AdminView'
 
-// The PUBLIC viewer site (display layer). Own chrome — none of the editor
-// header belongs here. Data comes from /api/site/* (Pages Functions + D1),
-// which only ever returns public rows; media files stream from the
-// spoolcast-videos R2 public bucket.
+// The viewer site (display layer). Own chrome — none of the editor header
+// belongs here. Public visitors see public rows; a signed-in creator can also
+// manage and watch private videos on their own profile.
 
 type Creator = { id: number; handle: string; name: string; bio: string; avatar_url: string }
 type Series = {
@@ -31,6 +30,7 @@ type Video = {
   creator_name?: string
   series_title?: string
   series_slug?: string
+  public: number
 }
 
 const getSite = async <T,>(path: string): Promise<T | null> => {
@@ -92,7 +92,11 @@ function SiteHeader() {
         <Link className="site-create" to="/projects">+ Create</Link>
         {user ? (
           <>
-            <span className="site-auth-who">{user.handle ? `@${user.handle}` : user.email}</span>
+            {user.handle ? (
+              <Link className="site-auth-who" to={`/u/${user.handle}`}>@{user.handle}</Link>
+            ) : (
+              <span className="site-auth-who">{user.email}</span>
+            )}
             <button type="button" onClick={() => void logout()}>Sign out</button>
           </>
         ) : open ? (
@@ -124,8 +128,18 @@ function SiteHeader() {
   )
 }
 
-function VideoCard({ v }: { v: Video }) {
-  return (
+function VideoCard({
+  v,
+  manage = false,
+  changing = false,
+  onVisibilityChange,
+}: {
+  v: Video
+  manage?: boolean
+  changing?: boolean
+  onVisibilityChange?: (video: Video, isPublic: boolean) => void
+}) {
+  const card = (
     <Link to={`/watch/v/${v.slug}`} className="site-card">
       {v.poster_url ? (
         <img src={v.poster_url} alt={v.title} loading="lazy" />
@@ -139,6 +153,23 @@ function VideoCard({ v }: { v: Video }) {
         <span>{[v.creator_name, fmtDuration(v.duration_s)].filter(Boolean).join(' · ')}</span>
       </div>
     </Link>
+  )
+  if (!manage) return card
+  return (
+    <div className="site-card-manage">
+      {card}
+      <div className="site-card-actions">
+        <span className={`admin-badge ${v.public ? 'live' : ''}`}>{v.public ? 'PUBLIC' : 'PRIVATE'}</span>
+        <button
+          type="button"
+          className="admin-btn"
+          disabled={changing}
+          onClick={() => onVisibilityChange?.(v, !v.public)}
+        >
+          {changing ? 'Saving…' : v.public ? 'Make private' : 'Make public'}
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -209,22 +240,58 @@ function SiteSeries() {
 
 function SiteProfile() {
   const { handle } = useParams()
-  const [data, setData] = useState<{ creator: Creator; series: Series[]; videos: Video[] } | null>(null)
+  const [data, setData] = useState<{
+    creator: Creator
+    series: Series[]
+    videos: Video[]
+    owner: boolean
+  } | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [changingId, setChangingId] = useState<number | null>(null)
+  const [note, setNote] = useState('')
   useEffect(() => {
-    void getSite<{ creator: Creator; series: Series[]; videos: Video[] }>(`u/${handle}`).then((d) => {
+    void getSite<{
+      creator: Creator
+      series: Series[]
+      videos: Video[]
+      owner: boolean
+    }>(`u/${handle}`).then((d) => {
       setData(d)
       setLoaded(true)
     })
   }, [handle])
   if (!data) return loaded ? <p className="site-empty">No such creator.</p> : null
+  const setVisibility = async (video: Video, isPublic: boolean) => {
+    setChangingId(video.id)
+    setNote('')
+    const response = await fetch(`/api/site/v/${video.slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public: isPublic }),
+    }).catch(() => null)
+    const out = await response?.json().catch(() => null)
+    if (!response?.ok || !out?.data?.video) {
+      setNote(out?.data?.error || 'Could not change visibility.')
+    } else {
+      setData((current) => current && {
+        ...current,
+        videos: current.videos.map((v) => (v.id === video.id ? out.data.video : v)),
+      })
+      setNote(isPublic ? 'Video is now public.' : 'Video is now private.')
+    }
+    setChangingId(null)
+  }
   const loose = data.videos.filter((v) => !data.series.some((s) => s.id === v.series_id))
   return (
     <>
       <section className="site-hero">
         <h1>{data.creator.name}</h1>
-        <p className="site-hero-by">@{data.creator.handle}</p>
+        <p className="site-hero-by">
+          @{data.creator.handle}
+          {data.owner ? ' · Your dashboard' : ''}
+        </p>
         {data.creator.bio && <p className="site-hero-desc">{data.creator.bio}</p>}
+        {note && <p className="site-owner-note" role="status">{note}</p>}
       </section>
       {data.series.map((s) => {
         const vids = data.videos.filter((v) => v.series_id === s.id)
@@ -233,7 +300,15 @@ function SiteProfile() {
           <section className="site-row" key={s.id}>
             <h2><Link to={`/watch/s/${s.slug}`}>{s.title}</Link></h2>
             <div className="site-strip">
-              {vids.map((v) => <VideoCard key={v.id} v={v} />)}
+              {vids.map((v) => (
+                <VideoCard
+                  key={v.id}
+                  v={v}
+                  manage={data.owner}
+                  changing={changingId === v.id}
+                  onVisibilityChange={setVisibility}
+                />
+              ))}
             </div>
           </section>
         )
@@ -241,7 +316,17 @@ function SiteProfile() {
       {loose.length > 0 && (
         <section className="site-row">
           <h2>Videos</h2>
-          <div className="site-strip">{loose.map((v) => <VideoCard key={v.id} v={v} />)}</div>
+          <div className="site-strip">
+            {loose.map((v) => (
+              <VideoCard
+                key={v.id}
+                v={v}
+                manage={data.owner}
+                changing={changingId === v.id}
+                onVisibilityChange={setVisibility}
+              />
+            ))}
+          </div>
         </section>
       )}
     </>
@@ -255,10 +340,17 @@ function SitePlayer() {
     creator: Creator
     series: Series | null
     siblings: Video[]
+    owner: boolean
   } | null>(null)
   const [loaded, setLoaded] = useState(false)
   useEffect(() => {
-    void getSite<{ video: Video; creator: Creator; series: Series | null; siblings: Video[] }>(
+    void getSite<{
+      video: Video
+      creator: Creator
+      series: Series | null
+      siblings: Video[]
+      owner: boolean
+    }>(
       `v/${slug}`,
     ).then((d) => {
       setData(d)
@@ -276,6 +368,7 @@ function SitePlayer() {
         <p className="site-hero-by">
           <Link to={`/u/${creator.handle}`}>{creator.name}</Link>
           {series && <>{' · '}<Link to={`/watch/s/${series.slug}`}>{series.title}</Link></>}
+          {data.owner && !video.public ? ' · Private' : ''}
         </p>
         {video.description && <p className="site-hero-desc">{video.description}</p>}
       </div>

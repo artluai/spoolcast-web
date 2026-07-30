@@ -1,21 +1,30 @@
 // Viewer-site API (Cloudflare Pages Functions + D1).
-// Read-only catalog endpoints; only rows with public=1 ever leave this file.
+// Public visitors only receive public rows. A signed-in creator can also read
+// and manage the private rows on their own page.
 //   GET /api/site/home        → { latest: [...], rows: [{ series, videos }] }
 //   GET /api/site/u/:handle   → { creator, series: [...], videos: [...] }
 //   GET /api/site/s/:slug     → { series, creator, videos: [...] }
 //   GET /api/site/v/:slug     → { video, creator, series, siblings: [...] }
+//   PATCH /api/site/v/:slug   → toggle the owner's video public/private
 //   GET /api/site/templates   → { templates: [...] } (live global templates)
+
+import { sessionUser } from '../_auth.js'
 
 const MEDIA_BASE = 'https://pub-6903b93eacaf46b08e7b4644251ab085.r2.dev'
 // Global asset library bucket (spoolcast-assets) — same base the character
 // library's image_url values use.
 const ASSETS_BASE = 'https://pub-275d3988223b4b53b851fe856882cec0.r2.dev'
 
-const json = (data, status = 200) =>
+const json = (data, status = 200, privateResponse = false) =>
   new Response(JSON.stringify({ ok: status < 400, data }), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': privateResponse ? 'private, no-store' : 'public, max-age=60',
+    },
   })
+
+const publicCreator = ({ user_id: _userId, ...creator }) => creator
 
 const withUrls = (v) =>
   v && {
@@ -24,7 +33,7 @@ const withUrls = (v) =>
     poster_url: v.poster_key ? `${MEDIA_BASE}/${v.poster_key}` : '',
   }
 
-export async function onRequestGet({ env, params }) {
+export async function onRequestGet({ env, request, params }) {
   const parts = Array.isArray(params.path) ? params.path : [params.path]
   const [route, arg] = parts
   const db = env.DB
@@ -67,43 +76,56 @@ export async function onRequestGet({ env, params }) {
   if (route === 'u' && arg) {
     const creator = await db.prepare(`SELECT * FROM creators WHERE handle = ?`).bind(arg).first()
     if (!creator) return json({ error: 'not found' }, 404)
+    const user = await sessionUser(env, request)
+    const owner = Boolean(user && creator.user_id === user.id)
     const series = (
       await db
-        .prepare(`SELECT * FROM series WHERE creator_id = ? AND public = 1 ORDER BY created_at DESC`)
+        .prepare(
+          `SELECT * FROM series WHERE creator_id = ?${owner ? '' : ' AND public = 1'} ORDER BY created_at DESC`,
+        )
         .bind(creator.id)
         .all()
     ).results
     const videos = (
       await db
         .prepare(
-          `SELECT * FROM videos WHERE creator_id = ? AND public = 1 ORDER BY published_at DESC LIMIT 60`,
+          `SELECT * FROM videos WHERE creator_id = ?${owner ? '' : ' AND public = 1'} ORDER BY published_at DESC LIMIT 60`,
         )
         .bind(creator.id)
         .all()
     ).results.map(withUrls)
-    return json({ creator, series, videos })
+    return json({ creator: publicCreator(creator), series, videos, owner }, 200, Boolean(user))
   }
 
   if (route === 's' && arg) {
-    const series = await db
-      .prepare(`SELECT * FROM series WHERE slug = ? AND public = 1`)
-      .bind(arg)
-      .first()
+    const series = await db.prepare(`SELECT * FROM series WHERE slug = ?`).bind(arg).first()
     if (!series) return json({ error: 'not found' }, 404)
     const creator = await db.prepare(`SELECT * FROM creators WHERE id = ?`).bind(series.creator_id).first()
+    const user = await sessionUser(env, request)
+    const owner = Boolean(user && creator.user_id === user.id)
+    if (!series.public && !owner) return json({ error: 'not found' }, 404, Boolean(user))
     const videos = (
       await db
-        .prepare(`SELECT * FROM videos WHERE series_id = ? AND public = 1 ORDER BY episode, published_at`)
+        .prepare(
+          `SELECT * FROM videos WHERE series_id = ?${owner ? '' : ' AND public = 1'} ORDER BY episode, published_at`,
+        )
         .bind(series.id)
         .all()
     ).results.map(withUrls)
-    return json({ series, creator, videos })
+    return json(
+      { series, creator: publicCreator(creator), videos, owner },
+      200,
+      Boolean(user),
+    )
   }
 
   if (route === 'v' && arg) {
-    const video = await db.prepare(`SELECT * FROM videos WHERE slug = ? AND public = 1`).bind(arg).first()
+    const video = await db.prepare(`SELECT * FROM videos WHERE slug = ?`).bind(arg).first()
     if (!video) return json({ error: 'not found' }, 404)
     const creator = await db.prepare(`SELECT * FROM creators WHERE id = ?`).bind(video.creator_id).first()
+    const user = await sessionUser(env, request)
+    const owner = Boolean(user && creator.user_id === user.id)
+    if (!video.public && !owner) return json({ error: 'not found' }, 404, Boolean(user))
     const series = video.series_id
       ? await db.prepare(`SELECT * FROM series WHERE id = ?`).bind(video.series_id).first()
       : null
@@ -111,13 +133,17 @@ export async function onRequestGet({ env, params }) {
       ? (
           await db
             .prepare(
-              `SELECT * FROM videos WHERE series_id = ? AND public = 1 ORDER BY episode, published_at`,
+              `SELECT * FROM videos WHERE series_id = ?${owner ? '' : ' AND public = 1'} ORDER BY episode, published_at`,
             )
             .bind(video.series_id)
             .all()
         ).results.map(withUrls)
       : []
-    return json({ video: withUrls(video), creator, series, siblings })
+    return json(
+      { video: withUrls(video), creator: publicCreator(creator), series, siblings, owner },
+      200,
+      Boolean(user),
+    )
   }
 
   if (route === 'templates') {
@@ -140,4 +166,42 @@ export async function onRequestGet({ env, params }) {
   }
 
   return json({ error: 'unknown route' }, 404)
+}
+
+export async function onRequestPatch({ env, request, params }) {
+  const parts = Array.isArray(params.path) ? params.path : [params.path]
+  const [route, arg] = parts
+  if (route !== 'v' || !arg) return json({ error: 'unknown route' }, 404, true)
+
+  const user = await sessionUser(env, request)
+  if (!user) return json({ error: 'Sign in first.' }, 401, true)
+  const creator = await env.DB.prepare(`SELECT * FROM creators WHERE user_id = ?`).bind(user.id).first()
+  if (!creator) return json({ error: 'Creator profile not found.' }, 404, true)
+  const video = await env.DB.prepare(`SELECT * FROM videos WHERE slug = ?`).bind(arg).first()
+  if (!video) return json({ error: 'Video not found.' }, 404, true)
+  if (video.creator_id !== creator.id) {
+    return json({ error: 'You can only manage your own videos.' }, 403, true)
+  }
+
+  const body = await request.json().catch(() => ({}))
+  if (typeof body.public !== 'boolean') {
+    return json({ error: 'public must be true or false.' }, 400, true)
+  }
+  const isPublic = body.public ? 1 : 0
+  await env.DB.prepare(`UPDATE videos SET public = ? WHERE id = ?`).bind(isPublic, video.id).run()
+
+  // Keep the series shelf honest: it is public while at least one episode is
+  // public, and private again when its last public episode is hidden.
+  if (video.series_id) {
+    await env.DB.prepare(
+      `UPDATE series
+       SET public = CASE WHEN EXISTS (
+         SELECT 1 FROM videos WHERE series_id = ? AND public = 1
+       ) THEN 1 ELSE 0 END
+       WHERE id = ?`,
+    ).bind(video.series_id, video.series_id).run()
+  }
+
+  const updated = await env.DB.prepare(`SELECT * FROM videos WHERE id = ?`).bind(video.id).first()
+  return json({ video: withUrls(updated) }, 200, true)
 }

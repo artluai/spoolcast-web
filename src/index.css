@@ -3234,7 +3234,8 @@ body.chat-pinned { padding-right: 380px; }
 .site-auth { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .site-auth button { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
 .site-auth button:hover { border-color: var(--accent); color: var(--ink); }
-.site-auth-who { color: var(--ink-2); font-size: 12.5px; }
+.site-auth-who { color: var(--ink-2); font-size: 12.5px; text-decoration: none; }
+.site-auth a.site-auth-who:hover { color: var(--accent-2); }
 .site-auth-form { display: flex; align-items: center; gap: 8px; }
 .site-auth-form input { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--ink); border-radius: 6px; padding: 6px 10px; font-size: 12.5px; width: 210px; }
 .site-auth-form input:focus { outline: none; border-color: var(--accent); }
@@ -3263,6 +3264,10 @@ body.chat-pinned { padding-right: 380px; }
 .admin-btn { background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .admin-btn:hover { border-color: var(--accent); color: var(--ink); }
 .admin-btn:disabled { opacity: .5; cursor: default; }
+.site-card-manage { flex: 0 0 232px; min-width: 0; }
+.site-card-manage > .site-card { display: block; }
+.site-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px 0; }
+.site-owner-note { color: var(--ink-2); font-size: 12.5px; margin: 10px 0 0; }
 .admin-cast .site-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
 .admin-cast .site-card img { aspect-ratio: 3 / 4; }
 

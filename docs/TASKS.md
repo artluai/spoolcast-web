@@ -195,7 +195,7 @@ task is unowned until someone claims it on the board.
   - plain: Big episodes upload fine
   - why: A full-length episode at reasonable bitrate does not fit through the current API.
 
-- [ ] **[CODEX]** Owner dashboard: list my videos, toggle public/private after publish, and let
+- [x] **[CODEX]** Owner dashboard: list my videos, toggle public/private after publish, and let
   creators watch their own private videos; the site API filters public=1 unconditionally, so an
   ad maker cannot view their own ad
   - plain: Manage your own videos
