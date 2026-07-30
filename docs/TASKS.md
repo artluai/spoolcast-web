@@ -91,7 +91,7 @@ task is unowned until someone claims it on the board.
   - plain: Un-stick the setup button
   - why: Step 03 can be AI-completed like every other step.
 
-- [ ] **[CODEX]** Carry the world kit chosen at step 1 into Project setup instead of starting
+- [x] **[CODEX]** Carry the world kit chosen at step 1 into Project setup instead of starting
   blank
   - plain: Choices carry forward
   - why: Selecting a world kit once is enough; step 3 respects it.

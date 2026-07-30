@@ -3372,6 +3372,8 @@ export function EpisodeSettings({ stepId }: { stepId: string }) {
 // expand in place for detail. Per-episode fields (length) sit below.
 export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; showName: string; onOpenCast: () => void }) {
   const setupAIError = useSetupAISuggestion(stepId)
+  const ideaBrief = useWorkflowStore((s) => s.ideaBrief)
+  const selectedWorldKitNames = featuringNames(ideaBrief)
   const [open, setOpen] = useState<string | null>(null)
   const [styleId, setStyleId] = useState('')
   const [series, setSeries] = useState('')
@@ -3491,7 +3493,14 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
         </>
       ),
     },
-    { id: 'worldkit', label: 'World Kit', value: 'cast, places, props & references', jump: onOpenCast },
+    {
+      id: 'worldkit',
+      label: 'World Kit',
+      value: selectedWorldKitNames.length
+        ? selectedWorldKitNames.join(', ')
+        : 'No featured references selected in Step 1',
+      jump: onOpenCast,
+    },
   ]
 
   // No divider lines — quiet rows separated by whitespace only. Plain divs,
