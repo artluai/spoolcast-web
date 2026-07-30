@@ -101,7 +101,7 @@ task is unowned until someone claims it on the board.
   - plain: Thumbnails match the video
   - why: Thumbnails show the actual cast and props instead of ignoring the world kit.
 
-- [ ] **[CODEX]** Publish thumbnails: fix the crop so the thumbnail frames the actual image
+- [x] **[CODEX]** Publish thumbnails: fix the crop so the thumbnail frames the actual image
   - plain: Thumbnails stop cropping wrong
   - why: What you approve is what the platform shows.
 

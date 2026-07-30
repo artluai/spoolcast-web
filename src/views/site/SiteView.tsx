@@ -140,7 +140,7 @@ function VideoCard({
   onVisibilityChange?: (video: Video, isPublic: boolean) => void
 }) {
   const card = (
-    <Link to={`/watch/v/${v.slug}`} className="site-card">
+    <Link to={`/watch/v/${v.slug}`} className="site-card site-video-card">
       {v.poster_url ? (
         <img src={v.poster_url} alt={v.title} loading="lazy" />
       ) : (

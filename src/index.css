@@ -1421,12 +1421,11 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .pkg-gen-row + .pkg-fields, .pkg-gen-row + .pkg-thumbs { margin-top: 14px; }
 .pkg-fields { display: flex; flex-direction: column; gap: 16px; max-width: 560px; }
 .pkg-thumbs { max-width: 860px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-/* Thumbnail candidates are 16:9 — the tile IS the thumbnail's shape (no
-   letterboxing), cropped like a real feed card. */
+/* Let each approved thumbnail keep its real frame instead of forcing 16:9. */
 .thumb-pill.wide { min-height: 0; }
 .thumb-pill.wide .pill-body { padding: 7px; }
-.thumb-pill.wide .preview { aspect-ratio: 16 / 9; height: auto; background: #10141e; }
-.thumb-pill.wide .preview img { object-fit: cover; background: none; }
+.thumb-pill.wide .preview { aspect-ratio: auto; height: auto; background: #10141e; }
+.thumb-pill.wide .preview img { width: 100%; height: auto; object-fit: contain; background: #10141e; }
 /* Full-size candidate preview: image-first modal, actions below. */
 .pkg-thumb-modal { width: min(1080px, calc(100vw - 64px)); padding: 14px; }
 .pkg-thumb-modal img { display: block; width: 100%; border-radius: 8px; }
@@ -3205,6 +3204,7 @@ body.chat-pinned { padding-right: 380px; }
 .site-grid .site-card { flex: initial; }
 .site-card img, .site-card-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px;
   border: 1px solid var(--line); background: var(--bg-3); display: block; transition: border-color .14s, transform .14s; }
+.site-video-card img { aspect-ratio: auto; height: auto; object-fit: contain; background: #10141e; }
 .site-card:hover img, .site-card:hover .site-card-blank { border-color: var(--accent); transform: translateY(-2px); }
 .site-card-blank { display: flex; align-items: center; justify-content: center; padding: 12px;
   background: linear-gradient(145deg, var(--bg-3), var(--bg-4)); }
