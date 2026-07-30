@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pill } from '../../components/common/Pill'
-import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, urlOk } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, seriesUrl, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { RulesPanel } from './RulesPanel'
@@ -57,6 +57,45 @@ type ThumbState = {
   finalizing: number | null
   bust: number // cache-buster for candidate images after a re-generate
 }
+type PublishSessionConfig = {
+  series?: string
+  series_title?: string
+  series_description?: string
+  episode?: number | string
+  episode_number?: number | string
+}
+type SeriesDefaults = {
+  name?: string
+  description?: string
+}
+
+const videoShape = (blob: Blob) => new Promise<{ duration: number; width: number; height: number }>((resolve, reject) => {
+  const video = document.createElement('video')
+  const objectUrl = URL.createObjectURL(blob)
+  const cleanup = () => {
+    URL.revokeObjectURL(objectUrl)
+    video.removeAttribute('src')
+  }
+  video.preload = 'metadata'
+  video.onloadedmetadata = () => {
+    const shape = {
+      duration: video.duration,
+      width: video.videoWidth,
+      height: video.videoHeight,
+    }
+    cleanup()
+    if (!Number.isFinite(shape.duration) || shape.duration <= 0 || !shape.width || !shape.height) {
+      reject(new Error('Could not read the finished render’s duration and dimensions.'))
+      return
+    }
+    resolve(shape)
+  }
+  video.onerror = () => {
+    cleanup()
+    reject(new Error('Could not read the finished render’s duration and dimensions.'))
+  }
+  video.src = objectUrl
+})
 
 export function PackagePublishStage({
   stageId,
@@ -268,21 +307,54 @@ export function PackagePublishStage({
     try {
       const me = await fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).catch(() => null)
       if (!me?.data?.user) throw new Error('Sign in on the site first (avatar in the header).')
-      const video = await fetch(downloadUrl(`renders/${activeSession()}-1.0x.mp4`))
-      if (!video.ok) throw new Error('Could not read the finished render from the engine.')
-      const cfg = await getFileJson<{ series?: string }>('session.json')
+      const [videoResponse, posterResponse, cfg] = await Promise.all([
+        fetch(downloadUrl(`renders/${activeSession()}-1.0x.mp4`)),
+        fetch(downloadUrl(thumbPath())),
+        getFileJson<PublishSessionConfig>('session.json'),
+      ])
+      if (!videoResponse.ok) throw new Error('Could not read the finished render from the engine.')
+      if (!posterResponse.ok) throw new Error('Choose a thumbnail first — the published video needs a poster.')
+      const video = await videoResponse.blob()
+      const poster = await posterResponse.blob()
+      const shape = await videoShape(video)
       const series = String(cfg?.series || '').trim()
+      const seriesOut = series
+        ? await getJson<{ data?: { defaults_json?: string | null } }>(seriesUrl(series))
+        : null
+      let seriesDefaults: SeriesDefaults = {}
+      try {
+        seriesDefaults = JSON.parse(seriesOut?.data?.defaults_json || '{}') as SeriesDefaults
+      } catch {
+        seriesDefaults = {}
+      }
+      const rawEpisode = cfg?.episode ?? cfg?.episode_number
+      const episode = Number(rawEpisode)
+      const hasEpisode = Number.isInteger(episode) && episode > 0
+      const seriesTitle = String(cfg?.series_title || seriesDefaults.name || '').trim()
+      const seriesDescription = String(
+        cfg?.series_description || seriesDefaults.description || '',
+      ).trim()
       const query = new URLSearchParams({
         slug: activeSession(),
         title: title.trim(),
         description,
         public: pubPublic ? '1' : '0',
-        ...(series ? { series, series_title: series.replace(/-/g, ' ') } : {}),
+        ...(hasEpisode ? { episode: String(episode) } : {}),
+        ...(series ? {
+          series,
+          series_title: seriesTitle || series.replace(/-/g, ' '),
+          ...(seriesDescription ? { series_description: seriesDescription } : {}),
+        } : {}),
       })
+      const form = new FormData()
+      form.append('video', video, `${activeSession()}-1.0x.mp4`)
+      form.append('poster', poster, `${activeSession()}-thumbnail.png`)
+      form.append('duration_s', String(shape.duration))
+      form.append('width', String(shape.width))
+      form.append('height', String(shape.height))
       const out = await fetch(`/api/publish/video?${query}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'video/mp4' },
-        body: await video.blob(),
+        body: form,
       }).then((r) => r.json()).catch(() => null)
       if (!out?.ok) throw new Error(out?.data?.error || 'The site did not accept the upload.')
       setPubState('done')

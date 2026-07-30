@@ -185,7 +185,7 @@ task is unowned until someone claims it on the board.
   - plain: Publishing is a button, not a script
   - why: Twenty episodes publish themselves instead of twenty manual CLI invocations.
 
-- [ ] **[CODEX]** Publish carries the full show shape: episode number, poster, duration, and
+- [x] **[CODEX]** Publish carries the full show shape: episode number, poster, duration, and
   series cover and description; the API path writes none of these today and the editor omits the
   episode number it already knows
   - plain: Episodes look like a show
