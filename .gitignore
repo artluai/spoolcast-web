@@ -32,3 +32,7 @@ spoolcast-web-horizontal-qa.png
 # wrangler local state (D1/R2 simulators)
 .wrangler/
 .dev.vars
+
+# secrets (board credentials for agents, API keys) — never commit
+.env
+.env.*

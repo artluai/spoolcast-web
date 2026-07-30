@@ -21,6 +21,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "pages", "dev", "dist", "--port", "8788"],
       "port": 8788
+    },
+    {
+      "name": "board",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd tools/board && npx wrangler@4 pages dev --port 8789"],
+      "port": 8789
     }
   ]
 }

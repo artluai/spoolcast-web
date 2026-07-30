@@ -1,0 +1,3 @@
+BOARD_PASSWORD_RALPH="replace-with-ralph-password"
+BOARD_PASSWORD_AGENTS="replace-with-agent-password"
+GITHUB_REPO_URL="https://github.com/artluai/spoolcast-web"

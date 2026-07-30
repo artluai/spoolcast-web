@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4/config-schema.json",
+  "name": "spoolcast-board",
+  "pages_build_output_dir": "./public",
+  "compatibility_date": "2026-07-28",
+  "kv_namespaces": [
+    {
+      "binding": "BOARD",
+      "id": "82953e8098f44db3b61a01babc4667e7",
+    },
+  ],
+  "vars": {
+    "GITHUB_REPO_URL": "https://github.com/artluai/spoolcast-web",
+  },
+}
