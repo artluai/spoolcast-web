@@ -69,7 +69,7 @@ task is unowned until someone claims it on the board.
   - plain: One job system
   - why: Autopilot and the render worker need a single queue to schedule against.
 
-- [ ] **[CODEX]** Move YouTube publishing off the browser-interactive OAuth flow and the local
+- [x] **[CODEX]** Move YouTube publishing off the browser-interactive OAuth flow and the local
   token file so publish runs headless from the hosted engine
   - plain: Cloud publishing to YouTube
   - why: The final upload step also works away from the Mac.
@@ -96,7 +96,7 @@ task is unowned until someone claims it on the board.
   - plain: Choices carry forward
   - why: Selecting a world kit once is enough; step 3 respects it.
 
-- [ ] **[CODEX]** Publish thumbnails: pull world kit references (character and prop images) into
+- [x] **[CODEX]** Publish thumbnails: pull world kit references (character and prop images) into
   thumbnail generation the same way shot generation already does
   - plain: Thumbnails match the video
   - why: Thumbnails show the actual cast and props instead of ignoring the world kit.
@@ -105,7 +105,7 @@ task is unowned until someone claims it on the board.
   - plain: Thumbnails stop cropping wrong
   - why: What you approve is what the platform shows.
 
-- [ ] **[CODEX]** Per-project setting for who writes thumbnail text: the image model or Remotion,
+- [x] **[CODEX]** Per-project setting for who writes thumbnail text: the image model or Remotion,
   defaulting to the image model
   - plain: Choose who draws the title text
   - why: Projects that want baked-in, art-directed text get it from the image model.
