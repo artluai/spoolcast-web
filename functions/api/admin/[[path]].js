@@ -14,6 +14,10 @@
 //   GET  /api/admin/library              → full cloud inventory: template rows
 //        + everything actually in the spoolcast-assets bucket (characters
 //        grouped by slug, plus any keys outside the known prefixes)
+//   GET  /api/admin/settings/render-location
+//   POST /api/admin/settings/render-location  {location: "local"|"cloud"}
+//   POST /api/admin/render/start         → authenticated cloud-worker proxy
+//   GET  /api/admin/render/{file|info|download}
 
 import { requireAdmin } from '../_auth.js'
 
@@ -40,6 +44,32 @@ const TYPES = {
 }
 const ext = (name) => name.slice(name.lastIndexOf('.')).toLowerCase()
 const contentType = (name, fallback) => TYPES[ext(name)] || fallback || 'application/octet-stream'
+const renderLocation = async (env) => {
+  const row = await env.DB.prepare(
+    `SELECT value FROM admin_settings WHERE key = 'render_location'`,
+  ).first()
+  return row?.value === 'cloud' ? 'cloud' : 'local'
+}
+const renderWorker = (env) => {
+  const base = String(env.RENDER_WORKER_URL || '').replace(/\/+$/, '')
+  const token = String(env.RENDER_WORKER_TOKEN || '')
+  return base && token ? { base, token } : null
+}
+const workerResponse = async (env, path, init = {}) => {
+  const worker = renderWorker(env)
+  if (!worker) return json({ error: 'Cloud render worker is not configured.' }, 503)
+  const headers = new Headers(init.headers || {})
+  headers.set('Authorization', `Bearer ${worker.token}`)
+  const upstream = await fetch(`${worker.base}${path}`, { ...init, headers }).catch(() => null)
+  if (!upstream) return json({ error: 'Cloud render worker is unreachable.' }, 502)
+  const responseHeaders = new Headers()
+  for (const name of ['Content-Type', 'Content-Disposition', 'Content-Length', 'Accept-Ranges']) {
+    const value = upstream.headers.get(name)
+    if (value) responseHeaders.set(name, value)
+  }
+  responseHeaders.set('Cache-Control', 'private, no-store')
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders })
+}
 
 export async function onRequest({ env, request, params }) {
   const gate = await requireAdmin(env, request)
@@ -90,7 +120,67 @@ export async function onRequest({ env, request, params }) {
       templates: await templateRows(),
       characters: [...characters.values()].sort((a, b) => a.slug.localeCompare(b.slug)),
       other,
+      rendering: {
+        location: await renderLocation(env),
+        cloud_configured: Boolean(renderWorker(env)),
+      },
     })
+  }
+
+  if (route === 'settings' && action === 'render-location') {
+    if (request.method === 'GET') {
+      return json({
+        location: await renderLocation(env),
+        cloud_configured: Boolean(renderWorker(env)),
+      })
+    }
+    if (request.method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const location = String(body.location || '')
+      if (!['local', 'cloud'].includes(location)) {
+        return json({ error: 'location must be local or cloud' }, 400)
+      }
+      if (location === 'cloud' && !renderWorker(env)) {
+        return json({ error: 'Cloud render worker is not configured.' }, 409)
+      }
+      await env.DB.prepare(
+        `INSERT INTO admin_settings (key, value, updated_by, updated_at)
+         VALUES ('render_location', ?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET
+           value=excluded.value, updated_by=excluded.updated_by, updated_at=datetime('now')`,
+      ).bind(location, admin.id).run()
+      return json({ location, cloud_configured: Boolean(renderWorker(env)) })
+    }
+  }
+
+  if (route === 'render' && action === 'start' && request.method === 'POST') {
+    if (await renderLocation(env) !== 'cloud') {
+      return json({ error: 'Cloud rendering is not selected in Admin settings.' }, 409)
+    }
+    const payload = await request.json().catch(() => ({}))
+    if (payload.action !== 'render_with_audit') {
+      return json({ error: 'The render proxy accepts render_with_audit only.' }, 400)
+    }
+    return workerResponse(env, '/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  if (route === 'render' && ['file', 'info', 'download'].includes(action) && request.method === 'GET') {
+    const source = new URL(request.url)
+    const session = source.searchParams.get('session') || ''
+    if (!/^[A-Za-z0-9_-]+$/.test(session)) return json({ error: 'Invalid session.' }, 400)
+    const upstreamPath = action === 'info' ? '/api/render-info' : `/api/${action}`
+    const upstream = new URL(upstreamPath, 'https://render-worker.invalid')
+    upstream.searchParams.set('session', session)
+    if (action !== 'info') {
+      const path = source.searchParams.get('path') || ''
+      if (!path || path.includes('..')) return json({ error: 'Invalid path.' }, 400)
+      upstream.searchParams.set('path', path)
+    }
+    return workerResponse(env, `${upstream.pathname}${upstream.search}`)
   }
 
   if (route === 'templates' && action === 'publish' && request.method === 'POST') {

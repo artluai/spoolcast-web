@@ -36,6 +36,7 @@ export function activeSession(): string {
   return ACTIVE_SESSION
 }
 export const TENANT = env.VITE_TENANT ?? 'local'
+export type RenderLocation = 'local' | 'cloud'
 
 // When the backend can serve low-quality preview proxies, flip this on; the preview
 // player then requests the lighter feed while full-quality stays available for
@@ -141,6 +142,69 @@ export async function postAction<T = unknown>(
     return null
   }
 }
+
+type ActionResponse<T> = {
+  ok?: boolean
+  data?: T
+  error?: string
+  message?: string
+  details?: string
+}
+
+/** The admin's global render choice. Failure is deliberately local-first so
+ * the existing single-machine flow is unchanged when the site API is absent. */
+export async function adminRenderLocation(): Promise<RenderLocation> {
+  try {
+    const res = await fetch('/api/admin/settings/render-location', { cache: 'no-store' })
+    if (!res.ok) return 'local'
+    const out = (await res.json()) as { data?: { location?: RenderLocation } }
+    return out.data?.location === 'cloud' ? 'cloud' : 'local'
+  } catch {
+    return 'local'
+  }
+}
+
+/** Start final rendering on the selected target. Cloud requests go through
+ * the admin-gated Pages proxy so the worker bearer token never reaches JS. */
+export async function postRenderAction<T = unknown>(
+  location: RenderLocation,
+  body: Record<string, unknown>,
+): Promise<ActionResponse<T> | null> {
+  if (location === 'local') return postAction<T>(body)
+  try {
+    const res = await fetch('/api/admin/render/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: activeSession(), tenant: TENANT, ...body }),
+    })
+    return (await res.json()) as ActionResponse<T>
+  } catch {
+    return null
+  }
+}
+
+export const renderTargetFileUrl = (
+  location: RenderLocation,
+  path: string,
+  session = activeSession(),
+) => location === 'cloud'
+  ? `/api/admin/render/file?${queryString({ session, path })}`
+  : fileUrl(path, session)
+
+export const renderTargetInfoUrl = (
+  location: RenderLocation,
+  session = activeSession(),
+) => location === 'cloud'
+  ? `/api/admin/render/info?${queryString({ session })}`
+  : renderInfoUrl(session)
+
+export const renderTargetDownloadUrl = (
+  location: RenderLocation,
+  path: string,
+  session = activeSession(),
+) => location === 'cloud'
+  ? `/api/admin/render/download?${queryString({ session, path })}`
+  : downloadUrl(path, session)
 
 /** Upload the user's own take (raw bytes, no base64 — videos are tens of MB)
  *  straight into a shot's active media slot. `shot` is the PERMANENT shot id;

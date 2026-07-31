@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
-import { activeSession, apiUrl, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, renderInfoUrl, templatesUrl, uploadFinalCutAsset } from '../../lib/api'
+import { activeSession, adminRenderLocation, apiUrl, contentUrl, downloadUrl, fileUrl, getJson, jobsUrl, postAction, postRenderAction, renderTargetDownloadUrl, renderTargetFileUrl, renderTargetInfoUrl, templatesUrl, uploadFinalCutAsset } from '../../lib/api'
+import type { RenderLocation } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { TimelineScroller } from './TimelineScroller'
 
@@ -17,6 +18,11 @@ const AUDIO_WAVEFORM_VISIBLE_BARS = 84
 type DecodedWaveform = {
   duration: number
   peaks: number[]
+}
+
+type RenderJobPointer = {
+  jobId: string
+  location: RenderLocation
 }
 
 const decodedWaveformCache = new Map<string, Promise<DecodedWaveform>>()
@@ -1423,14 +1429,15 @@ export function VisualReviewStage({
   const setRenderError = useWorkflowStore((s) => s.setFinalRenderError)
   const [renderPct, setRenderPct] = useState<number | null>(null)
   const [renderStatus, setRenderStatus] = useState('')
-  const renderJobRef = useRef<string | null>(null)
+  const renderJobRef = useRef<RenderJobPointer | null>(null)
   const renderTimerRef = useRef<number | null>(null)
   const [renderInfo, setRenderInfo] = useState<RenderInfo | null>(null)
+  const [renderLocation, setRenderLocation] = useState<RenderLocation>('local')
   const [renderQuality, setRenderQuality] = useState<RenderQuality>(() => readRenderQuality())
   const [renderQualityMenuOpen, setRenderQualityMenuOpen] = useState(false)
   const [renderHistoryMenuOpen, setRenderHistoryMenuOpen] = useState(false)
   const refreshRenderInfo = useCallback(async () => {
-    const out = await getJson<{ ok?: boolean; data?: RenderInfo }>(renderInfoUrl())
+    const out = await getJson<{ ok?: boolean; data?: RenderInfo }>(renderTargetInfoUrl(renderLocation))
     if (out?.ok === false || !out?.data) return null
     setRenderInfo(out.data)
     const currentState = useWorkflowStore.getState().finalRender
@@ -1444,6 +1451,13 @@ export function VisualReviewStage({
       useWorkflowStore.getState().setFinalRender('stale')
     }
     return out.data
+  }, [renderLocation])
+  useEffect(() => {
+    let live = true
+    void adminRenderLocation().then((location) => {
+      if (live) setRenderLocation(location)
+    })
+    return () => { live = false }
   }, [])
   useEffect(() => {
     try {
@@ -4383,9 +4397,21 @@ export function VisualReviewStage({
     }
   }
 
-  const readSessionText = async (path: string) => {
-    const out = await getJson<{ ok?: boolean; data?: { content?: string } }>(fileUrl(path))
+  const readRenderText = async (path: string, location: RenderLocation) => {
+    const out = await getJson<{ ok?: boolean; data?: { content?: string } }>(
+      renderTargetFileUrl(location, path),
+    )
     return out?.ok ? (out.data?.content ?? '') : ''
+  }
+
+  const readRenderJson = async <T,>(path: string, location: RenderLocation): Promise<T | null> => {
+    const content = await readRenderText(path, location)
+    if (!content) return null
+    try {
+      return JSON.parse(content) as T
+    } catch {
+      return null
+    }
   }
 
   // Progress from the job log: the wrapper's "[render-with-audit] <stage>" lines
@@ -4407,7 +4433,11 @@ export function VisualReviewStage({
     else if (pct != null) setRenderStatus('Rendering frames')
   }
 
-  const finishRenderJob = (job: { state?: string; exit_code?: number | null }, log = '') => {
+  const finishRenderJob = (
+    job: { state?: string; exit_code?: number | null },
+    log = '',
+    location: RenderLocation = renderLocation,
+  ) => {
     stopRenderPolling()
     window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY())
     renderJobRef.current = null
@@ -4416,7 +4446,8 @@ export function VisualReviewStage({
       setRenderError(null)
       setRenderState('done')
       setRenderStatus('Ready')
-      void refreshRenderInfo()
+      if (renderLocation === location) void refreshRenderInfo()
+      else setRenderLocation(location)
       return
     }
     // exit codes from scripts/render_with_audit.sh: 2 audit failed · 3 render
@@ -4442,24 +4473,32 @@ export function VisualReviewStage({
     setRenderState('failed')
   }
 
-  const resolveRenderJob = async (jobId: string, job: { state?: string; exit_code?: number | null }) => {
-    finishRenderJob(job, await readSessionText(`working/jobs/${jobId}.log`))
+  const resolveRenderJob = async (
+    jobId: string,
+    location: RenderLocation,
+    job: { state?: string; exit_code?: number | null },
+  ) => {
+    finishRenderJob(job, await readRenderText(`working/jobs/${jobId}.log`, location), location)
   }
 
   const pollRenderJob = async () => {
-    const jobId = renderJobRef.current
-    if (!jobId) return
-    const job = await getFileJson<{ state?: string; exit_code?: number | null }>(`working/jobs/${jobId}.json`)
+    const pointer = renderJobRef.current
+    if (!pointer) return
+    const { jobId, location } = pointer
+    const job = await readRenderJson<{ state?: string; exit_code?: number | null }>(
+      `working/jobs/${jobId}.json`,
+      location,
+    )
     if (!job) return // transient read failure — keep polling
     if (job.state === 'running' || job.state === 'created') {
-      applyRenderLog(await readSessionText(`working/jobs/${jobId}.log`))
+      applyRenderLog(await readRenderText(`working/jobs/${jobId}.log`, location))
       return
     }
-    await resolveRenderJob(jobId, job)
+    await resolveRenderJob(jobId, location, job)
   }
 
-  const beginRenderPolling = (jobId: string) => {
-    renderJobRef.current = jobId
+  const beginRenderPolling = (jobId: string, location: RenderLocation) => {
+    renderJobRef.current = { jobId, location }
     stopRenderPolling()
     renderTimerRef.current = window.setInterval(() => { void pollRenderJob() }, 2500)
     void pollRenderJob()
@@ -4474,7 +4513,9 @@ export function VisualReviewStage({
     setRenderPct(null)
     setRenderStatus('Starting the render…')
     setRenderState('rendering')
-    const out = await postAction<{ status?: string; stdout?: string }>({
+    const location = await adminRenderLocation()
+    setRenderLocation(location)
+    const out = await postRenderAction<{ status?: string; stdout?: string }>(location, {
       action: 'render_with_audit',
       quality: renderQuality,
     })
@@ -4491,8 +4532,8 @@ export function VisualReviewStage({
       return
     }
     if (jobId) {
-      window.localStorage.setItem(RENDER_JOB_STORAGE_KEY(), jobId)
-      beginRenderPolling(jobId)
+      window.localStorage.setItem(RENDER_JOB_STORAGE_KEY(), JSON.stringify({ jobId, location }))
+      beginRenderPolling(jobId, location)
     }
     // No job id parsed (unexpected): stay in 'rendering' — the App status poll
     // flips to done when the audit sentinel appears.
@@ -4524,14 +4565,25 @@ export function VisualReviewStage({
   // A compile started in a previous visit/page-load may still be running (or
   // have finished while this step was closed) — resume polling to resolve it.
   useEffect(() => {
-    const jobId = window.localStorage.getItem(RENDER_JOB_STORAGE_KEY())
-    if (!jobId) return
+    const stored = window.localStorage.getItem(RENDER_JOB_STORAGE_KEY())
+    if (!stored) return
+    let pointer: RenderJobPointer
+    try {
+      const parsed = JSON.parse(stored) as Partial<RenderJobPointer>
+      pointer = {
+        jobId: String(parsed.jobId || ''),
+        location: parsed.location === 'cloud' ? 'cloud' : 'local',
+      }
+    } catch {
+      pointer = { jobId: stored, location: 'local' }
+    }
+    if (!pointer.jobId) return
     if (useWorkflowStore.getState().finalRender === 'done') {
       window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY())
       return
     }
     setRenderState('rendering')
-    beginRenderPolling(jobId)
+    beginRenderPolling(pointer.jobId, pointer.location)
     // Resume-once on mount; polling helpers intentionally aren't dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -4540,7 +4592,7 @@ export function VisualReviewStage({
     const current = renderInfo?.current
     if (!current?.exists || !current.matches_timeline) return
     const link = document.createElement('a')
-    link.href = downloadUrl(current.path || RENDER_OUTPUT_PATH())
+    link.href = renderTargetDownloadUrl(renderLocation, current.path || RENDER_OUTPUT_PATH())
     link.download = current.name || RENDER_OUTPUT_NAME()
     document.body.appendChild(link)
     link.click()
@@ -4549,7 +4601,7 @@ export function VisualReviewStage({
   const downloadRenderExport = (record: RenderExportRecord) => {
     if (!record.path) return
     const link = document.createElement('a')
-    link.href = downloadUrl(record.path)
+    link.href = renderTargetDownloadUrl(renderLocation, record.path)
     link.download = record.name || record.path.split('/').pop() || RENDER_OUTPUT_NAME()
     document.body.appendChild(link)
     link.click()

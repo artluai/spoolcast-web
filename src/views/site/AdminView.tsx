@@ -23,7 +23,13 @@ type Tpl = {
   preview_url: string
 }
 type Chr = { slug: string; portrait_url: string; files: FileRef[] }
-type Library = { templates: Tpl[]; characters: Chr[]; other: FileRef[] }
+type RenderLocation = 'local' | 'cloud'
+type Library = {
+  templates: Tpl[]
+  characters: Chr[]
+  other: FileRef[]
+  rendering: { location: RenderLocation; cloud_configured: boolean }
+}
 
 export default function AdminView() {
   const [lib, setLib] = useState<Library | null>(null)
@@ -54,6 +60,16 @@ export default function AdminView() {
     await load()
     setBusy('')
   }
+  const setRenderLocation = async (location: RenderLocation) => {
+    setBusy('render-location')
+    await fetch('/api/admin/settings/render-location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location }),
+    }).catch(() => {})
+    await load()
+    setBusy('')
+  }
 
   if (gate === 'loading') return null
   if (gate === 'anon') return <p className="site-empty">Sign in first — this page is for the admin account.</p>
@@ -68,6 +84,41 @@ export default function AdminView() {
           Everything published to the cloud asset library: templates anyone can start from, and the
           shared character cast. Publish or update a template with site/publish_template.py.
         </p>
+      </section>
+
+      <section className="site-row">
+        <h2>Rendering <span className="site-by">admin only</span></h2>
+        <div className="admin-tpl">
+          <div className="admin-tpl-body">
+            <b>
+              Render final videos on
+              <span className={`admin-badge ${lib.rendering.cloud_configured ? 'live' : ''}`}>
+                {lib.rendering.cloud_configured ? 'CLOUD READY' : 'CLOUD NOT CONFIGURED'}
+              </span>
+            </b>
+            <p>
+              Local uses this Mac exactly as before. Cloud sends Remotion and ffmpeg work to the
+              private render worker.
+            </p>
+          </div>
+          {(['local', 'cloud'] as const).map((location) => (
+            <button
+              key={location}
+              type="button"
+              className="admin-btn"
+              aria-pressed={lib.rendering.location === location}
+              disabled={
+                busy === 'render-location'
+                || lib.rendering.location === location
+                || (location === 'cloud' && !lib.rendering.cloud_configured)
+              }
+              onClick={() => void setRenderLocation(location)}
+            >
+              {lib.rendering.location === location ? '✓ ' : ''}
+              {location === 'local' ? 'This Mac' : 'Cloud'}
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="site-row">
