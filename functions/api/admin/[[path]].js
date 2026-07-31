@@ -70,6 +70,48 @@ const workerResponse = async (env, path, init = {}) => {
   responseHeaders.set('Cache-Control', 'private, no-store')
   return new Response(upstream.body, { status: upstream.status, headers: responseHeaders })
 }
+const workerJobFile = async (env, jobId, kind) => {
+  const worker = renderWorker(env)
+  if (!worker) return json({ error: 'Cloud render worker is not configured.' }, 503)
+  const upstream = await fetch(`${worker.base}/api/jobs/${jobId}`, {
+    headers: { Authorization: `Bearer ${worker.token}` },
+  }).catch(() => null)
+  if (!upstream) return json({ error: 'Cloud render worker is unreachable.' }, 502)
+  const body = await upstream.json().catch(() => null)
+  const job = body?.data
+  if (!upstream.ok || !job) return json({ error: 'Render job not found.' }, upstream.status)
+  if (kind === 'log') return json({ content: String(job.log_tail || '') })
+  const state = {
+    queued: 'created',
+    retrying: 'created',
+    running: 'running',
+    cancelling: 'running',
+    done: 'succeeded',
+    cancelled: 'stopped',
+    failed: 'failed',
+  }[job.status] || 'created'
+  return json({
+    content: JSON.stringify({
+      job_id: job.id,
+      job: job.kind,
+      session: job.session,
+      state,
+      exit_code: job.result?.exit_code ?? null,
+      error: job.error || null,
+      phase: job.phase || null,
+      queue_position: job.queue_position ?? null,
+      jobs_ahead: job.jobs_ahead ?? 0,
+      progress_current: job.progress_current ?? null,
+      progress_total: job.progress_total ?? null,
+      progress_unit: job.progress_unit || '',
+      message: job.message || '',
+      created_at: job.created_at,
+      started_at: job.started_at,
+      updated_at: job.updated_at,
+      finished_at: job.finished_at,
+    }),
+  })
+}
 
 export async function onRequest({ env, request, params }) {
   const gate = await requireAdmin(env, request)
@@ -178,6 +220,10 @@ export async function onRequest({ env, request, params }) {
     if (action !== 'info') {
       const path = source.searchParams.get('path') || ''
       if (!path || path.includes('..')) return json({ error: 'Invalid path.' }, 400)
+      const jobFile = /^working\/jobs\/([a-f0-9]{32})\.(json|log)$/.exec(path)
+      if (action === 'file' && jobFile) {
+        return workerJobFile(env, jobFile[1], jobFile[2])
+      }
       upstream.searchParams.set('path', path)
     }
     return workerResponse(env, `${upstream.pathname}${upstream.search}`)
