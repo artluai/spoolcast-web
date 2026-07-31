@@ -48,7 +48,7 @@ task is unowned until someone claims it on the board.
   - plain: Active projects are in the cloud
   - why: The hosted engine has everything current; archives stay on the Mac by choice.
 
-- [~] **[CODEX]** Editor cloud bridge: route signed-in editor API calls through Cloudflare to
+- [x] **[CODEX]** Editor cloud bridge: route signed-in editor API calls through Cloudflare to
   the hosted Railway engine without exposing its bearer token
   - plain: Editor talks to the server
   - why: The phone workflow becomes real: open the editor anywhere and drive the hosted engine.
