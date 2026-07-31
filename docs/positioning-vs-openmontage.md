@@ -178,7 +178,7 @@ Verified against code / README. "Planned" means scoped but not yet running.
 | **Gates** | Machine-enforced audits + transactional rollback | Human sign-off at 5 checkpoints |
 | **Guidance layers** | Project wiki + scoped step rules + templates | Director skills (markdown) |
 | **Clients** | Agent CLI, web UI, (planned) more intake surfaces | Terminal + coding assistant only |
-| **Finishes the video** | Render, audits, mobile crops, caption burn-in, YouTube publish | Stops at compose |
+| **Finishes the video** | Render, audits, mobile crops, caption burn-in, Spoolcast publish; YouTube post-launch | Stops at compose |
 | **Fix without re-running** | Permanent shot ids; polish only re-runs changed shots | Re-run and pay again |
 | **Failure recovery** | Transactional writes, `.orig` baselines, revert window, stage health + waivers | Not present |
 | **Series memory** | World kit, cast, style rules across episodes | Fresh each run |

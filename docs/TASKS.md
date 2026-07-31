@@ -9,6 +9,9 @@ pipeline hands-off if the creator wants, and publishes the result as a streaming
 creator's public profile, watchable for credits. The same pipeline stays a general video workflow:
 ad makers and client work use it privately, without the storefront.
 
+**Launch scope:** publishing means Spoolcast profiles plus downloadable exports. YouTube
+publishing is explicitly post-launch and must not block launch readiness.
+
 **Status legend:** `[ ]` todo · `[~]` in progress · `[x]` done.
 **Roles:** `**[FABLE]**` `**[CODEX]**` `**[RALPH]**` — the recommended team for the task. A todo
 task is unowned until someone claims it on the board.
@@ -74,10 +77,10 @@ task is unowned until someone claims it on the board.
   - plain: See every job and queue in one place
   - why: Creators can navigate away or return later without wondering whether long work stopped.
 
-- [x] **[CODEX]** Move YouTube publishing off the browser-interactive OAuth flow and the local
-  token file so publish runs headless from the hosted engine
-  - plain: Cloud publishing to YouTube
-  - why: The final upload step also works away from the Mac.
+- [x] **[CODEX]** Post-launch YouTube groundwork: move OAuth off the browser-interactive flow
+  and local token file so a future hosted publisher can run headlessly
+  - plain: YouTube is cloud-ready for later
+  - why: The capability is prepared, but YouTube publishing is not part of launch.
 
 - [~] **[FABLE]** Project board: this board, a private Cloudflare Pages site with a KV-backed
   API, seeded from docs/TASKS.md
