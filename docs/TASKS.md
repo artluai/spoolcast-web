@@ -53,21 +53,26 @@ task is unowned until someone claims it on the board.
   - plain: Editor talks to the server
   - why: The phone workflow becomes real: open the editor anywhere and drive the hosted engine.
 
-- [ ] **[CODEX]** Remotion render worker: a separate container image with Node and Chromium that
+- [~] **[CODEX]** Remotion render worker: a separate container image with Node and Chromium that
   picks up render jobs through the existing durable job-file pattern and produces every export
   format in the cloud
   - plain: Cloud video rendering
   - why: The last Mac-only render step disappears, and renders can scale past one machine.
 
-- [ ] **[CODEX]** Fix the per-session public/ symlink repointing in init_session.py: it is a
+- [x] **[CODEX]** Fix the per-session public/ symlink repointing in init_session.py: it is a
   global mutable pointer, so two concurrent renders corrupt each other
   - plain: Renders can run side by side
   - why: A 20-episode season cannot render one episode at a time through a shared symlink.
 
-- [ ] **[CODEX]** Unify the two job runners (the sqlite worker loop in local_api.py and the
+- [~] **[CODEX]** Unify the two job runners (the sqlite worker loop in local_api.py and the
   per-session job files of spoolcast_job.py) behind one queue
   - plain: One job system
   - why: Autopilot and the render worker need a single queue to schedule against.
+
+- [ ] **[CODEX]** Global Process Center: persistent app-wide progress for rendering, image/video
+  generation, audio, batches, uploads, and publishing, with queue position, ETA, cancel, and retry
+  - plain: See every job and queue in one place
+  - why: Creators can navigate away or return later without wondering whether long work stopped.
 
 - [x] **[CODEX]** Move YouTube publishing off the browser-interactive OAuth flow and the local
   token file so publish runs headless from the hosted engine
