@@ -75,6 +75,7 @@ export type StepAIAction = {
   stageId: string
   label: string
   busy: boolean
+  busyLabel?: string
   disabled?: boolean
   disabledReason?: string
   title?: string

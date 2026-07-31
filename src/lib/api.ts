@@ -6,8 +6,9 @@
 // per-user sessions) is a configuration change — not a refactor across dozens of
 // call sites.
 //
-// Defaults reproduce today's local-dev behavior EXACTLY. Override per environment
-// with Vite env vars (e.g. a `.env.production` or the host's env):
+// Defaults reproduce today's local-dev behavior EXACTLY. Production uses the
+// signed-in, same-origin Pages proxy so the Railway bearer token never reaches
+// browser JavaScript. Override per environment only when deliberately needed:
 //   VITE_API_BASE      = https://api.yourhost.com/api
 //   VITE_SESSION       = <session id>   (dev fallback only — the real session
 //                                        comes from the /p/:id route)
@@ -19,7 +20,10 @@
 
 const env = import.meta.env as Record<string, string | undefined>
 
-export const API_BASE = (env.VITE_API_BASE ?? 'http://localhost:8000/api').replace(/\/+$/, '')
+export const API_BASE = (
+  env.VITE_API_BASE
+  ?? (import.meta.env.PROD ? '/api/engine' : 'http://localhost:8000/api')
+).replace(/\/+$/, '')
 
 // Identity. The active session comes from the ROUTE (/p/:id) — the workflow
 // shell calls setActiveSession() on entry, before any session-scoped fetch.
@@ -151,11 +155,12 @@ type ActionResponse<T> = {
   details?: string
 }
 
-/** The admin's global render choice. Failure is deliberately local-first so
- * the existing single-machine flow is unchanged when the site API is absent. */
+/** The admin's global render choice, readable by every signed-in creator.
+ * Failure is deliberately local-first so today's single-machine flow stays
+ * unchanged when the hosted proxy is absent. */
 export async function adminRenderLocation(): Promise<RenderLocation> {
   try {
-    const res = await fetch('/api/admin/settings/render-location', { cache: 'no-store' })
+    const res = await fetch(apiUrl('render-location'), { cache: 'no-store' })
     if (!res.ok) return 'local'
     const out = (await res.json()) as { data?: { location?: RenderLocation } }
     return out.data?.location === 'cloud' ? 'cloud' : 'local'
@@ -164,47 +169,33 @@ export async function adminRenderLocation(): Promise<RenderLocation> {
   }
 }
 
-/** Start final rendering on the selected target. Cloud requests go through
- * the admin-gated Pages proxy so the worker bearer token never reaches JS. */
+/** Start final rendering on the selected target. In production postAction()
+ * already goes through the signed-in Pages proxy; only the admin controls the
+ * global location setting. */
 export async function postRenderAction<T = unknown>(
   location: RenderLocation,
   body: Record<string, unknown>,
 ): Promise<ActionResponse<T> | null> {
   if (location === 'local') return postAction<T>(body)
-  try {
-    const res = await fetch('/api/admin/render/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: activeSession(), tenant: TENANT, ...body }),
-    })
-    return (await res.json()) as ActionResponse<T>
-  } catch {
-    return null
-  }
+  return postAction<T>(body)
 }
 
 export const renderTargetFileUrl = (
-  location: RenderLocation,
+  _location: RenderLocation,
   path: string,
   session = activeSession(),
-) => location === 'cloud'
-  ? `/api/admin/render/file?${queryString({ session, path })}`
-  : fileUrl(path, session)
+) => fileUrl(path, session)
 
 export const renderTargetInfoUrl = (
-  location: RenderLocation,
+  _location: RenderLocation,
   session = activeSession(),
-) => location === 'cloud'
-  ? `/api/admin/render/info?${queryString({ session })}`
-  : renderInfoUrl(session)
+) => renderInfoUrl(session)
 
 export const renderTargetDownloadUrl = (
-  location: RenderLocation,
+  _location: RenderLocation,
   path: string,
   session = activeSession(),
-) => location === 'cloud'
-  ? `/api/admin/render/download?${queryString({ session, path })}`
-  : downloadUrl(path, session)
+) => downloadUrl(path, session)
 
 /** Upload the user's own take (raw bytes, no base64 — videos are tens of MB)
  *  straight into a shot's active media slot. `shot` is the PERMANENT shot id;

@@ -10,6 +10,9 @@ pages_build_output_dir = "dist"
 # Sign-ins from these addresses get the admin role (comma-separated) — keeps
 # the operator account admin even on a fresh database.
 ADMIN_EMAILS = "bitbrandsagency@gmail.com"
+# Browser engine requests stay same-origin. Pages adds the private Railway
+# bearer secret before forwarding them to this hosted API.
+ENGINE_API_URL = "https://spoolcast-production.up.railway.app"
 
 [[d1_databases]]
 binding = "DB"
