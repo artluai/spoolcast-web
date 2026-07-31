@@ -64,7 +64,7 @@ task is unowned until someone claims it on the board.
   - plain: Renders can run side by side
   - why: A 20-episode season cannot render one episode at a time through a shared symlink.
 
-- [~] **[CODEX]** Unify the two job runners (the sqlite worker loop in local_api.py and the
+- [x] **[CODEX]** Unify the two job runners (the sqlite worker loop in local_api.py and the
   per-session job files of spoolcast_job.py) behind one queue
   - plain: One job system
   - why: Autopilot and the render worker need a single queue to schedule against.
