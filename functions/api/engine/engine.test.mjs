@@ -149,6 +149,29 @@ test('reserves new project ownership and replaces the browser tenant', async () 
   assert.equal(db.sessions.get('new-project'), 2)
 })
 
+test('a crafted path cannot ride an owned session param into another project', async () => {
+  let contacted = false
+  globalThis.fetch = async () => {
+    contacted = true
+    return new Response()
+  }
+  const db = mockDb({ owned: [['mine', 2], ['theirs', 1]] })
+  const crafted = await call(db, 'file?session=mine&path=sessions/theirs/renders/final.mp4')
+  assert.equal(crafted.status, 404)
+  assert.equal(contacted, false)
+
+  const relative = await call(db, 'file?path=working/structure.md')
+  assert.equal(relative.status, 400)
+  assert.equal(contacted, false)
+})
+
+test('shared library paths are readable without naming a session', async () => {
+  globalThis.fetch = async () =>
+    Response.json({ ok: true, data: { content: 'portrait' } })
+  const response = await call(mockDb({ owned: [['mine', 2]] }), 'file?path=global/characters/aoi/portrait.png')
+  assert.equal(response.status, 200)
+})
+
 test('applies the admin cloud-render setting without making creators admins', async () => {
   const localDb = mockDb({ owned: [['mine', 2]], location: 'local' })
   let contacted = false

@@ -1,6 +1,10 @@
 import { sessionUser } from './_auth.js'
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
+// Content-root prefixes any signed-in user may read: the shared library
+// tiers. Everything else is either sessions/<id>/… or session-relative and
+// must ride an owned session.
+const SHARED_READ_PREFIXES = ['global/', 'styles/', 'series/', 'shared/', 'templates/', 'archetypes/']
 const FORWARDED_RESPONSE_HEADERS = [
   'Accept-Ranges',
   'Content-Disposition',
@@ -153,7 +157,12 @@ export async function proxyEngine({ env, request, path, user }) {
 
   const source = new URL(request.url)
   const requestedPath = source.searchParams.get('path') || ''
-  if (requestedPath.split('/').includes('..')) {
+  if (
+    requestedPath
+    && (requestedPath.includes('\\')
+      || requestedPath.startsWith('/')
+      || requestedPath.split('/').includes('..'))
+  ) {
     return json({ error: 'Invalid path.' }, 400)
   }
   const upstreamUrl = new URL(`/api/${parts.join('/')}`, config.base)
@@ -201,6 +210,15 @@ export async function proxyEngine({ env, request, path, user }) {
   const action = String(parsedBody?.action || '')
   let reserved = false
 
+  // A path that names no session (working/…, renders/…) is session-relative
+  // upstream, so it must ride an owned session param — except the shared
+  // library tiers, which any signed-in user may read.
+  const sharedPath = ['GET', 'HEAD'].includes(request.method)
+    && SHARED_READ_PREFIXES.some((prefix) => requestedPath.startsWith(prefix))
+  if (requestedPath && !sharedPath && !contentSession && !session) {
+    return json({ error: 'Invalid path.' }, 400)
+  }
+
   if (action === 'create_session' && request.method === 'POST') {
     if (!SAFE_ID.test(session)) return json({ error: 'Invalid session.' }, 400)
     const result = await env.DB.prepare(
@@ -208,8 +226,14 @@ export async function proxyEngine({ env, request, path, user }) {
     ).bind(session, user.id).run()
     if (!result.meta?.changes) return json({ error: 'That project id is already in use.' }, 409)
     reserved = true
-  } else if (session && !(await ownedSession(env, user.id, session))) {
-    return json({ error: 'Project not found.' }, 404)
+  } else {
+    // Every session named anywhere in the request must be owned. The old
+    // first-match-wins check let a crafted path ride an owned session param.
+    for (const ref of new Set([bodySession, querySession, contentSession].filter(Boolean))) {
+      if (!(await ownedSession(env, user.id, ref))) {
+        return json({ error: 'Project not found.' }, 404)
+      }
+    }
   }
 
   if (action === 'render_with_audit') {
