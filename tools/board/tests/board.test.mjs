@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { onRequestGet as getAbout } from '../functions/api/about.js';
 import { onRequestGet as getBoard, onRequestPut as putBoard } from '../functions/api/board.js';
@@ -317,12 +315,36 @@ test('About content is private and supplies configured repository links', async 
   assert.match(about.pipeline, /World kit/);
 });
 
-test('TASKS parser preserves order, status, and recommendation labels', async () => {
-  const taskPath = fileURLToPath(new URL('../../../docs/TASKS.md', import.meta.url));
-  const markdown = await readFile(taskPath, 'utf8');
-  const tasks = parseTasks(markdown);
+// docs/TASKS.md is now only a pointer at the live board, so the parser is tested against a
+// fixture in the same format the seed originally consumed.
+const parserFixture = `# Fixture
 
-  assert.ok(tasks.length >= 20);
+## Run hosted, from anywhere (goal: cloud)
+
+- [x] **[FABLE]** Editor and public site hosted on Cloudflare Pages, built from this repo
+  - plain: The UI loads anywhere
+  - why: The editor and the watch pages are already reachable from any device.
+
+- [~] **[FABLE]** Railway engine deploy with bearer-token auth
+  - plain: Engine runs on a server
+  - why: Drafting, generation, and review stop depending on the Mac being awake.
+
+- [ ] **[CODEX]** Remotion render worker: a container image with Node and Chromium that picks up
+  render jobs
+  - plain: Cloud video rendering
+  - why: The last Mac-only render step disappears, and renders can scale past one machine.
+
+## Founder decisions (goal: founder)
+
+- [ ] **[RALPH]** Set the Railway usage cap and give the go to push the engine deploy
+  - plain: Approve the server spend
+  - why: Unblocks the hosted engine; the cap keeps the bill bounded.
+`;
+
+test('TASKS parser preserves order, status, and recommendation labels', () => {
+  const tasks = parseTasks(parserFixture);
+
+  assert.equal(tasks.length, 4);
   assert.equal(tasks[0].goal, 'cloud');
   assert.equal(tasks[0].status, 'done');
   assert.equal(tasks[0].tag, 'fable');
@@ -332,15 +354,9 @@ test('TASKS parser preserves order, status, and recommendation labels', async ()
   assert.ok(
     tasks.every((task) => (task.status === 'todo' ? task.owner === null : task.owner !== null)),
   );
-  assert.ok(tasks.some((task) => task.status === 'in_progress'));
-  assert.ok(tasks.some((task) => task.tag === 'codex' && task.status === 'todo'));
-  assert.ok(tasks.some((task) => task.tag === 'founder'));
-  for (const goal of ['cloud', 'editor', 'ingest', 'autopilot', 'show', 'money', 'founder']) {
-    assert.ok(
-      tasks.some((task) => task.goal === goal),
-      `expected at least one task for goal ${goal}`,
-    );
-  }
+  assert.equal(tasks[1].status, 'in_progress');
+  assert.equal(tasks[3].tag, 'founder');
+  assert.equal(tasks[3].goal, 'founder');
 
   const renderWorker = tasks.find((task) => task.title.startsWith('Remotion render worker'));
   assert.ok(renderWorker);

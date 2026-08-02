@@ -24,6 +24,17 @@ export async function seedBoard({
   if (!boardUrl) throw new Error('Set BOARD_URL to the deployed or local board address.');
   if (!password) throw new Error('Set BOARD_PASSWORD to the agent board password.');
 
+  // The live board is the source of truth and was seeded once on 2026-08-01. Seeding REPLACES
+  // the whole board, wiping every status, owner, and discussion. Local dev KV only.
+  if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(boardUrl)) {
+    throw new Error(
+      'Refusing to seed a non-local board: the live board is the source of truth and seeding wipes it. Use the board API to add or update tasks instead.',
+    );
+  }
+  if (tasks.length === 0) {
+    throw new Error('Parsed 0 tasks (docs/TASKS.md is now only a pointer to the board); refusing to seed an empty board.');
+  }
+
   const response = await fetch(`${boardUrl.replace(/\/+$/, '')}/api/board`, {
     method: 'PUT',
     headers: {

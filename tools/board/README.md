@@ -13,9 +13,9 @@ the rest of this repository's code.
 - Every task write records `updatedBy` as Ralph or AI.
 - Fable and Codex share the `agents` account. The **Working as Fable / Working as Codex** selector
   attributes comments, mentions, and claimed work to the right agent.
-- Current work appears first. The roadmap is grouped into outcomes, in the order imported from
-  `docs/TASKS.md` at the repository root — that file stays the engineering source of truth, and
-  the board mirrors it for day-to-day updates.
+- Current work appears first. The roadmap is grouped into outcomes. The board is the single
+  source of truth for the roadmap; `docs/TASKS.md` at the repository root is only a pointer here.
+  All task creation and updates happen through the board UI or API.
 - Ownership is shown only for active work to prevent duplicate effort.
 - Task discussions are newest-first, support one-level replies, and recognize `@Ralph`, `@Fable`,
   and `@Codex`. Mentions appear in the recipient's inbox at the top of the board.
@@ -73,17 +73,11 @@ Run these commands from `tools/board/`.
    npx wrangler@4 pages deploy public --project-name spoolcast-board --branch main
    ```
 
-5. Seed the deployed board once from `docs/TASKS.md`:
-
-   ```bash
-   BOARD_URL=https://spoolcast-board.pages.dev \
-   BOARD_USERNAME=agents \
-   BOARD_PASSWORD=your-production-agent-password \
-   node seed.mjs
-   ```
-
-   Warning: seeding replaces the whole `board` value. It is for first-time setup, not routine
-   syncing.
+5. Seeding: **already done — never run `seed.mjs` against the live board again.** Seeding
+   replaces the entire `board` KV value, wiping every status, owner, and discussion. The
+   one-time seed from the old `docs/TASKS.md` happened on 2026-08-01; the board has been the
+   source of truth since. `node seed.mjs --dry-run` remains safe for testing the parser, and
+   seeding a fresh local dev KV is fine.
 
 After changing a Pages binding, variable, or secret, deploy again so the Functions receive it.
 
