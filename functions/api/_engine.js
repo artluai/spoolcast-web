@@ -1,4 +1,4 @@
-import { sessionUser } from './_auth.js'
+import { readCookie, sessionUser } from './_auth.js'
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
 // Content-root prefixes any signed-in user may read: the shared library
@@ -171,6 +171,7 @@ export async function proxyEngine({ env, request, path, user }) {
 
   let parsedBody = null
   let body = request.body
+  let action = ''
   if (
     !['GET', 'HEAD'].includes(request.method)
     && request.headers.get('Content-Type')?.toLowerCase().includes('application/json')
@@ -180,6 +181,14 @@ export async function proxyEngine({ env, request, path, user }) {
       return json({ error: 'Invalid JSON payload.' }, 400)
     }
     parsedBody.tenant = String(user.id)
+    action = String(parsedBody.action || '')
+    if (action === 'manual_publish') {
+      // The browser cannot read the HttpOnly site session, and the engine
+      // must not gain its own account system. The authenticated site proxy
+      // forwards this user's existing site credential only inside this job.
+      parsedBody.site_credential = readCookie(request, 'sc_session')
+      parsedBody.site_url = source.origin
+    }
     body = JSON.stringify(parsedBody)
   }
 
@@ -207,7 +216,6 @@ export async function proxyEngine({ env, request, path, user }) {
   const bodySession = String(parsedBody?.session || '')
   const contentSession = sessionFromContentPath(requestedPath)
   const session = bodySession || querySession || contentSession
-  const action = String(parsedBody?.action || '')
   let reserved = false
 
   // A path that names no session (working/…, renders/…) is session-relative

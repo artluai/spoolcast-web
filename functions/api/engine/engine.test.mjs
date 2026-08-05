@@ -193,3 +193,36 @@ test('applies the admin cloud-render setting without making creators admins', as
   const location = await call(localDb, 'render-location')
   assert.deepEqual(await location.json(), { ok: true, data: { location: 'local' } })
 })
+
+test('forwards the signed-in site credential only inside a manual publish job', async () => {
+  const db = mockDb({ owned: [['mine', 2]] })
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new URL(url).pathname, '/api/action')
+    assert.equal(init.headers.has('Cookie'), false)
+    assert.deepEqual(JSON.parse(init.body), {
+      action: 'manual_publish',
+      session: 'mine',
+      tenant: '2',
+      approve: true,
+      allow_external: true,
+      public: false,
+      site_credential: 'valid-session',
+      site_url: 'https://site.example',
+    })
+    return Response.json({ ok: true, data: { job_id: 'a'.repeat(32) } }, { status: 202 })
+  }
+  const response = await call(db, 'action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'manual_publish',
+      session: 'mine',
+      approve: true,
+      allow_external: true,
+      public: false,
+      site_credential: 'browser-must-not-control-this',
+      site_url: 'https://attacker.example',
+    }),
+  })
+  assert.equal(response.status, 202)
+})

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pill } from '../../components/common/Pill'
-import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, postAction, seriesUrl, urlOk } from '../../lib/api'
+import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { RulesPanel } from './RulesPanel'
@@ -57,114 +57,15 @@ type ThumbState = {
   finalizing: number | null
   bust: number // cache-buster for candidate images after a re-generate
 }
-type PublishSessionConfig = {
-  series?: string
-  series_title?: string
-  series_description?: string
-  episode?: number | string
-  episode_number?: number | string
-}
-type SeriesDefaults = {
-  name?: string
-  description?: string
-}
-
-const MULTIPART_THRESHOLD = 90 * 1024 * 1024
-const MULTIPART_PART_SIZE = 8 * 1024 * 1024
-
-const videoShape = (blob: Blob) => new Promise<{ duration: number; width: number; height: number }>((resolve, reject) => {
-  const video = document.createElement('video')
-  const objectUrl = URL.createObjectURL(blob)
-  const cleanup = () => {
-    URL.revokeObjectURL(objectUrl)
-    video.removeAttribute('src')
-  }
-  video.preload = 'metadata'
-  video.onloadedmetadata = () => {
-    const shape = {
-      duration: video.duration,
-      width: video.videoWidth,
-      height: video.videoHeight,
+type PublishJob = {
+  status?: string
+  error?: string | null
+  message?: string | null
+  result?: {
+    publish?: {
+      url?: string
+      public?: boolean
     }
-    cleanup()
-    if (!Number.isFinite(shape.duration) || shape.duration <= 0 || !shape.width || !shape.height) {
-      reject(new Error('Could not read the finished render’s duration and dimensions.'))
-      return
-    }
-    resolve(shape)
-  }
-  video.onerror = () => {
-    cleanup()
-    reject(new Error('Could not read the finished render’s duration and dimensions.'))
-  }
-  video.src = objectUrl
-})
-
-const publishMetadata = (
-  poster: Blob,
-  shape: { duration: number; width: number; height: number },
-) => {
-  const form = new FormData()
-  form.append('poster', poster, `${activeSession()}-thumbnail.png`)
-  form.append('duration_s', String(shape.duration))
-  form.append('width', String(shape.width))
-  form.append('height', String(shape.height))
-  return form
-}
-
-const responseJson = async (response: Response) => {
-  const out = await response.json().catch(() => null)
-  if (!response.ok || !out?.ok) {
-    throw new Error(out?.data?.error || 'The site did not accept the upload.')
-  }
-  return out
-}
-
-const publishLargeVideo = async (
-  video: Blob,
-  poster: Blob,
-  shape: { duration: number; width: number; height: number },
-  query: URLSearchParams,
-) => {
-  const multipartQuery = new URLSearchParams(query)
-  multipartQuery.set('content_type', video.type || 'video/mp4')
-  let uploadId = ''
-  try {
-    const started = await responseJson(await fetch(
-      `/api/publish/video/multipart/start?${multipartQuery}`,
-      { method: 'POST' },
-    ))
-    uploadId = started.data.upload_id
-    const parts: Array<{ partNumber: number; etag: string }> = []
-    for (let offset = 0, partNumber = 1; offset < video.size; offset += MULTIPART_PART_SIZE, partNumber += 1) {
-      const partQuery = new URLSearchParams(multipartQuery)
-      partQuery.set('upload_id', uploadId)
-      partQuery.set('part_number', String(partNumber))
-      const uploaded = await responseJson(await fetch(
-        `/api/publish/video/multipart/part?${partQuery}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: video.slice(offset, offset + MULTIPART_PART_SIZE),
-        },
-      ))
-      parts.push(uploaded.data)
-    }
-    const completeQuery = new URLSearchParams(multipartQuery)
-    completeQuery.set('upload_id', uploadId)
-    const form = publishMetadata(poster, shape)
-    form.append('parts', JSON.stringify(parts))
-    return await responseJson(await fetch(
-      `/api/publish/video/multipart/complete?${completeQuery}`,
-      { method: 'POST', body: form },
-    ))
-  } catch (error) {
-    if (uploadId) {
-      const abortQuery = new URLSearchParams(multipartQuery)
-      abortQuery.set('upload_id', uploadId)
-      await fetch(`/api/publish/video/multipart/abort?${abortQuery}`, { method: 'POST' }).catch(() => null)
-    }
-    throw error
   }
 }
 
@@ -361,10 +262,10 @@ export function PackagePublishStage({
     })
   }
 
-  // PUBLISH TO SPOOLCAST: push the finished render to the signed-in account's
-  // creator page via the site API (/api/publish/video). Works when the editor
-  // is served from the site origin (pages dev / production); under plain vite
-  // the API isn't there and the button reports that instead of pretending.
+  // PUBLISH TO SPOOLCAST: the signed-in site proxy forwards its HttpOnly
+  // credential into the engine's durable manual_publish job. The worker reads
+  // the canonical render, poster, video-meta.json, session/series metadata,
+  // then uploads the video through the site's 8 MiB R2 multipart endpoints.
   const [pubState, setPubState] = useState<'idle' | 'working' | 'done'>('idle')
   const [pubPublic, setPubPublic] = useState(false)
   const [pubNote, setPubNote] = useState('')
@@ -378,59 +279,47 @@ export function PackagePublishStage({
     try {
       const me = await fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).catch(() => null)
       if (!me?.data?.user) throw new Error('Sign in on the site first (avatar in the header).')
-      const [videoResponse, posterResponse, cfg] = await Promise.all([
-        fetch(downloadUrl(`renders/${activeSession()}-1.0x.mp4`)),
-        fetch(downloadUrl(thumbPath())),
-        getFileJson<PublishSessionConfig>('session.json'),
-      ])
-      if (!videoResponse.ok) throw new Error('Could not read the finished render from the engine.')
-      if (!posterResponse.ok) throw new Error('Choose a thumbnail first — the published video needs a poster.')
-      const video = await videoResponse.blob()
-      const poster = await posterResponse.blob()
-      const shape = await videoShape(video)
-      const series = String(cfg?.series || '').trim()
-      const seriesOut = series
-        ? await getJson<{ data?: { defaults_json?: string | null } }>(seriesUrl(series))
-        : null
-      let seriesDefaults: SeriesDefaults = {}
-      try {
-        seriesDefaults = JSON.parse(seriesOut?.data?.defaults_json || '{}') as SeriesDefaults
-      } catch {
-        seriesDefaults = {}
-      }
-      const rawEpisode = cfg?.episode ?? cfg?.episode_number
-      const episode = Number(rawEpisode)
-      const hasEpisode = Number.isInteger(episode) && episode > 0
-      const seriesTitle = String(cfg?.series_title || seriesDefaults.name || '').trim()
-      const seriesDescription = String(
-        cfg?.series_description || seriesDefaults.description || '',
-      ).trim()
-      const query = new URLSearchParams({
-        slug: activeSession(),
+      const started = await postAction<{
+        job_id?: string
+        stdout?: string
+      }>({
+        action: 'manual_publish',
+        approve: true,
+        allow_external: true,
+        // Private unless the user explicitly checks the public toggle.
+        public: pubPublic,
         title: title.trim(),
         description,
-        public: pubPublic ? '1' : '0',
-        ...(hasEpisode ? { episode: String(episode) } : {}),
-        ...(series ? {
-          series,
-          series_title: seriesTitle || series.replace(/-/g, ' '),
-          ...(seriesDescription ? { series_description: seriesDescription } : {}),
-        } : {}),
       })
-      let out
-      if (video.size > MULTIPART_THRESHOLD) {
-        out = await publishLargeVideo(video, poster, shape, query)
-      } else {
-        const form = publishMetadata(poster, shape)
-        form.append('video', video, `${activeSession()}-1.0x.mp4`)
-        out = await responseJson(await fetch(`/api/publish/video?${query}`, {
-          method: 'POST',
-          body: form,
-        }))
+      const jobId = started?.data?.job_id
+        ?? /job (\S+)/.exec(started?.data?.stdout || '')?.[1]
+        ?? null
+      if (!started?.ok || !jobId) {
+        throw new Error(started?.message || started?.error || 'The engine could not start the publish job.')
       }
-      setPubState('done')
-      setPubNote(`Live at ${out.data.url}${out.data.public ? '' : ' (private — flip it public any time)'}`)
-      onToast('Published to your Spoolcast page.')
+
+      const timer = window.setInterval(() => {
+        void (async () => {
+          const out = await getJson<{ ok?: boolean; data?: PublishJob }>(jobsUrl(jobId))
+          const job = out?.data
+          if (!job || ['queued', 'retrying', 'running', 'cancelling'].includes(job.status || '')) return
+          window.clearInterval(timer)
+          jobTimersRef.current = jobTimersRef.current.filter((value) => value !== timer)
+          if (job.status !== 'done' || !job.result?.publish) {
+            setPubState('idle')
+            setPubNote(job.message || job.error || 'Publishing failed.')
+            return
+          }
+          const published = job.result.publish
+          setPubState('done')
+          setPubNote(
+            `Live at ${published.url || `/watch/v/${activeSession()}`}`
+            + (published.public ? '' : ' (private — flip it public any time)'),
+          )
+          onToast(`Published ${published.public ? 'publicly' : 'privately'} to your Spoolcast page.`)
+        })()
+      }, 2500)
+      jobTimersRef.current.push(timer)
     } catch (error) {
       setPubState('idle')
       setPubNote(error instanceof Error ? error.message : 'Publishing failed.')
@@ -723,10 +612,10 @@ export function PackagePublishStage({
             Public on my page
           </label>
           <button type="button" disabled={pubState === 'working'} onClick={() => void publishToSite()}>
-            {pubState === 'working' ? (<><span className="spin" /> Uploading…</>) : pubState === 'done' ? 'Publish again' : 'Publish'}
+            {pubState === 'working' ? (<><span className="spin" /> Publishing…</>) : pubState === 'done' ? 'Publish again' : 'Publish'}
           </button>
           <span className="pkg-meta">
-            {pubNote || 'Uploads the finished render to your creator page under your account.'}
+            {pubNote || 'Queues the finished render to your creator page under your account.'}
           </span>
         </div>
       </section>

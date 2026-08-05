@@ -187,7 +187,7 @@ task is unowned until someone claims it on the board.
 
 ## Publish like a show (goal: show)
 
-- [ ] **[CODEX]** Automated publish from the engine: a real publish action that pushes the
+- [x] **[CODEX]** Automated publish from the engine: a real publish action that pushes the
   render plus video-meta.json to the site publish API; today site/publish.py is a hand-run local
   script and manual_publish is listed as unimplemented
   - plain: Publishing is a button, not a script
