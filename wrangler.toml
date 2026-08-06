@@ -18,6 +18,7 @@ ENGINE_API_URL = "https://spoolcast-production.up.railway.app"
 binding = "DB"
 database_name = "spoolcast-site"
 database_id = "ad151aba-415c-4988-bc6d-67673432d39d"
+migrations_dir = "site/migrations"
 
 [[r2_buckets]]
 binding = "VIDEOS"
