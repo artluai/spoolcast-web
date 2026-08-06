@@ -23,6 +23,23 @@ as a prototype, but the workflow now talks to the local Spoolcast engine API at
 - **Scope changes to exactly what was asked.** Don't change desktop styling when
   asked for a mobile fix (or vice versa).
 
+## UI system and themes
+
+Before building or changing visible UI, read `docs/UI_GUIDE.md` and inspect the
+live component gallery at `/design-system`. Reuse the matching running component
+and its existing state language before creating anything new.
+
+- `src/styles/themes.css` is the skin source of truth. A theme changes tokens,
+  never workflow behavior or labels.
+- `src/lib/theme.ts` is the registered theme catalog.
+- `/design-system` must show every reusable control and its relevant default,
+  selected, disabled, loading, success, and error states.
+- New visual patterns are incomplete until their live example and guidance are
+  added to the UI system in the same change.
+- SVGs are for reusable assets such as logos and icons. Controls and interaction
+  examples remain real HTML/CSS so responsive and interactive states can be
+  verified.
+
 ## Stage processes and jobs
 
 Long-running, paid, or external work must be modeled as a stage process.

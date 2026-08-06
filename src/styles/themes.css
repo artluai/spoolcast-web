@@ -1,0 +1,62 @@
+/*
+ * SPOOLCAST THEMES
+ *
+ * A skin changes these values only. Layout, component behavior, labels, and
+ * interaction rules live elsewhere and must remain stable between themes.
+ *
+ * Add a future skin as:
+ *   :root[data-theme='theme-id'] { ...the complete token set... }
+ * Then register it in src/lib/theme.ts so the design-system gallery can test it.
+ */
+
+:root,
+:root[data-theme='spoolcast-dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #0a0c12;
+  --bg-2: #11141d;
+  --bg-3: #171a25;
+  --bg-4: #1f2330;
+  --panel: #181d2b;
+  --panel-hi: #232a3c;
+
+  /* Borders and text */
+  --line: #23283a;
+  --line-2: #323849;
+  --line-hover: #3d445a;
+  --ink: #e9ecf3;
+  --ink-2: #9098ad;
+  --ink-3: #5a6178;
+
+  /* Brand and semantic states */
+  --accent: #7aa2ff;
+  --accent-2: #9fbaff;
+  --accent-glow: rgba(122, 162, 255, .18);
+  --ai: #7aa2ff;
+  --purple: #b08bff;
+  --autopilot: #b08bff;
+  --green: #36c98c;
+  --amber: #e0a338;
+  --red: #e96a6a;
+  --on-accent: #071021;
+  --on-accent-strong: #0a0c12;
+
+  /* Reusable effects */
+  --page-grid-dot: rgba(255, 255, 255, .035);
+  --divider-soft: rgba(255, 255, 255, .045);
+  --scrim: rgba(0, 0, 0, .72);
+  --shadow-raised: 0 18px 44px rgba(0, 0, 0, .38);
+  --shadow-modal: 0 30px 80px rgba(0, 0, 0, .6);
+  --scrollbar-thumb: #262b3e;
+
+  /* Control geometry */
+  --control-height: 34px;
+  --control-radius: 9px;
+  --control-font-size: 12px;
+  --control-pad-x: 12px;
+
+  /* Type */
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

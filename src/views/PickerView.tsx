@@ -133,21 +133,39 @@ export function PickerView({
           <p className="lede">Pick up where you left off, or start something new.</p>
         </div>
 
-        <button className="blank-top solo" disabled={creatingBlank} onClick={() => void createBlank()}>
-          <span className="bt-glyph">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          <span className="bt-text">
-            <span className="bt-title">Standalone — start blank</span>
-            <span className="bt-sub">Start with your idea. Choose a series or template in Step 1.</span>
-          </span>
-          <span className="bt-cta">
-            {creatingBlank ? <span className="spin" /> : null}
-            {creatingBlank ? 'Starting…' : 'Start blank →'}
-          </span>
-        </button>
+        {/* The fork (series storyboard beat 1): the single-video column IS
+            today's blank-start flow, handler untouched. The series column is
+            visible but honestly disabled until the show-planning contract
+            lands (board t_b16d4e8b2353) — wiring it up is that task's job. */}
+        <div className="blank-fork">
+          <button className="blank-top" disabled={creatingBlank} onClick={() => void createBlank()}>
+            <span className="bt-glyph">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </span>
+            <span className="bt-text">
+              <span className="bt-title">Start a single video</span>
+              <span className="bt-sub">One idea, one video. Choose a series or template in Step 1.</span>
+            </span>
+            <span className="bt-cta">
+              {creatingBlank ? <span className="spin" /> : null}
+              {creatingBlank ? 'Starting…' : 'Start →'}
+            </span>
+          </button>
+          <button className="blank-top" disabled title="Series planning is in build — this card goes live when the show-planning contract lands">
+            <span className="bt-glyph">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </span>
+            <span className="bt-text">
+              <span className="bt-title">Start a new series</span>
+              <span className="bt-sub">A story becomes seasons and episodes. You approve every step.</span>
+            </span>
+            <span className="status-pill">In build</span>
+          </button>
+        </div>
         {blankError ? <p className="cs-error blank-error">{blankError}</p> : null}
 
         {sessions.length ? (

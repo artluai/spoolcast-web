@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Series flow storyboard — Moby Dick</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0c12; --bg-2: #11141d; --bg-3: #171a25; --bg-4: #1f2330;
+    --panel: #181d2b; --panel-hi: #232a3c;
+    --line: #23283a; --line-2: #323849; --line-hover: #3d445a;
+    --ink: #e9ecf3; --ink-2: #9098ad; --ink-3: #5a6178;
+    --accent: #7aa2ff; --accent-2: #9fbaff; --accent-glow: rgba(122,162,255,.18);
+    --ai: #7aa2ff; --purple: #b08bff; --autopilot: #b08bff;
+    --green: #36c98c; --amber: #e0a338; --red: #e96a6a;
+    --on-accent: #071021;
+    --control-height: 34px; --control-radius: 9px; --control-font-size: 12px; --control-pad-x: 12px;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); }
+  .wrap { width: min(1080px, calc(100% - 48px)); margin: 0 auto; padding: 52px 0 120px; }
+
+  .intro h1 { margin: 8px 0 10px; font-size: clamp(28px, 4vw, 42px); line-height: 1.05; letter-spacing: -.045em; }
+  .intro p { margin: 0; max-width: 700px; color: var(--ink-2); }
+  .eyebrow { color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+
+  .beat { margin-top: 58px; }
+  .beat-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .beat-num { flex: none; color: var(--accent-2); font-family: var(--mono); font-size: 11px; letter-spacing: .12em; }
+  .beat-head h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+  .beat-act { margin: 0 0 14px 0; padding-left: 0; color: var(--ink-2); font-size: 13px; max-width: 720px; }
+  .beat-act b.you { color: var(--ink); }
+  .beat-act b.ai { color: var(--accent-2); }
+
+  .frame { border: 1px solid var(--line); border-radius: 14px; background: var(--bg-2); overflow: hidden; }
+  .chrome { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: var(--bg-3); padding: 9px 14px; }
+  .chrome i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
+  .chrome span { color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; }
+  .body { padding: 26px; }
+
+  .mono-label { color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; min-height: var(--control-height); border: 1px solid var(--line-2); border-radius: var(--control-radius); background: var(--bg-3); color: var(--ink-2); padding: 0 var(--control-pad-x); font-size: var(--control-font-size); cursor: default; }
+  .btn.primary { border-color: color-mix(in srgb, var(--ai) 42%, transparent); background: color-mix(in srgb, var(--ai) 13%, transparent); color: var(--accent-2); }
+  .btn.accent { border-color: transparent; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.ghost { background: transparent; }
+  .btn.disabled { opacity: .4; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg-3); color: var(--ink-2); padding: 3px 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .pill.green { border-color: rgba(54,201,140,.35); color: var(--green); background: rgba(54,201,140,.07); }
+  .pill.amber { border-color: rgba(224,163,56,.35); color: var(--amber); background: rgba(224,163,56,.07); }
+  .pill.purple { border-color: rgba(176,139,255,.35); color: var(--purple); background: rgba(176,139,255,.07); }
+  .pill.dim { color: var(--ink-3); }
+
+  /* home card (matches the real home) */
+  .home-card { display: flex; align-items: center; gap: 18px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--bg-3); padding: 20px 22px; }
+  .home-card .plus { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; background: var(--bg-4); color: var(--ink-2); font-size: 20px; }
+  .home-card .t { flex: 1; min-width: 0; }
+  .home-card .t b { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
+  .home-card .t span { color: var(--ink-3); font-size: 13px; }
+
+  .promptbox { border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-3); padding: 16px; }
+  .promptbox p { margin: 0 0 12px; font-size: 15px; color: var(--ink); }
+  .promptbox p.placeholder { color: var(--ink-3); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg-2); color: var(--ink-2); padding: 6px 10px; font-size: 12px; }
+  .chip .k { color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+  .chip.add { border-style: dashed; color: var(--ink-3); }
+  .entry-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+  .suggest { border: 1px solid color-mix(in srgb, var(--ai) 42%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--ai) 7%, transparent); padding: 16px; margin-top: 14px; }
+  .suggest .mono-label { color: var(--accent-2); }
+  .suggest p { margin: 8px 0 12px; color: var(--ink); font-size: 13.5px; line-height: 1.5; }
+  .suggest .row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* map canvas */
+  .canvas { position: relative; background-color: #050608; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='66' height='66'%3E%3Cpath d='M33 28v10M28 33h10' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1'/%3E%3C/svg%3E"); background-size: 66px 66px; overflow-x: auto; }
+  .lane { position: relative; display: flex; align-items: center; padding: 40px 30px; min-width: max-content; }
+  .node { position: relative; flex: none; width: 172px; height: 88px; border: 1px solid var(--line-2); border-radius: 10px; background: linear-gradient(180deg,#13161f,#11141d); color: var(--ink); padding: 0 12px; overflow: hidden; }
+  .node-stripe { position: absolute; left: 0; top: 0; right: 0; height: 2px; background: var(--ink-3); }
+  .node.s-done .node-stripe { background: var(--green); }
+  .node.s-work .node-stripe { background: var(--amber); }
+  .node.running { border-color: var(--autopilot); box-shadow: 0 0 0 2px color-mix(in srgb, var(--autopilot) 50%, transparent), 0 0 24px color-mix(in srgb, var(--autopilot) 30%, transparent); }
+  .node.running .node-stripe { background: var(--purple); }
+  .node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.5), 0 12px 32px rgba(0,0,0,.38); }
+  .node.fog { border: 1px dashed rgba(130,150,190,.3); background: rgba(255,255,255,.015); opacity: .55; }
+  .node .num { position: absolute; left: 12px; right: 12px; top: 14px; font-family: var(--mono); font-size: 10px; line-height: 12px; color: var(--ink-3); letter-spacing: .12em; }
+  .node-name { position: absolute; left: 12px; right: 12px; top: 32px; font-size: 13px; line-height: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node-foot { position: absolute; left: 12px; right: 12px; bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-family: var(--mono); font-size: 10px; line-height: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-3); }
+  .node.s-done .node-foot b { color: var(--green); font-weight: 600; }
+  .node.s-work .node-foot b { color: var(--amber); font-weight: 600; }
+  .node.running .node-foot b { color: var(--purple); font-weight: 600; }
+  .link { flex: none; width: 34px; height: 1.5px; background: var(--line-2); }
+  .link.dashed { background: repeating-linear-gradient(90deg, var(--line-2) 0 5px, transparent 5px 10px); }
+  .gate { flex: none; width: 36px; height: 36px; margin: 0 8px; border: 1.5px solid var(--line-2); border-radius: 9px; background: var(--bg-3); display: grid; place-items: center; font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--ink-3); }
+  .gate.passed { border-color: rgba(54,201,140,.5); color: var(--green); }
+  .gate.waiting { border-color: rgba(224,163,56,.6); color: var(--amber); box-shadow: 0 0 0 3px rgba(224,163,56,.12); }
+  .lane-label { flex: none; width: 110px; margin-right: 14px; color: var(--ink-2); font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; line-height: 1.5; }
+  .lane-detail { width: 640px; border: 1px solid var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--ai) 5%, var(--bg-2)); box-shadow: 0 0 0 2px rgba(122,162,255,.25), 0 18px 44px rgba(0,0,0,.38); padding: 16px 18px; }
+  .beatlist { display: grid; gap: 6px; }
+  .beatline { display: flex; gap: 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-3); color: var(--ink-2); padding: 8px 11px; font-size: 12.5px; line-height: 1.45; }
+  .beatline span { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; padding-top: 2px; }
+  .beatline.sel { border-color: var(--accent); background: var(--bg-4); color: var(--ink); }
+  .lane-label i { font-style: normal; color: var(--ink-3); font-size: 9.5px; letter-spacing: .04em; }
+  .fanout-stack { flex: none; display: grid; gap: 10px; margin-left: 8px; }
+  .fan-pill { width: 200px; border: 1px dashed rgba(130,150,190,.3); border-radius: 10px; background: rgba(255,255,255,.015); color: var(--ink-3); padding: 10px 12px; font-size: 12px; }
+  .fan-pill b { display: block; color: var(--ink-2); font-size: 12px; }
+  .fan-pill span { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+
+  .detail { border-top: 1px solid var(--line); background: color-mix(in srgb, var(--ai) 4.5%, var(--bg-2)); padding: 22px 26px; }
+  .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .detail-head h3 { margin: 0; font-size: 15px; }
+  .detail-head .mono-label b { color: var(--amber); }
+  .season-cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+  .season-card { border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 14px; }
+  .season-card .k { color: var(--accent-2); font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  .season-card b { display: block; margin: 5px 0 6px; font-size: 14px; }
+  .season-card p { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+  .season-card .eps { margin-top: 10px; color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; }
+  .detail-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+  /* gates strip (compressed beats) */
+  .gatestrip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); padding: 16px 18px; }
+  .gatestrip .arrow { color: var(--ink-3); }
+
+  /* show page */
+  .showpage { display: grid; grid-template-columns: 240px minmax(0,1fr) 270px; }
+  .showpage > * { min-width: 0; }
+  .rail { border-right: 1px solid var(--line); padding: 20px 16px; display: grid; gap: 10px; align-content: start; }
+  .rail h4, .col h4, .needs h4 { margin: 0 0 4px; font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .season-row { border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 12px; }
+  .season-row.active { border-color: var(--accent); background: var(--bg-4); }
+  .season-row b { display: block; font-size: 13px; }
+  .season-row small { color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; }
+  .season-row .pill { margin-top: 8px; }
+  .col { padding: 20px; display: grid; gap: 8px; align-content: start; }
+  .ep-row { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; align-items: center; gap: 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 10px 14px; }
+  .ep-row .n { color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; }
+  .ep-row .t b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stepbar { display: flex; gap: 4px; margin-top: 6px; }
+  .stepbar span { width: 13px; height: 3px; border-radius: 2px; background: var(--line-2); }
+  .stepbar .done { background: rgba(54,201,140,.55); }
+  .stepbar .active { background: var(--accent); }
+  .stepbar .gatewait { background: var(--amber); }
+  .stepbar .run { background: var(--purple); }
+  .needs { border-left: 1px solid var(--line); padding: 20px 16px; display: grid; gap: 10px; align-content: start; }
+  .needs-card { border: 1px solid rgba(224,163,56,.4); border-radius: 10px; background: rgba(224,163,56,.05); padding: 12px; }
+  .needs-card.calm { border-color: var(--line-2); background: var(--bg-3); }
+  .needs-card .where { color: var(--amber); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .needs-card.calm .where { color: var(--accent-2); }
+  .needs-card b { display: block; margin: 5px 0 2px; font-size: 12.5px; }
+  .needs-card span { color: var(--ink-3); font-size: 11.5px; }
+  .shared { border-top: 1px solid var(--line); padding: 18px 24px 22px; }
+  .shared-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+  .cast-card { border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 11px 12px; }
+  .cast-card b { display: block; font-size: 12.5px; }
+  .cast-card small { color: var(--ink-3); font-size: 10.5px; line-height: 1.4; display: block; }
+  .cast-card .var { margin-top: 7px; display: inline-flex; border: 1px dashed rgba(176,139,255,.45); border-radius: 5px; color: var(--purple); padding: 2px 7px; font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+  .ledger { margin-top: 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-3); padding: 12px 14px; color: var(--ink-2); font-size: 12px; }
+  .ledger code { color: var(--accent-2); font-family: var(--mono); font-size: 10.5px; }
+
+  .show-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: 16px 24px; flex-wrap: wrap; }
+  .show-head .t h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+  .show-head .t .crumb { color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .show-head .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .note { margin-top: 12px; color: var(--ink-3); font-size: 12px; max-width: 720px; }
+  .note b { color: var(--ink-2); }
+
+  .fork2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) {
+    .fork2 { grid-template-columns: 1fr; }
+    .home-card { flex-wrap: wrap; }
+  }
+  @media (max-width: 900px) {
+    .showpage { grid-template-columns: 1fr; }
+    .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+    .needs { border-left: 0; border-top: 1px solid var(--line); }
+    .season-cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="intro">
+    <span class="eyebrow">Storyboard · series tier model · docs/series-tier-model.md</span>
+    <h1>The flow, beat by beat</h1>
+    <p>Each beat shows exactly what's on screen at that moment, starting from blank.
+    <b style="color:var(--ink)">You</b> = the user acts. <b style="color:var(--accent-2)">Spoolcast</b> = the drafter responds. Nothing is pre-filled — everything on screen was put there by a previous beat.</p>
+  </header>
+
+  <!-- BEAT 1 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 1</span><h2>Start a project — the fork, before any flow</h2></div>
+    <p class="beat-act">The start card becomes two columns. You already know which one you mean. <b class="you">You</b> click <b class="you">Start a new series</b>.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · new project · start a project</span></div>
+      <div class="body">
+        <div class="fork2">
+          <div class="home-card">
+            <div class="plus">+</div>
+            <div class="t">
+              <b>Start a single video</b>
+              <span>One idea, one video. Choose a series or template in Step 1.</span>
+            </div>
+            <span class="btn accent">START →</span>
+          </div>
+          <div class="home-card" style="border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.35);">
+            <div class="plus">≡</div>
+            <div class="t">
+              <b>Start a new series</b>
+              <span>A story becomes seasons and episodes. You approve every step.</span>
+            </div>
+            <span class="btn accent">START →</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>The single-video path is today's flow, untouched</b> — prompt, autopilot, the video appears. The rest of this storyboard follows the series card.</p>
+  </section>
+
+  <!-- BEAT 2 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 2</span><h2>Series intake, empty</h2></div>
+    <p class="beat-act">Same intake surface as a video — one prompt box, add sources. The only difference is invisible: this session will run the show-planning contract instead of a video contract.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · new series · intake</span></div>
+      <div class="body">
+        <div class="promptbox">
+          <p class="placeholder">Describe the series — and add everything you have…</p>
+          <div class="chips">
+            <span class="chip add">+ add sources</span>
+          </div>
+        </div>
+        <div class="entry-foot">
+          <span class="btn primary disabled">Continue →</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BEAT 3 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 3</span><h2>You type, you attach, you continue</h2></div>
+    <p class="beat-act"><b class="you">You</b> write the prompt and drop in what you have — a mood board and some notes. Then <b class="you">Continue</b>.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · new series · intake</span></div>
+      <div class="body">
+        <div class="promptbox">
+          <p>Make a series about Moby Dick in anime format</p>
+          <div class="chips">
+            <span class="chip"><span class="k">IMG</span> anime-mood-board · 14 images</span>
+            <span class="chip"><span class="k">MD</span> my-notes.md</span>
+            <span class="chip add">+ add sources</span>
+          </div>
+        </div>
+        <div class="entry-foot">
+          <span class="btn primary">Continue →</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BEAT 4 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 4</span><h2>The planning map appears, working</h2></div>
+    <p class="beat-act">The same map UI you use today — three steps instead of twelve. <b class="ai">Spoolcast</b> is ingesting: it noticed Moby Dick is public domain and is fetching the book itself. You wait or leave; it's a normal running step.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · moby-dick · show planning</span></div>
+      <div class="canvas">
+        <div class="lane">
+          <div class="node running">
+            <span class="node-stripe"></span>
+            <span class="num">S·01</span>
+            <span class="node-name">Ingest sources</span>
+            <div class="node-foot"><b>Running</b><small>FETCHING BOOK…</small></div>
+          </div>
+          <span class="link"></span><span class="gate">·</span><span class="link dashed"></span>
+          <div class="node fog">
+            <span class="node-stripe"></span>
+            <span class="num">S·02</span>
+            <span class="node-name">Season breakdown</span>
+            <div class="node-foot"><b>Waiting</b><small>—</small></div>
+          </div>
+          <span class="link dashed"></span><span class="gate">·</span><span class="link dashed"></span>
+          <div class="node fog">
+            <span class="node-stripe"></span>
+            <span class="num">S·03</span>
+            <span class="node-name">World &amp; cast</span>
+            <div class="node-foot"><b>Waiting</b><small>—</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BEAT 6 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 5</span><h2>First gate: the season proposal</h2></div>
+    <p class="beat-act">Ingest finished. <b class="ai">Spoolcast</b> read the whole book and proposes a shape. This is where "3 seasons × 10 episodes" comes from — proposed, not picked from a menu. <b class="you">You</b> approve, edit, or re-draft with a note.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · moby-dick · show planning</span></div>
+      <div class="canvas">
+        <div class="lane">
+          <div class="node s-done">
+            <span class="node-stripe"></span>
+            <span class="num">S·01</span>
+            <span class="node-name">Ingest sources</span>
+            <div class="node-foot"><b>Done</b><small>3 SOURCES</small></div>
+          </div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-work selected">
+            <span class="node-stripe"></span>
+            <span class="num">S·02</span>
+            <span class="node-name">Season breakdown</span>
+            <div class="node-foot"><b>Proposed</b><small>3 SEASONS</small></div>
+          </div>
+          <span class="link"></span><span class="gate waiting">!</span><span class="link dashed"></span>
+          <div class="node fog">
+            <span class="node-stripe"></span>
+            <span class="num">S·03</span>
+            <span class="node-name">World &amp; cast</span>
+            <div class="node-foot"><b>Waiting</b><small>—</small></div>
+          </div>
+        </div>
+      </div>
+      <div class="detail">
+        <div class="detail-head">
+          <h3>Proposed: Moby Dick as three seasons</h3>
+          <span class="mono-label">GATE S·02 · <b>NEEDS YOUR APPROVAL</b></span>
+        </div>
+        <div class="season-cards">
+          <div class="season-card">
+            <span class="k">Season 1 · 10 EP</span>
+            <b>The Sea and the Ship</b>
+            <p>Ishmael comes to New Bedford, meets Queequeg, signs onto the Pequod. Departure on Christmas day. Ahab stays unseen until the season's last shot.</p>
+            <div class="eps">ARC: WONDER → UNEASE</div>
+          </div>
+          <div class="season-card">
+            <span class="k">Season 2 · 10 EP</span>
+            <b>The Hunt</b>
+            <p>Ahab nails the doubloon to the mast and the voyage becomes his. Gams with passing ships, first lowerings, omens gathering. Starbuck's quiet resistance.</p>
+            <div class="eps">ARC: OBSESSION TAKES THE SHIP</div>
+          </div>
+          <div class="season-card">
+            <span class="k">Season 3 · 10 EP</span>
+            <b>The White Whale</b>
+            <p>The prophecies close in. The typhoon, the lost lifebuoy, Queequeg's coffin. The three-day chase, the wreck, and Ishmael alone on the sea.</p>
+            <div class="eps">ARC: FATE ARRIVES</div>
+          </div>
+        </div>
+        <div class="detail-actions">
+          <span class="btn primary">Approve breakdown</span>
+          <span class="btn">Edit seasons</span>
+          <span class="btn ghost">Re-draft with note…</span>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>Structurally identical to step 2 today</b> — the drafter proposing three core messages, at a bigger scale. The anime style and narration-vs-dialogue question get proposed the same way at the next gate (world &amp; cast), where the drafter has the mood board in hand.</p>
+  </section>
+
+  <!-- BEAT 7 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 6</span><h2>Two more gates of the same shape, then fan-out</h2></div>
+    <p class="beat-act">Same gesture, repeated: <b class="ai">Spoolcast</b> proposes the world &amp; cast, <b class="you">you</b> approve. Per season it proposes the 10-episode list with a brief each, <b class="you">you</b> approve. Approving a season's list triggers fan-out — ten real sessions are created.</p>
+    <div class="gatestrip">
+      <span class="pill green">✓ SEASONS APPROVED</span>
+      <span class="arrow">→</span>
+      <span class="pill green">✓ WORLD &amp; CAST APPROVED</span>
+      <span class="arrow">→</span>
+      <span class="pill green">✓ S1 EPISODE LIST APPROVED</span>
+      <span class="arrow">→</span>
+      <span class="pill purple">FAN-OUT · 10 EPISODE SESSIONS CREATED</span>
+    </div>
+  </section>
+
+  <!-- BEAT 8 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 7</span><h2>The show page — where you live from now on</h2></div>
+    <p class="beat-act">This page now exists because a show exists. It has <b class="you">two views of the same ten episodes</b>. <b>List</b> is for managing: compact rows, and the <b class="you">Needs you</b> rail jumps you to whatever is blocked. <b>Map</b> (next frame) is for editing: every episode's full map, open at once.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · shows · moby-dick</span></div>
+      <div class="show-head">
+        <div class="t">
+          <span class="crumb">SHOW</span>
+          <h3>Moby Dick</h3>
+        </div>
+        <div class="badges">
+          <span class="pill" style="border-color: var(--accent); color: var(--accent-2);">VIEW: LIST</span>
+          <span class="pill dim">MAP</span>
+          <span class="pill">ANIME</span>
+          <span class="pill green">NARRATION-FIRST</span>
+          <span class="pill dim">30 EPISODES PLANNED</span>
+          <span class="pill dim">2 PUBLISHED</span>
+        </div>
+      </div>
+      <div class="showpage">
+        <aside class="rail">
+          <h4>Seasons</h4>
+          <div class="season-row active">
+            <b>S1 · The Sea and the Ship</b>
+            <small>10 EPISODES · FANNED OUT</small><br>
+            <span class="pill green">2 PUBLISHED</span>
+          </div>
+          <div class="season-row">
+            <b>S2 · The Hunt</b>
+            <small>EPISODE LIST PROPOSED</small><br>
+            <span class="pill amber">NEEDS APPROVAL</span>
+          </div>
+          <div class="season-row">
+            <b>S3 · The White Whale</b>
+            <small>ARC APPROVED</small><br>
+            <span class="pill dim">PLAN EPISODES →</span>
+          </div>
+        </aside>
+
+        <main class="col">
+          <h4>Season 1 · Episodes</h4>
+          <div class="ep-row">
+            <span class="n">E01</span>
+            <div class="t"><b>Loomings</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span></div>
+            </div>
+            <span class="pill green">PUBLISHED</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E02</span>
+            <div class="t"><b>The Spouter-Inn</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span></div>
+            </div>
+            <span class="pill green">PUBLISHED</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E03</span>
+            <div class="t"><b>A Bosom Friend</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="gatewait"></span><span></span></div>
+            </div>
+            <span class="pill amber">GATE · STEP 11 REVIEW</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E04</span>
+            <div class="t"><b>The Sermon</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="run"></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill purple">AUTOPILOT · RENDERING</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E05</span>
+            <div class="t"><b>Nantucket</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="gatewait"></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill amber">GATE · STEP 7 BOARD</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E06</span>
+            <div class="t"><b>The Pequod</b>
+              <div class="stepbar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="active"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill">DRAFTING</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E07</span>
+            <div class="t"><b>Signing On</b>
+              <div class="stepbar"><span class="done"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill dim">QUEUED</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E08</span>
+            <div class="t"><b>The Prophet</b>
+              <div class="stepbar"><span class="done"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill dim">QUEUED</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E09</span>
+            <div class="t"><b>Christmas Departure</b>
+              <div class="stepbar"><span class="done"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill dim">QUEUED</span>
+          </div>
+          <div class="ep-row">
+            <span class="n">E10</span>
+            <div class="t"><b>Ahab</b>
+              <div class="stepbar"><span class="done"></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            </div>
+            <span class="pill dim">QUEUED</span>
+          </div>
+        </main>
+
+        <aside class="needs">
+          <h4>Needs you · 3</h4>
+          <div class="needs-card">
+            <span class="where">S1 · E03 · STEP 11</span>
+            <b>Visual review ready</b>
+            <span>Approve the render of "A Bosom Friend" → opens that episode's map at step 11.</span>
+          </div>
+          <div class="needs-card">
+            <span class="where">S1 · E05 · STEP 7</span>
+            <b>Shot board waiting</b>
+            <span>Board compiled; review shots before render contract.</span>
+          </div>
+          <div class="needs-card calm">
+            <span class="where">S2 · SEASON PLAN</span>
+            <b>Episode list proposed</b>
+            <span>10 episodes for "The Hunt" — approve to fan out.</span>
+          </div>
+        </aside>
+      </div>
+
+      <div class="shared">
+        <h4>Shared across every episode · edited here, inherited by reference</h4>
+        <div class="shared-grid">
+          <div class="cast-card"><b>Ishmael</b><small>Narrator &amp; witness. Anime: lean, wind-worn coat.</small></div>
+          <div class="cast-card"><b>Ahab</b><small>Captain. Scar like a lightning seam.</small><span class="var">+ VARIATION: YOUNG AHAB · S2E4 FLASHBACK</span></div>
+          <div class="cast-card"><b>Queequeg</b><small>Harpooneer. Tattooed, calm, royal.</small></div>
+          <div class="cast-card"><b>Starbuck</b><small>First mate. The ship's conscience.</small></div>
+          <div class="cast-card"><b>The Pequod</b><small>World kit: the ship as a place — deck, masthead, cabin.</small></div>
+          <div class="cast-card"><b>Style</b><small>Anime, painted seas, ukiyo-e wave language from the mood board.</small></div>
+        </div>
+        <div class="ledger">
+          <b>Continuity ledger</b> — a character has states; a scene points at a state.
+          <code>ahab: whole → ivory leg (before S1)</code> · <code>queequeg: well → fever S3E4 → recovered S3E6</code> · <code>coffin: built S3E4 → lifebuoy S3E9</code>
+        </div>
+      </div>
+    </div>
+
+    <p class="beat-act" style="margin-top: 26px;">Same page, <b class="you">Map view</b>: every episode's full map as a lane, all open at once. Because every episode runs the same contract, the columns line up — scan straight down a column to compare the same step across episodes, and click into any node to edit right there. Go back and forth freely; this is the editor's view of a season.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · shows · moby-dick</span></div>
+      <div class="show-head">
+        <div class="t">
+          <span class="crumb">SHOW · SEASON 1</span>
+          <h3>Moby Dick</h3>
+        </div>
+        <div class="badges">
+          <span class="pill dim">LIST</span>
+          <span class="pill" style="border-color: var(--accent); color: var(--accent-2);">VIEW: MAP</span>
+        </div>
+      </div>
+      <div class="canvas">
+        <div class="lane" style="padding-bottom: 8px;">
+          <span class="lane-label">E01<br><i>Loomings</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">10</span><span class="node-name">Visual assets</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">12</span><span class="node-name">Publish</span><div class="node-foot"><b>Live</b></div></div>
+        </div>
+        <div class="lane" style="padding-top: 8px; padding-bottom: 8px;">
+          <span class="lane-label">E03<br><i>A Bosom Friend</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-work selected"><span class="node-stripe"></span><span class="num">10</span><span class="node-name">Visual assets</span><div class="node-foot"><b>Review</b><small>GATE</small></div></div>
+          <span class="link"></span><span class="gate waiting">!</span><span class="link dashed"></span>
+          <div class="node fog"><span class="node-stripe"></span><span class="num">12</span><span class="node-name">Publish</span><div class="node-foot"><b>Waiting</b></div></div>
+        </div>
+        <div class="lane" style="padding-top: 8px; padding-bottom: 8px;">
+          <span class="lane-label">E05<br><i>Nantucket</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate waiting">!</span><span class="link"></span>
+          <div class="node s-work selected"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Gate</b><small>WAITING</small></div></div>
+          <span class="link dashed"></span><span class="gate">·</span><span class="link dashed"></span>
+          <div class="node fog"><span class="node-stripe"></span><span class="num">10</span><span class="node-name">Visual assets</span><div class="node-foot"><b>Waiting</b></div></div>
+          <span class="link dashed"></span><span class="gate">·</span><span class="link dashed"></span>
+          <div class="node fog"><span class="node-stripe"></span><span class="num">12</span><span class="node-name">Publish</span><div class="node-foot"><b>Waiting</b></div></div>
+        </div>
+        <div class="lane" style="padding-top: 8px;">
+          <span class="lane-label" style="color: var(--ink-3);">+ 7 MORE<br><i>E02 · E04 · E06–E10</i></span>
+          <div class="fan-pill" style="width: 640px;">Lanes render as you scroll — every episode of the season is here, in order.</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="beat-act" style="margin-top: 26px;">And when you <b class="you">click a node</b> — here E03's step 04 — that step's normal editing surface unfolds under its lane, full width. The lanes below slide down; everything else stays put. It's the same editor the episode's own map opens, embedded in place. Close it and the lane snaps back. Expand as many as you want.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · shows · moby-dick · map view</span></div>
+      <div class="canvas">
+        <div class="lane" style="padding-bottom: 8px;">
+          <span class="lane-label">E01<br><i>Loomings</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Done</b></div></div>
+        </div>
+        <div class="lane" style="padding-top: 8px; padding-bottom: 0;">
+          <span class="lane-label">E03<br><i>A Bosom Friend</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done selected"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Open</b><small>EDITING</small></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done" style="opacity:.55;"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Done</b></div></div>
+        </div>
+        <div class="lane" style="padding-top: 0; padding-bottom: 8px;">
+          <span class="lane-label"></span>
+          <div class="lane-detail">
+            <div class="detail-head" style="margin-bottom: 10px;">
+              <h3>E03 · Step 04 · Structure</h3>
+              <span class="mono-label">SAME EDITOR AS THE EPISODE MAP · <b style="color:var(--accent-2)">EDITING IN PLACE</b></span>
+            </div>
+            <div class="beatlist">
+              <div class="beatline"><span>B1</span> Cold open — Ishmael wakes pinned under Queequeg's tattooed arm; panic, then laughter.</div>
+              <div class="beatline"><span>B2</span> Breakfast at the Spouter-Inn — whalemen size each other up in silence.</div>
+              <div class="beatline sel"><span>B3</span> Queequeg's story — Rokovoko, the prince who rowed out to see the world and never went home.</div>
+              <div class="beatline"><span>B4</span> The pact — the tomahawk pipe passed back and forth; "married," says Queequeg.</div>
+              <div class="beatline"><span>B5</span> Button — Ishmael splits his money with him without being asked.</div>
+            </div>
+            <div class="detail-actions" style="margin-top: 12px;">
+              <span class="btn primary">Save</span>
+              <span class="btn ghost">Re-draft with note…</span>
+              <span class="btn ghost">Open full episode →</span>
+              <span class="btn ghost" style="margin-left:auto;">Close ✕</span>
+            </div>
+          </div>
+        </div>
+        <div class="lane" style="padding-top: 8px; padding-bottom: 8px;">
+          <span class="lane-label">E05<br><i>Nantucket</i></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">01</span><span class="node-name">Intake</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done"><span class="node-stripe"></span><span class="num">04</span><span class="node-name">Structure</span><div class="node-foot"><b>Done</b></div></div>
+          <span class="link"></span><span class="gate waiting">!</span><span class="link"></span>
+          <div class="node s-work"><span class="node-stripe"></span><span class="num">07</span><span class="node-name">Board &amp; shots</span><div class="node-foot"><b>Gate</b><small>WAITING</small></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BEAT 9 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 8</span><h2>Inside an episode: today's map, untouched</h2></div>
+    <p class="beat-act"><b class="you">You</b> click E05 from the show page. This is the UI you already use every day — the only differences are the breadcrumb and that the world-kit step arrived already settled, inherited from the show.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · moby-dick · s1 · e05 nantucket</span></div>
+      <div class="show-head">
+        <div class="t">
+          <span class="crumb">MOBY DICK › SEASON 1 › EPISODE 5</span>
+          <h3>Nantucket</h3>
+        </div>
+        <div class="badges"><span class="pill purple">AUTOPILOT PAUSED AT GATE</span></div>
+      </div>
+      <div class="canvas">
+        <div class="lane">
+          <div class="node s-done">
+            <span class="node-stripe"></span><span class="num">01</span>
+            <span class="node-name">Intake</span>
+            <div class="node-foot"><b>Done</b><small>EP BRIEF</small></div>
+          </div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done">
+            <span class="node-stripe"></span><span class="num">04</span>
+            <span class="node-name">Structure</span>
+            <div class="node-foot"><b>Done</b><small>BEATS</small></div>
+          </div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-done">
+            <span class="node-stripe"></span><span class="num">05</span>
+            <span class="node-name">World kit</span>
+            <div class="node-foot"><b>Done</b><small>INHERITED · SHOW</small></div>
+          </div>
+          <span class="link"></span><span class="gate passed">✓</span><span class="link"></span>
+          <div class="node s-work selected">
+            <span class="node-stripe"></span><span class="num">07</span>
+            <span class="node-name">Board &amp; shots</span>
+            <div class="node-foot"><b>Gate</b><small>WAITING</small></div>
+          </div>
+          <span class="link"></span><span class="gate waiting">!</span><span class="link dashed"></span>
+          <div class="node fog">
+            <span class="node-stripe"></span><span class="num">10</span>
+            <span class="node-name">Visual assets</span>
+            <div class="node-foot"><b>Waiting</b><small>—</small></div>
+          </div>
+          <span class="link dashed"></span>
+          <div class="node fog">
+            <span class="node-stripe"></span><span class="num">12</span>
+            <span class="node-name">Publish</span>
+            <div class="node-foot"><b>Waiting</b><small>→ SHOW PAGE</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>That's the whole flow.</b> Two cards on the start page, one short planning map with gates, one show page. Everything else on these screens already exists today.</p>
+  </section>
+
+  <!-- BEAT 9 -->
+  <section class="beat">
+    <div class="beat-head"><span class="beat-num">BEAT 9 · ASIDE</span><h2>The safety net on the other path</h2></div>
+    <p class="beat-act">Someone picks <b class="you">Start a single video</b> but attaches a whole manuscript. <b class="ai">Spoolcast</b> may suggest switching — once, dismissible. Decline and it's a normal video session; nothing changed.</p>
+    <div class="frame">
+      <div class="chrome"><i></i><i></i><i></i><span>spoolcast · session · step 1 · intake</span></div>
+      <div class="body">
+        <div class="promptbox">
+          <p>Make a video from my novel</p>
+          <div class="chips">
+            <span class="chip"><span class="k">TXT</span> my-novel.txt · 96,000 words</span>
+            <span class="chip add">+ add sources</span>
+          </div>
+        </div>
+        <div class="suggest">
+          <span class="mono-label">AI · FROM YOUR SOURCES</span>
+          <p>96,000 words is a lot for one video. This might want to be a <b>series</b> — I can plan it as seasons and episodes instead.</p>
+          <div class="row">
+            <span class="btn primary">Switch to a series →</span>
+            <span class="btn ghost">No — one video</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

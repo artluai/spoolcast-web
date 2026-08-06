@@ -3,6 +3,8 @@ import { Pill } from '../../components/common/Pill'
 import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { FeedbackButton } from './FeedbackButton'
+import { ModelPicker } from './ModelPicker'
 import { RulesPanel } from './RulesPanel'
 
 // Advanced generation options: what else to draft and where the video ships.
@@ -154,7 +156,7 @@ export function PackagePublishStage({
   // from the script + core message + series rules) writes working/video-meta.json;
   // fields are editable after. The ▾ carries optional guidance to the model.
   const [metaGen, setMetaGen] = useState<GenState>('idle')
-  const [metaModel] = useState(DEFAULT_MODEL_ID)
+  const [metaModel, setMetaModel] = useState(DEFAULT_MODEL_ID)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [synopsis, setSynopsis] = useState('')
@@ -411,11 +413,15 @@ export function PackagePublishStage({
       <section className="pkg-section">
         <span className="eyebrow">Title &amp; description</span>
         <div className="pkg-gen-row">
-          <button type="button" disabled={metaGen === 'working'} onClick={() => generateMeta('')}>
-            {metaGen === 'working'
-              ? (<><span className="spin" /> Drafting…</>)
-              : metaGen === 'ready' ? '✦ Regenerate title & description' : '✦ Generate title & description'}
-          </button>
+          <FeedbackButton
+            label={metaGen === 'ready' ? 'Regenerate title & description' : 'Generate title & description'}
+            busyLabel="Drafting…"
+            busy={metaGen === 'working'}
+            ruleStep="package_widescreen"
+            placeholder="Tell the AI what the title and description should emphasize — e.g. “lead with the twist”, “calmer tone”…"
+            onRun={(feedback) => generateMeta(feedback, metaModel)}
+          />
+          <ModelPicker model={metaModel} onChange={setMetaModel} disabled={metaGen === 'working'} />
           <span className="pkg-meta">drafted from the script, series rules, and the rules below</span>
         </div>
         {/* ADVANCED: what else gets drafted and where the video ships. The
@@ -527,11 +533,14 @@ export function PackagePublishStage({
       <section className="pkg-section">
         <span className="eyebrow">Thumbnail</span>
         <div className="pkg-gen-row">
-          <button type="button" disabled={thumb.gen === 'working'} onClick={() => generateThumbs('')}>
-            {thumb.gen === 'working'
-              ? (<><span className="spin" /> Generating…</>)
-              : thumb.versions.length ? '✦ Regenerate thumbnails' : '✦ Generate thumbnails'}
-          </button>
+          <FeedbackButton
+            label={thumb.versions.length ? 'Regenerate thumbnails' : 'Generate thumbnails'}
+            busyLabel="Generating…"
+            busy={thumb.gen === 'working'}
+            ruleStep="package_widescreen"
+            placeholder="Tell the AI what the covers should show — e.g. “close on the character”, “bolder colors”…"
+            onRun={(feedback) => generateThumbs(feedback)}
+          />
           <label className="pkg-count">
             <select className="sc-select" value={thumbCount} onChange={(e) => setThumbCount(Number(e.target.value))} disabled={thumb.gen === 'working'}>
               {Array.from({ length: MAX_THUMBS }, (_, i) => i + 1).map((n) => (

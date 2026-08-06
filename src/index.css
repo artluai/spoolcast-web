@@ -1,31 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg: #0a0c12;
-  --bg-2: #11141d;
-  --bg-3: #171a25;
-  --bg-4: #1f2330;
-  /* raised panels — clearly lighter than the page so they read on dim/mobile screens */
-  --panel: #181d2b;
-  --panel-hi: #232a3c;
-  --line: #23283a;
-  --line-2: #323849;
-  --ink: #e9ecf3;
-  --ink-2: #9098ad;
-  --ink-3: #5a6178;
-  --accent: #7aa2ff;
-  --accent-2: #9fbaff;
-  --accent-glow: rgba(122, 162, 255, .18);
-  --green: #36c98c;
-  --amber: #e0a338;
-  --purple: #b08bff;
-  --red: #e96a6a;
-  --control-height: 34px;
-  --control-radius: 9px;
-  --control-font-size: 12px;
-  --control-pad-x: 12px;
-  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--ink);
   background: var(--bg);
   font-family: var(--sans);
@@ -43,7 +18,7 @@ button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #262b3e; border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; border: 2px solid var(--bg); }
 
 /* 100dvh (not 100%/100vh) so the layout matches the *visible* area on mobile —
    in-app browser toolbars otherwise push the footer behind the bottom chrome. */
@@ -51,7 +26,7 @@ button { cursor: pointer; }
 main {
   min-height: 0;
   background:
-    radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 1px) 0 0/24px 24px,
+    radial-gradient(circle at 1px 1px, var(--page-grid-dot) 1px, transparent 1px) 0 0/24px 24px,
     var(--bg);
   overflow: hidden;
 }
@@ -78,7 +53,7 @@ body.header-float header { background: transparent; border-bottom-color: transpa
 .mark, .login-mark {
   display: grid;
   place-items: center;
-  color: #0a0c12;
+  color: var(--on-accent-strong);
   font-weight: 700;
   background: linear-gradient(135deg, var(--accent), #9d7aff);
 }
@@ -118,7 +93,7 @@ body.header-float header { background: transparent; border-bottom-color: transpa
 .btn-soft:hover, .btn-soft.active, .detail-head button:hover:not(:disabled), .detail-command-bar button:hover:not(:disabled), .cast-head button:hover {
   background: var(--bg-3);
   color: var(--ink);
-  border-color: #3d445a;
+  border-color: var(--line-hover);
 }
 .autopilot {
   display: inline-flex;
@@ -171,7 +146,7 @@ footer {
   border: 1px solid var(--line-2);
   font-weight: 600;
 }
-.primary-cta { color: #071021; background: var(--accent); border-color: var(--accent); box-shadow: 0 16px 42px rgba(122,162,255,.24); }
+.primary-cta { color: var(--on-accent); background: var(--accent); border-color: var(--accent); box-shadow: 0 16px 42px rgba(122,162,255,.24); }
 .or-divider { margin: 18px 0 10px; color: var(--ink-3); font-size: 12px; }
 .google-btn { display: flex; align-items: center; justify-content: center; gap: 12px; background: #fff; color: #20242d; }
 .g { color: #4285f4; font-weight: 700; }
@@ -501,9 +476,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .detail-command-bar > button,
 .detail-command-bar > span:not(.step-ai-control) > button { height: var(--control-height); min-height: var(--control-height); padding-block: 0; font-size: var(--control-font-size); }
 .step-ai-control { display: inline-flex; flex: 0 1 auto; max-width: min(620px, 100%); }
-.step-ai-control .save-continue { min-height: var(--control-height); padding-block: 0; border-color: rgba(176,139,255,.42); background: rgba(176,139,255,.13); color: #d7c5ff; font-size: var(--control-font-size); }
-.step-ai-control .save-continue:hover:not(:disabled) { border-color: var(--purple); background: rgba(176,139,255,.2); color: #eee7ff; }
-.step-ai-control > div { width: min(620px, calc(100vw - 84px)); min-width: 340px; margin-top: 0 !important; background: rgba(176,139,255,.045) !important; }
+.step-ai-control .save-continue { min-height: var(--control-height); padding-block: 0; border-color: color-mix(in srgb, var(--ai) 42%, transparent); background: color-mix(in srgb, var(--ai) 13%, transparent); color: var(--accent-2); font-size: var(--control-font-size); }
+.step-ai-control .save-continue:hover:not(:disabled) { border-color: var(--ai); background: color-mix(in srgb, var(--ai) 20%, transparent); color: var(--ink); }
+.step-ai-control > div { width: min(620px, calc(100vw - 84px)); min-width: 340px; margin-top: 0 !important; background: color-mix(in srgb, var(--ai) 4.5%, transparent) !important; }
 .detail-history-actions { display: inline-flex; gap: 8px; }
 .detail-menu-anchor { position: relative; display: inline-flex; }
 .detail-menu-anchor > .detail-action-menu { position: absolute; top: calc(100% + 6px); left: 0; width: min(290px, calc(100vw - 48px)); min-width: 0; z-index: 1000; }
@@ -918,9 +893,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid rgba(176,139,255,.45);
-  background: rgba(176,139,255,.08);
-  color: var(--purple);
+  border: 1px solid color-mix(in srgb, var(--autopilot) 45%, transparent);
+  background: color-mix(in srgb, var(--autopilot) 8%, transparent);
+  color: var(--autopilot);
   font-family: var(--sans);
   font-weight: 600;
   font-size: 13.5px;
@@ -928,10 +903,10 @@ body.chat-pinned .detail-card.full { right: 380px; }
   padding: 0 18px;
   transition: background .14s, border-color .14s;
 }
-.autopilot-btn:hover:not(:disabled) { background: rgba(176,139,255,.16); border-color: var(--purple); }
+.autopilot-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--autopilot) 16%, transparent); border-color: var(--autopilot); }
 
 /* autopilot runs ON the canvas — the active node pulses as it's worked on */
-.node.running { border-color: var(--purple); box-shadow: 0 0 0 2px rgba(176,139,255,.5), 0 0 24px rgba(176,139,255,.3); animation: apPulse 1.2s ease-in-out infinite; }
+.node.running { border-color: var(--autopilot); box-shadow: 0 0 0 2px color-mix(in srgb, var(--autopilot) 50%, transparent), 0 0 24px color-mix(in srgb, var(--autopilot) 30%, transparent); animation: apPulse 1.2s ease-in-out infinite; }
 @keyframes apPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(176,139,255,.5), 0 0 18px rgba(176,139,255,.22); } 50% { box-shadow: 0 0 0 3px rgba(176,139,255,.7), 0 0 30px rgba(176,139,255,.4); } }
 
 /* stop banner shown while autopilot is running */
@@ -945,14 +920,14 @@ body.chat-pinned .detail-card.full { right: 380px; }
   align-items: center;
   gap: 12px;
   padding: 10px 12px 10px 16px;
-  border: 1px solid rgba(176,139,255,.45);
+  border: 1px solid color-mix(in srgb, var(--autopilot) 45%, transparent);
   border-radius: 999px;
   background: rgba(24,20,38,.94);
   box-shadow: 0 16px 40px rgba(0,0,0,.5);
   color: var(--ink-2);
   font-size: 13px;
 }
-.autopilot-bar .spin { color: var(--purple); }
+.autopilot-bar .spin { color: var(--autopilot); }
 .autopilot-bar button {
   border: 1px solid var(--line-2);
   background: var(--bg-3);
@@ -966,7 +941,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .autopilot-bar button:hover { background: rgba(233,106,106,.14); border-color: var(--red); color: var(--red); }
 .autopilot-btn:disabled { background: var(--bg-3); border-color: var(--line-2); color: var(--ink-3); cursor: not-allowed; }
 .autopilot-btn:disabled .ap-spark { color: var(--ink-3); }
-.autopilot-btn .ap-spark { color: var(--purple); }
+.autopilot-btn .ap-spark { color: var(--autopilot); }
 
 .table-wrap { overflow: auto; }
 .shots { width: 100%; border-collapse: collapse; min-width: 980px; }
@@ -1024,13 +999,13 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vg-advanced-actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: 8px; }
 .vg-advanced-actions .vg-action-btn { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; white-space: nowrap; }
 .vg-advanced-actions .vp-undo.on { color: var(--ink); border-color: var(--accent); background: var(--accent-glow); }
-.vg-split-action { display: inline-flex; align-items: stretch; height: var(--control-height); min-height: var(--control-height); box-sizing: border-box; border: 1px solid var(--line-2); border-radius: var(--control-radius); overflow: hidden; background: var(--bg-3); }
-.vg-split-action:hover { background: var(--bg-4); border-color: var(--accent); }
+.vg-split-action { display: inline-flex; align-items: stretch; height: var(--control-height); min-height: var(--control-height); box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--ai) 45%, transparent); border-radius: var(--control-radius); overflow: hidden; background: color-mix(in srgb, var(--ai) 8%, var(--bg-3)); }
+.vg-split-action:hover { background: color-mix(in srgb, var(--ai) 14%, var(--bg-3)); border-color: var(--ai); }
 .vg-split-action:has(button:disabled) { opacity: .4; cursor: default; }
-.vg-split-toggle { width: 42px; height: 100%; min-height: 0; box-sizing: border-box; border: 0; border-right: 1px solid var(--line-2); background: transparent; color: var(--ink-2); font-family: var(--mono); font-size: 11px; cursor: pointer; }
-.vg-split-action:hover .vg-split-toggle { border-right-color: var(--accent); color: var(--ink); }
+.vg-split-toggle { width: var(--control-height); height: 100%; min-height: 0; box-sizing: border-box; border: 0; border-right: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); background: transparent; color: var(--ai); font-family: var(--mono); font-size: 11px; cursor: pointer; }
+.vg-split-action:hover .vg-split-toggle { border-right-color: var(--ai); color: var(--ink); }
 .vg-split-toggle:disabled { color: var(--ink-3); cursor: not-allowed; }
-.vg-split-action .vg-split-main { width: auto; min-width: 210px; height: 100%; min-height: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); font-weight: 400; color: var(--ink-2); }
+.vg-split-action .vg-split-main { width: auto; min-width: 0; height: 100%; min-height: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); font-weight: 400; color: var(--ai); }
 .vg-split-action .vg-split-main:hover:not(:disabled) { background: transparent; color: var(--ink); }
 .vg-split-action .vg-split-main:disabled { background: transparent; border: 0; }
 .vg-regen-note-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-top: 10px; padding: 12px; border: 1px dashed var(--line-2); border-radius: 8px; background: rgba(255,255,255,.015); }
@@ -1402,6 +1377,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
    opacity:.4 + pointer-events:none (the same running-job treatment used elsewhere). */
 /* Step 12 — Package & publish: flat hairline sections, same language as .vr-export.
    Buttons ride the shared quiet-button group (see the .struct-head/.ch/.gal-bar rule). */
+.detail-card.step-build .detail-body { padding: 34px var(--detail-gutter) 40px; }
 .pkg-section { border-top: 1px solid var(--line); padding: 14px 0 16px; }
 .pkg-section:first-child { border-top: 0; padding-top: 0; }
 .pkg-section .eyebrow { display: block; margin-bottom: 12px; }
@@ -1727,7 +1703,7 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-img-row .vp-img-head { flex: 1; min-width: 0; }
 
 /* unified dropdown trigger (⋯ / "Edit ▾") */
-.vp-menu-btn { min-height: var(--control-height); background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: var(--control-radius); padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); cursor: pointer; }
+.vp-menu-btn { min-height: var(--control-height); box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: var(--control-radius); padding: 0 var(--control-pad-x); font-family: var(--sans); font-size: var(--control-font-size); cursor: pointer; }
 .vp-menu-btn:hover { background: var(--bg-4); color: var(--ink); border-color: var(--accent); }
 .vp-row-menu { flex: none; background: none; border: 1px solid var(--line); color: var(--ink-3); border-radius: 5px; padding: 1px 9px 3px; font-size: 14px; line-height: 1; cursor: pointer; }
 .vp-row-menu:hover { color: var(--ink); border-color: var(--accent); background: var(--bg-3); }
@@ -1776,9 +1752,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .step1-choice-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .step1-choice-copy { display: flex; min-height: 62px; flex-direction: column; gap: 4px; padding: 10px 12px 12px; }
 .step1-choice-copy > span { display: -webkit-box; overflow: hidden; color: var(--ink-3); font-size: 11.5px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.step1-choice-card.ai { border-color: rgba(176,139,255,.45); background: rgba(176,139,255,.07); }
-.step1-choice-card.ai b { color: var(--purple); }
-.step1-choice-thumb.ai { color: var(--purple); background: rgba(176,139,255,.07); }
+.step1-choice-card.ai { border-color: color-mix(in srgb, var(--ai) 45%, transparent); background: color-mix(in srgb, var(--ai) 7%, transparent); }
+.step1-choice-card.ai b { color: var(--ai); }
+.step1-choice-thumb.ai { color: var(--ai); background: color-mix(in srgb, var(--ai) 7%, transparent); }
 .step1-choice-card.new .step1-choice-thumb { color: var(--accent-2); }
 .step1-choice-remove { position: absolute; top: 8px; right: 8px; z-index: 2; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 7px; background: rgba(8,10,16,.86); color: var(--ink-2); cursor: pointer; opacity: 0; transition: opacity .12s, border-color .12s, color .12s; }
 .step1-choice-wrap:hover .step1-choice-remove, .step1-choice-remove:focus-visible { opacity: 1; }
@@ -1848,8 +1824,8 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .vp-map-kitbtns { display: inline-flex; align-items: center; gap: 8px; }
 .vp-map-shotshead, .vp-map-kithead { height: 40px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .vp-map-shotshead .vp-map-colhead, .vp-map-kithead .vp-map-colhead { margin-bottom: 0; }
-.vp-aimap { color: var(--purple); border-color: rgba(176,139,255,.5); }
-.vp-aimap:hover:not(:disabled) { border-color: var(--purple); }
+.vp-aimap { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 50%, transparent); }
+.vp-aimap:hover:not(:disabled) { border-color: var(--ai); }
 .vp-lightbox { max-width: 92vw; max-height: 90vh; border-radius: 12px; box-shadow: 0 30px 90px rgba(0,0,0,.6); }
 .vp-var-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(6,8,13,.7); backdrop-filter: blur(4px); }
 .vp-var-thread { position: fixed; inset: 0; z-index: 94; pointer-events: none; }
@@ -2124,13 +2100,13 @@ body.chat-pinned .detail-card.full { right: 380px; }
 
 .vp-ai { display: flex; gap: 8px; margin-bottom: 14px; }
 .vp-ai-input { flex: 1; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); padding: 8px 10px; font-family: var(--sans); font-size: 12px; }
-.vp-ai-input:focus { outline: none; border-color: var(--purple); }
-.vp-ai-btn { flex: none; background: rgba(176,139,255,.16); border: 1px solid var(--purple); color: var(--purple); border-radius: 6px; padding: 0 14px; font-family: var(--mono); font-size: 11px; cursor: pointer; white-space: nowrap; }
-.vp-ai-btn:hover:not(:disabled) { background: rgba(176,139,255,.26); }
+.vp-ai-input:focus { outline: none; border-color: var(--ai); }
+.vp-ai-btn { flex: none; background: color-mix(in srgb, var(--ai) 16%, transparent); border: 1px solid var(--ai); color: var(--ai); border-radius: var(--control-radius); padding: 0 var(--control-pad-x); font-family: var(--mono); font-size: var(--control-font-size); cursor: pointer; white-space: nowrap; }
+.vp-ai-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ai) 26%, transparent); }
 .vp-ai-btn:disabled { opacity: .6; cursor: default; }
 
 .vp-edit-actions { display: flex; align-items: center; gap: 10px; }
-.vp-save { background: var(--accent); border: none; color: #0a0c12; border-radius: 6px; padding: 8px 18px; font-weight: 600; font-size: 12px; cursor: pointer; }
+.vp-save { min-height: var(--control-height); box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; background: var(--ai); border: none; color: var(--on-accent-strong); border-radius: var(--control-radius); padding: 0 var(--control-pad-x); font-family: var(--sans); font-weight: 600; font-size: var(--control-font-size); cursor: pointer; }
 .vp-save:hover:not(:disabled) { filter: brightness(1.08); }
 .vp-save:disabled { background: var(--bg-3); color: var(--ink-3); border: 1px solid var(--line-2); cursor: default; }
 .vp-cancel { background: none; border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 6px; padding: 8px 14px; font-size: 12px; cursor: pointer; }
@@ -2676,7 +2652,10 @@ body.chat-pinned { padding-right: 380px; }
 .tpl-picker .search:focus-within{background:var(--panel-hi)}
 .tpl-picker .no-results{color:var(--ink-3);font-family:var(--mono);font-size:12px;padding:26px 4px}
 
-/* standalone banner — compact, sits on top of the resume list */
+/* start fork — two ways in, side by side on top of the resume list */
+.tpl-picker .blank-fork{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.tpl-picker .blank-fork .blank-top{margin-bottom:0}
+/* start cards — compact banner language shared by both fork columns */
 .tpl-picker .blank-top{display:flex;align-items:center;gap:16px;width:100%;text-align:left;cursor:pointer;
   border:0;border-radius:12px;padding:14px 16px;margin-bottom:18px;
   background:var(--panel);transition:background .15s}
@@ -2978,6 +2957,7 @@ body.chat-pinned { padding-right: 380px; }
   .tpl-picker h1{font-size:24px}
   .tpl-picker .lede{font-size:11px}
   .tpl-picker .head{margin-bottom:12px}
+  .tpl-picker .blank-fork{grid-template-columns:1fr;gap:10px;margin-bottom:16px}
   .tpl-picker .blank-top{flex-wrap:wrap;gap:12px;margin-bottom:16px}
   .tpl-picker .bt-cta{width:100%;text-align:center}
   .tpl-picker .section-label{margin-bottom:10px}
@@ -3033,20 +3013,20 @@ body.chat-pinned { padding-right: 380px; }
 .tpl-btn { white-space: nowrap; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-2); color: var(--ink-2); padding: 9px 14px; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
 .tpl-btn:hover:not(:disabled) { border-color: #3d445a; color: var(--ink); }
 .tpl-btn:disabled { opacity: .4; cursor: not-allowed; }
-/* purple ✦ AI variant — matches the other AI buttons */
-.tpl-btn.ai { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: rgba(176,139,255,.45); background: rgba(176,139,255,.08); color: var(--purple); font-weight: 600; }
-.tpl-btn.ai:hover:not(:disabled) { border-color: var(--purple); background: rgba(176,139,255,.16); color: var(--purple); }
-.tpl-btn.ai .ap-spark { color: var(--purple); font-size: 12px; line-height: 1; }
+/* Blue ✦ AI variant — purple is reserved for Autopilot. */
+.tpl-btn.ai { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: color-mix(in srgb, var(--ai) 45%, transparent); background: color-mix(in srgb, var(--ai) 8%, transparent); color: var(--ai); font-weight: 600; }
+.tpl-btn.ai:hover:not(:disabled) { border-color: var(--ai); background: color-mix(in srgb, var(--ai) 16%, transparent); color: var(--ai); }
+.tpl-btn.ai .ap-spark { color: var(--ai); font-size: 12px; line-height: 1; }
 .tpl-scan { display: flex; flex-direction: column; gap: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-3); padding: 13px; }
-.tpl-scan-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--purple); border-radius: 9px; background: rgba(176,139,255,.12); color: var(--purple); padding: 9px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s; }
-.tpl-scan-btn:hover { background: rgba(176,139,255,.2); }
-.tpl-scan-btn .ap-spark { color: var(--purple); font-size: 12px; }
+.tpl-scan-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--ai); border-radius: 9px; background: color-mix(in srgb, var(--ai) 12%, transparent); color: var(--ai); padding: 9px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.tpl-scan-btn:hover { background: color-mix(in srgb, var(--ai) 20%, transparent); }
+.tpl-scan-btn .ap-spark { color: var(--ai); font-size: 12px; }
 .tpl-scan .scan-note { color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
 .tpl-or-line { color: var(--ink-3); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; }
-/* "Let AI decide" reuses the purple ✦ .ai-btn (onboarding + step 01); it's a
+/* "Let AI decide" reuses the blue ✦ .ai-btn (onboarding + step 01); it's a
    sub-dropdown toggle, so it's left-aligned with a rotating chevron. */
 .tpl-ai-toggle { align-self: flex-start; }
-.tpl-ai-toggle .tpl-chevron { color: var(--purple); transition: transform .18s ease; }
+.tpl-ai-toggle .tpl-chevron { color: var(--ai); transition: transform .18s ease; }
 .tpl-ai-toggle .tpl-chevron.open { transform: rotate(180deg); }
 /* collapsible dropdown header */
 .tpl-rules-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }
@@ -3091,13 +3071,12 @@ body.chat-pinned { padding-right: 380px; }
 /* small explanatory note under the length "Let AI decide" button */
 .skip-note { margin: 9px 0 0; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; max-width: 360px; }
 
-/* unified AI / autopilot action button — ✦ star + the same purple as the
-   main workflow's Autopilot button (--purple), consistent identity */
-.ai-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid rgba(176, 139, 255, .45); border-radius: 9px; background: rgba(176, 139, 255, .08); color: var(--purple); padding: 9px 15px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
-.ai-btn:hover { border-color: var(--purple); background: rgba(176, 139, 255, .16); }
-.ai-btn.sel { border-color: var(--purple); background: rgba(176, 139, 255, .2); box-shadow: 0 0 0 2px rgba(176, 139, 255, .25); }
-.ai-btn .ap-spark { color: var(--purple); font-size: 12px; line-height: 1; }
-/* PURPLE MEANS THE AI DECIDES. A plain choice the user makes gets the same
+/* Unified AI action button — blue ✦; purple remains exclusive to Autopilot. */
+.ai-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--ai) 45%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--ai) 8%, transparent); color: var(--ai); padding: 9px 15px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.ai-btn:hover { border-color: var(--ai); background: color-mix(in srgb, var(--ai) 16%, transparent); }
+.ai-btn.sel { border-color: var(--ai); background: color-mix(in srgb, var(--ai) 20%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai) 25%, transparent); }
+.ai-btn .ap-spark { color: var(--ai); font-size: 12px; line-height: 1; }
+/* BLUE MEANS THE AI DECIDES. A plain choice the user makes gets the same
    shape and none of the colour — sitting next to an .ai-btn, the difference
    IS the meaning. */
 .pill-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-2); color: var(--ink-2); padding: 9px 15px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
@@ -3107,9 +3086,9 @@ body.chat-pinned { padding-right: 380px; }
    .ai-btn so it wins on source order) */
 .tpl-ai-toggle.sel, .tpl-ai-toggle.sel:hover { border-color: var(--line-2); background: var(--bg-2); color: var(--ink-3); box-shadow: none; }
 .tpl-ai-toggle.sel .ap-spark, .tpl-ai-toggle.sel .tpl-chevron { color: var(--ink-3); }
-/* keep AI buttons purple even inside the nav (which styles bare buttons grey) */
-.fog-nav .ai-btn { background: rgba(176, 139, 255, .08); color: var(--purple); border-color: rgba(176, 139, 255, .45); }
-.fog-nav .ai-btn:hover { background: rgba(176, 139, 255, .16); color: var(--purple); border-color: var(--purple); }
+/* Keep AI buttons blue even inside the nav (which styles bare buttons grey). */
+.fog-nav .ai-btn { background: color-mix(in srgb, var(--ai) 8%, transparent); color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, transparent); }
+.fog-nav .ai-btn:hover { background: color-mix(in srgb, var(--ai) 16%, transparent); color: var(--ai); border-color: var(--ai); }
 /* core-message row: AI + skip buttons share the same footprint */
 .fog-msg-actions > button { flex: 1; padding: 11px 14px; }
 

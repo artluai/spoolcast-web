@@ -36,6 +36,7 @@ import { WorldKitView } from './views/workflow/WorldKit'
 import { RulesView } from './views/RulesView'
 import StudioView from './views/StudioView'
 import SiteView from './views/site/SiteView'
+import DesignSystemView from './views/DesignSystemView'
 
 type ApiArtifact = {
   stage_id?: string
@@ -136,6 +137,12 @@ function App() {
 // editor's hook tree never renders conditionally (rules of hooks).
 function RouteSplit() {
   const route = useLocation().pathname
+  // Internal, engine-independent visual source of truth. It intentionally
+  // renders outside the editor shell so every state remains reviewable even
+  // when the local engine or a session is unavailable.
+  if (route === '/design-system') {
+    return <DesignSystemView />
+  }
   // The watch feed IS the front door ('/'), YouTube-style; the editor lives
   // behind the site's Create button.
   if (route === '/' || route === '/watch' || route.startsWith('/watch/') || route.startsWith('/u/') || route === '/admin') {

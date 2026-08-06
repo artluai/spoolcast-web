@@ -36,6 +36,10 @@ The UI and backend are **format-agnostic**. They dynamically read the active for
 - Vite + React 19 + TypeScript
 - React Router for navigation
 - Design tokens via CSS custom properties on `:root` in `src/index.css`
+- Theme tokens and launch-skin registry in `src/styles/themes.css` and
+  `src/lib/theme.ts`
+- Live UI and theme reference at `/design-system`; agent rules in
+  `docs/UI_GUIDE.md`
 
 ## Constraints for AI Agents
 If you are an AI agent working in this repo, you **MUST** adhere to these rules:
@@ -59,6 +63,48 @@ npm run lint
 # Build for production
 npm run build
 ```
+
+## Testing locally (UI + real engine)
+
+The dev UI talks to the local engine at `http://localhost:8000/api` by default
+(see `src/lib/api.ts` — override with `VITE_API_BASE` only when deliberately
+needed). Do **not** point dev at the hosted engine: it sits behind bearer auth
+that only the production Cloudflare proxy can attach, and heavy jobs there burn
+real credits.
+
+**1. Start the engine** (separate repo, `/Users/ralphxu/Documents/Projects/spoolcast`):
+
+```bash
+cd /Users/ralphxu/Documents/Projects/spoolcast && .venv/bin/python local_api.py
+```
+
+One-time setup if `.venv` doesn't exist yet (the server is stdlib; the deps are
+for the scripts it imports):
+
+```bash
+cd /Users/ralphxu/Documents/Projects/spoolcast && python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+```
+
+A healthy start prints a banner with `http://localhost:8000` and
+`CONTENT_ROOT = …/spoolcast-content`.
+
+**2. Start this repo's dev server**: `npm run dev`, then open
+`http://localhost:5173/projects`. Your sessions and templates listing there is
+the proof the UI is talking to the engine.
+
+**Troubleshooting**
+
+- *"The engine isn't reachable"* — the engine process isn't running (step 1),
+  or it crashed on startup; check its terminal.
+- *Engine runs but every request returns 401 `unauthorized`* — the engine
+  repo's `.env` has `SPOOLCAST_API_TOKEN` set. That variable turns on bearer
+  auth (it's for the hosted deploy); the dev UI intentionally sends no token.
+  Comment the line out and restart the engine — with it unset, local
+  single-user runs are open by design. Caveat: the engine binds `0.0.0.0`, so
+  while unauthenticated it is reachable from your local network.
+- *Sessions load but media doesn't* — the engine serves files from
+  `CONTENT_ROOT`; confirm the banner points at the real
+  `spoolcast-content` checkout.
 
 ## Assets
 Real content is mirrored from the `spoolcast-content` repo into `public/content/` and referenced via `asset()` (e.g., `/content/styles/...`). This ensures assets ship with the static build. Any video assets must stay under Cloudflare Pages' **25 MB/file** limit.

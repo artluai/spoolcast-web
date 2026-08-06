@@ -2646,12 +2646,33 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const goal = useWorkflowStore((s) => s.goal)
   const storeSetGoal = useWorkflowStore((s) => s.setGoal)
   const setGoal = (g: Goal) => storeSetGoal(stepId, g)
+  const candidateJobStorageKey = `spoolcast:core-message-job:${activeSession()}`
+  const pendingSuggestionStorageKey = `spoolcast:core-message-wait:${activeSession()}`
   const [writeOpen, setWriteOpen] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [candidateJobId, setCandidateJobId] = useState(
+    () => sessionStorage.getItem(candidateJobStorageKey) || '',
+  )
+  const [candidateStarting, setCandidateStarting] = useState(false)
+  const [pendingSuggestion, setPendingSuggestion] = useState<{
+    instruction: string
+    model: string
+  } | null>(() => {
+    try {
+      const stored = sessionStorage.getItem(pendingSuggestionStorageKey)
+      if (!stored) return null
+      const parsed = JSON.parse(stored)
+      return typeof parsed?.instruction === 'string' && typeof parsed?.model === 'string'
+        ? parsed
+        : null
+    } catch {
+      return null
+    }
+  })
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
   const [researchBrief, setResearchBrief] = useState('')
+  const [researchOpen, setResearchOpen] = useState(false)
   const [researchEditing, setResearchEditing] = useState(false)
   const [researchRunning, setResearchRunning] = useState(false)
   const [researchSaving, setResearchSaving] = useState(false)
@@ -2661,6 +2682,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   const [researchModel, setResearchModel] = useState(DEFAULT_MODEL_ID)
   const [researchUpdateRequested, setResearchUpdateRequested] = useState(false)
   const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
+  const setStepMenu = useWorkflowStore((s) => s.setStepMenu)
 
   const loadResearchBrief = useCallback(async () => {
     const response = await fetch(fileUrl('working/research-brief.md'), { cache: 'no-store' })
@@ -2829,21 +2851,25 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
 
   // REAL AI SUGGESTION: runs the engine's metered propose_core_message draft
   // (writes working/core-message-candidates.json), then loads the candidates.
-  const suggest = async (
-    requestedFeedback: string | unknown = '',
-    requestedModel = DEFAULT_MODEL_ID,
-  ) => {
-    const instruction = typeof requestedFeedback === 'string' ? requestedFeedback : ''
-    setGenerating(true)
+  const loadCandidates = useCallback(async () => {
+    const response = await fetch(fileUrl('working/core-message-candidates.json'), { cache: 'no-store' })
+    const out = await response.json().catch(() => null)
+    if (!response.ok || !out?.ok || !out.data?.exists) return
+    const parsed = JSON.parse(out.data.content)
+    setCandidates(Array.isArray(parsed?.candidates) ? parsed.candidates : [])
+  }, [])
+
+  const generateCandidates = async (instruction: string, requestedModel: string) => {
+    setCandidateStarting(true)
     setAiError(null)
     try {
-      const res = await fetch(actionUrl(), {
+      const res = await fetch(jobsUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session: activeSession(),
           tenant: 'local',
-          action: 'draft_stage',
+          kind: 'draft_stage',
           stage_id: stepId,
           allow_cost: true,
           model: requestedModel,
@@ -2852,7 +2878,8 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
         }),
       })
       const out = await res.json().catch(() => null)
-      if (!res.ok || out?.ok === false) {
+      const jobId = out?.data?.id
+      if (!res.ok || out?.ok === false || !jobId) {
         if (out?.error === 'illegal_action') {
           setNeedRewind(true)
           return
@@ -2860,18 +2887,98 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
         setAiError(out?.message || out?.error || 'Suggestion failed.')
         return
       }
-      const fr = await fetch(fileUrl('working/core-message-candidates.json'))
-      const fileOut = await fr.json().catch(() => null)
-      if (fileOut?.ok && fileOut.data?.exists) {
-        const parsed = JSON.parse(fileOut.data.content)
-        setCandidates(Array.isArray(parsed?.candidates) ? parsed.candidates : [])
-      }
+      sessionStorage.setItem(candidateJobStorageKey, String(jobId))
+      setCandidateJobId(String(jobId))
     } catch {
       setAiError('Could not reach the engine.')
     } finally {
-      setGenerating(false)
+      setCandidateStarting(false)
     }
   }
+
+  // The paid draft runs in the engine job queue. Keeping the job id in
+  // sessionStorage lets Step 2 resume the same poll after navigation/remounts
+  // instead of starting a duplicate model call.
+  useEffect(() => {
+    if (!candidateJobId) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const response = await fetch(jobsUrl(candidateJobId), { cache: 'no-store' })
+        const out = await response.json().catch(() => null)
+        if (cancelled) return
+        const job = out?.data
+        if (!response.ok || out?.ok === false) {
+          throw new Error(out?.message || out?.error || 'Could not check the candidate draft.')
+        }
+        if (job?.status === 'done') {
+          sessionStorage.removeItem(candidateJobStorageKey)
+          setCandidateJobId('')
+          await loadCandidates()
+        } else if (job?.status === 'failed') {
+          sessionStorage.removeItem(candidateJobStorageKey)
+          setCandidateJobId('')
+          const error = job?.result?.error || job?.error
+          if (error === 'illegal_action') setNeedRewind(true)
+          else setAiError(job?.message || job?.result?.message || error || 'Suggestion failed.')
+        }
+      } catch (error) {
+        if (!cancelled) {
+          sessionStorage.removeItem(candidateJobStorageKey)
+          setCandidateJobId('')
+          setAiError(error instanceof Error ? error.message : 'Could not check the candidate draft.')
+        }
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [candidateJobId, candidateJobStorageKey, loadCandidates])
+
+  // Research never holds the user on Step 1 or locks the rest of Step 2.
+  // It only sequences this dependent AI action: a click made while research is
+  // active is remembered, shows an honest waiting state, and runs automatically
+  // once research-brief.md has finished writing.
+  const suggest = async (
+    requestedFeedback: string | unknown = '',
+    requestedModel = DEFAULT_MODEL_ID,
+  ) => {
+    if (candidateStarting || candidateJobId || pendingSuggestion) return
+    const instruction = typeof requestedFeedback === 'string' ? requestedFeedback : ''
+    const researchPending = researchRunning
+      || Boolean(sessionStorage.getItem(researchJobStorageKey()))
+    if (researchPending) {
+      setAiError(null)
+      const request = { instruction, model: requestedModel }
+      sessionStorage.setItem(pendingSuggestionStorageKey, JSON.stringify(request))
+      setPendingSuggestion(request)
+      return
+    }
+    await generateCandidates(instruction, requestedModel)
+  }
+
+  useEffect(() => {
+    if (
+      !pendingSuggestion
+      || researchRunning
+      || sessionStorage.getItem(researchJobStorageKey())
+    ) return
+    const request = pendingSuggestion
+    const timer = window.setTimeout(() => {
+      sessionStorage.removeItem(pendingSuggestionStorageKey)
+      setPendingSuggestion(null)
+      void loadResearchBrief()
+        .catch(() => {})
+        .then(() => generateCandidates(request.instruction, request.model))
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadResearchBrief, pendingSuggestion, researchRunning])
+
+  const generating = candidateStarting || Boolean(candidateJobId)
+  const aiBusy = generating || Boolean(pendingSuggestion)
 
   const rewindAndSuggest = async () => {
     setNeedRewind(false)
@@ -2904,12 +3011,32 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
     registerStepAIAction(stepId, {
       stageId: stepId,
       label: candidates?.length ? 'Update with AI' : 'Complete step with AI',
-      busy: generating,
+      busy: aiBusy,
+      busyLabel: pendingSuggestion
+        ? 'Waiting for research to finish…'
+        : 'Drafting candidates…',
       usesTextModel: true,
       run: ({ instructions, model: requestedModel }) => suggest(instructions, requestedModel),
     })
     return () => registerStepAIAction(stepId, null)
-  }, [candidates?.length, generating, registerStepAIAction, stepId])
+  }, [aiBusy, candidates?.length, pendingSuggestion, registerStepAIAction, stepId])
+
+  useEffect(() => {
+    setStepMenu({
+      stepId,
+      actions: [{
+        id: 'view-step-1-research',
+        label: 'View research from Step 1',
+        title: researchOpen ? 'Hide the Step 1 research brief' : 'Show the Step 1 research brief',
+        active: researchOpen,
+        placement: 'toolbar',
+        run: () => setResearchOpen((open) => !open),
+      }],
+    })
+    return () => {
+      if (useWorkflowStore.getState().stepMenu?.stepId === stepId) setStepMenu(null)
+    }
+  }, [researchOpen, setStepMenu, stepId])
 
   // ONLY the selected option wears a stroke (the app's accent selection
   // treatment, same family as .core-opt.sel / .node.selected) — unselected
@@ -2926,13 +3053,16 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
 
   return (
     <div className="idea-v2">
-      <details className="vp-section">
-        <summary className="vp-section-sum">
-          <span className="vp-sec-title">Research from Step 1</span>
-          <span className="vp-section-count">
-            {researchRunning ? 'RESEARCHING' : researchBrief.trim() ? 'READY' : 'NOT READY'}
-          </span>
-        </summary>
+      {researchOpen ? (
+        <section className="vp-section">
+          <div className="vp-section-sum">
+            <span className="vp-sec-title">Research from Step 1</span>
+            <span className="vp-section-count">
+              {researchRunning ? (
+                <><span className="spin" /> UPDATING</>
+              ) : researchBrief.trim() ? 'READY' : 'NOT AVAILABLE'}
+            </span>
+          </div>
         <div style={{ marginTop: 12 }}>
           {researchRunning ? (
             <p className="voice-pron-existing" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
@@ -3045,7 +3175,8 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
             </div>
           ) : null}
         </div>
-      </details>
+        </section>
+      ) : null}
 
       <h3 className="idea-q">What should the viewer walk away believing?</h3>
 
@@ -3073,18 +3204,43 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           exist) selects it by activating the highlighted/first candidate;
           the user's own draft is stashed in goal.ownText, never destroyed. */}
       <div
-        style={{ ...optStyle(goal.mode === 'ai'), cursor: candidates?.length && goal.mode !== 'ai' ? 'pointer' : undefined }}
+        role="button"
+        tabIndex={aiBusy ? -1 : 0}
+        aria-busy={aiBusy}
+        aria-label={candidates?.length ? 'Choose an AI-generated core message' : 'Draft three core-message candidates with AI'}
+        style={{ ...optStyle(goal.mode === 'ai'), cursor: aiBusy ? 'wait' : 'pointer' }}
         onClick={(e) => {
-          if (goal.mode === 'ai' || !candidates?.length) return
+          if (aiBusy) return
           if ((e.target as HTMLElement).closest('button, textarea, input')) return
+          if (!candidates?.length) {
+            void suggest()
+            return
+          }
+          if (goal.mode === 'ai') return
           pickCandidate(candidates[0])
+        }}
+        onKeyDown={(event) => {
+          if (aiBusy || (event.key !== 'Enter' && event.key !== ' ')) return
+          event.preventDefault()
+          if (!candidates?.length) void suggest()
+          else if (goal.mode !== 'ai') pickCandidate(candidates[0])
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="ap-spark">✦</span>
           <span style={{ flex: 1 }}>
-            <span className="nm" style={{ display: 'block' }}>Let AI suggest</span>
-            <span className="ds">3 candidates drafted from your idea &amp; source material — pick one, then edit it</span>
+            <span className="nm" style={{ display: 'block' }}>
+              {pendingSuggestion ? (
+                <><span className="spin" /> Waiting for research to finish…</>
+              ) : generating ? (
+                <><span className="spin" /> Drafting candidates…</>
+              ) : 'Let AI suggest'}
+            </span>
+            <span className="ds">
+              {candidates?.length
+                ? '3 candidates drafted from your idea & source material — pick one, then edit it'
+                : 'Draft 3 candidates from your idea & source material — pick one, then edit it'}
+            </span>
           </span>
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}

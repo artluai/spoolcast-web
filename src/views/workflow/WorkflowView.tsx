@@ -512,8 +512,8 @@ export function WorkflowView({
   // and timelines. Steps that are reading columns or rows/options (setup)
   // stay at normal width. The screenplay is wide since it became the
   // two-column clip table.
-  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'script', 'pacing', 'voice', 'check'].includes(activeStep.id)
-  const mediaFitPanel = ['check', 'build'].includes(activeStep.id)
+  const showWide = ['idea', 'pics', 'shots', 'plan', 'worldkit', 'script', 'pacing', 'voice', 'check', 'build'].includes(activeStep.id)
+  const mediaFitPanel = activeStep.id === 'check'
 
   const NODE_W = 172
   const NODE_H = 88
@@ -1075,7 +1075,7 @@ export function WorkflowView({
                   <FeedbackButton
                     label={activeStepAI?.label || 'Complete step with AI'}
                     busy={Boolean(activeStepAI?.busy)}
-                    busyLabel="Working…"
+                    busyLabel={activeStepAI?.busyLabel || 'Working…'}
                     disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
                     title={
                       isBeyondBlocked
@@ -1103,6 +1103,21 @@ export function WorkflowView({
                   />
                 </span>
               ) : null}
+              {activeStepMenu?.actions
+                .filter((action) => action.placement === 'toolbar')
+                .map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className={action.active ? 'active' : undefined}
+                    title={action.title}
+                    disabled={action.disabled}
+                    aria-pressed={action.active || undefined}
+                    onClick={() => void action.run()}
+                  >
+                    {action.label}
+                  </button>
+                ))}
               {activeStep.id === 'check' ? (
                 <>
                   <button
@@ -1160,7 +1175,9 @@ export function WorkflowView({
                     <span className="vp-menu-backdrop" onClick={() => setResetMenu(false)} />
                     <span className="vp-menu detail-action-menu detail-action-menu-end">
                       <span className="vp-menu-h">STEP ACTIONS</span>
-                      {activeStepMenu?.actions.map((action) => (
+                      {activeStepMenu?.actions
+                        .filter((action) => action.placement !== 'toolbar')
+                        .map((action) => (
                         <button
                           key={action.id}
                           type="button"
@@ -1176,7 +1193,7 @@ export function WorkflowView({
                           {action.label}
                         </button>
                       ))}
-                      {activeStepMenu?.actions.length ? <span className="vp-menu-div" /> : null}
+                      {activeStepMenu?.actions.some((action) => action.placement !== 'toolbar') ? <span className="vp-menu-div" /> : null}
                       {activeProgressIncomplete ? (
                         <button
                           type="button"

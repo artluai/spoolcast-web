@@ -118,7 +118,7 @@ task is unowned until someone claims it on the board.
   - plain: Choose who draws the title text
   - why: Projects that want baked-in, art-directed text get it from the image model.
 
-- [ ] **[CODEX]** Stale-state audit: steps re-read predecessor files by design, so find the
+- [x] **[CODEX]** Stale-state audit: steps re-read predecessor files by design, so find the
   places that break the rule (approved snapshots like generation-prompts.approved.json, .prev
   files, editor-side caches) where a change made early never reaches a later step
   - plain: Map where edits get lost

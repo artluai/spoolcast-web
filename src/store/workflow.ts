@@ -93,6 +93,7 @@ export type StepMenuAction = {
   disabled?: boolean
   active?: boolean
   danger?: boolean
+  placement?: 'toolbar' | 'menu'
   run: () => void | Promise<void>
 }
 
