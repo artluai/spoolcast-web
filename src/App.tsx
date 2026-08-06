@@ -220,6 +220,9 @@ function SpoolcastApp() {
   // The session's stage graph, served by the engine (GET /api/contract).
   // FALLBACK_CONTRACT covers engine-down and the /p/new mock flow only.
   const [contract, setContract] = useState<WorkflowContract>(FALLBACK_CONTRACT)
+  // Identifies when `contract` came from this exact session (cache or engine),
+  // rather than from the bundled explainer fallback or the previous route.
+  const [resolvedContractSession, setResolvedContractSession] = useState<string | null>(null)
   // Last observed presence of the render-audit sentinel (null = not yet polled) —
   // 'done' is derived from load-seed or absent→present edges, never plain presence.
   const renderSentinelRef = useRef<boolean | null>(null)
@@ -265,6 +268,7 @@ function SpoolcastApp() {
     setApiStatus(null)
     setApiLoading(true)
     setSessionTemplate(null)
+    setResolvedContractSession(null)
     if (!routeSession || routeSession === 'new') {
       // Left a real session for the mock blank flow (or off the workflow):
       // rebuild the blank graph — no poll will reshape it, and the previous
@@ -286,9 +290,14 @@ function SpoolcastApp() {
         : narrator === 'no'
           ? ('video' as const)
           : ('undecided' as const)
-      : sessionTemplate === '' || (sessionTemplate === null && contract.id === 'base')
-        ? ('undecided' as const)
-        : ('lifted' as const)
+      // A resolved engine contract is stronger evidence than a legacy blank
+      // `template` field. Completed older projects can legitimately have that
+      // blank field while their contract and graph are fully determined.
+      : resolvedContractSession === routeSession && contract.id !== 'base'
+        ? ('lifted' as const)
+        : sessionTemplate === '' || (sessionTemplate === null && contract.id === 'base')
+          ? ('undecided' as const)
+          : ('lifted' as const)
   useEffect(() => {
     if (routeSession !== 'new') return
     setSteps(buildStepsFromContract(FALLBACK_CONTRACT, true, null, fogState))
@@ -319,6 +328,7 @@ function SpoolcastApp() {
   useEffect(() => {
     if (!routeSession || routeSession === 'new') {
       setContract(FALLBACK_CONTRACT)
+      setResolvedContractSession(null)
       return
     }
     // LAST GOOD CONTRACT FIRST: the state boots on the bundled explainer
@@ -329,7 +339,10 @@ function SpoolcastApp() {
       const cached = window.localStorage.getItem(`spoolcast-contract:${routeSession}`)
       if (cached) {
         const parsed = JSON.parse(cached) as WorkflowContract
-        if (Array.isArray(parsed?.stages) && parsed.stages.length) setContract(parsed)
+        if (Array.isArray(parsed?.stages) && parsed.stages.length) {
+          setContract(parsed)
+          setResolvedContractSession(routeSession)
+        }
       }
     } catch { /* corrupt cache — the fetch below still wins */ }
     let cancelled = false
@@ -343,6 +356,7 @@ function SpoolcastApp() {
           if (out?.ok && Array.isArray(stages) && stages.length) {
             const next = { id: out.data?.id ?? 'explainer', stages: stages as WorkflowContract['stages'] }
             setContract(next)
+            setResolvedContractSession(routeSession)
             try { window.localStorage.setItem(`spoolcast-contract:${routeSession}`, JSON.stringify(next)) } catch { /* fine */ }
           } else if (triesLeft > 0) {
             window.setTimeout(() => attempt(triesLeft - 1), 2500)
