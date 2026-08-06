@@ -28,6 +28,31 @@ const engine = (env) => {
   return base && token ? { base, token } : null
 }
 
+const principalHeaders = async (config, userId, now = Date.now()) => {
+  const timestamp = String(Math.floor(now / 1000))
+  const payload = `v1\n${userId}\n${timestamp}`
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(config.token),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(payload),
+  )
+  const signatureHex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+  return {
+    'X-Spoolcast-User': String(userId),
+    'X-Spoolcast-Timestamp': timestamp,
+    'X-Spoolcast-Signature': signatureHex,
+  }
+}
+
 const partsOf = (path) => {
   const parts = Array.isArray(path) ? path : [path]
   return parts.filter(Boolean).map(String)
@@ -67,13 +92,16 @@ const responseFromUpstream = (upstream, replacementBody) => {
   )
 }
 
-const upstreamFetch = async (config, url, request, body) => {
+const upstreamFetch = async (config, url, request, body, userId) => {
   const headers = new Headers()
   for (const name of ['Accept', 'Content-Type', 'If-None-Match', 'Range']) {
     const value = request.headers.get(name)
     if (value) headers.set(name, value)
   }
   headers.set('Authorization', `Bearer ${config.token}`)
+  for (const [name, value] of Object.entries(await principalHeaders(config, userId))) {
+    headers.set(name, value)
+  }
   const init = {
     method: request.method,
     headers,
@@ -85,8 +113,12 @@ const upstreamFetch = async (config, url, request, body) => {
 
 const jobOwner = async (config, jobId, userId) => {
   if (!/^[a-f0-9]{32}$/.test(jobId)) return { error: json({ error: 'Invalid job id.' }, 400) }
+  const headers = new Headers({ Authorization: `Bearer ${config.token}` })
+  for (const [name, value] of Object.entries(await principalHeaders(config, userId))) {
+    headers.set(name, value)
+  }
   const upstream = await fetch(`${config.base}/api/jobs/${jobId}`, {
-    headers: { Authorization: `Bearer ${config.token}` },
+    headers,
   }).catch(() => null)
   if (!upstream) return { error: json({ error: 'Cloud engine is unreachable.' }, 502) }
   const payload = await upstream.clone().json().catch(() => null)
@@ -201,7 +233,7 @@ export async function proxyEngine({ env, request, path, user }) {
   }
 
   if (parts[0] === 'sessions' && request.method === 'GET') {
-    const upstream = await upstreamFetch(config, upstreamUrl, request, body)
+    const upstream = await upstreamFetch(config, upstreamUrl, request, body, user.id)
     if (!upstream) return json({ error: 'Cloud engine is unreachable.' }, 502)
     const payload = await upstream.json().catch(() => null)
     if (!upstream.ok || !payload?.data || !Array.isArray(payload.data.sessions)) {
@@ -262,7 +294,7 @@ export async function proxyEngine({ env, request, path, user }) {
     if (legacy) return legacy
   }
 
-  const upstream = await upstreamFetch(config, upstreamUrl, request, body)
+  const upstream = await upstreamFetch(config, upstreamUrl, request, body, user.id)
   if (!upstream) {
     if (reserved) {
       await env.DB.prepare(

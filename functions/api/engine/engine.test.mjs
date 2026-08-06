@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
 import { afterEach, test } from 'node:test'
 
 import { onRequest } from './[[path]].js'
@@ -78,6 +79,19 @@ const call = (db, path, init = {}) =>
     params: { path: path.split('?')[0].split('/') },
   })
 
+const assertPrincipal = (headers, userId = '2') => {
+  const timestamp = headers.get('X-Spoolcast-Timestamp')
+  assert.equal(headers.get('X-Spoolcast-User'), userId)
+  assert.match(timestamp, /^\d+$/)
+  assert.ok(Math.abs(Date.now() / 1000 - Number(timestamp)) < 10)
+  assert.equal(
+    headers.get('X-Spoolcast-Signature'),
+    createHmac('sha256', 'server-secret')
+      .update(`v1\n${userId}\n${timestamp}`)
+      .digest('hex'),
+  )
+}
+
 test('rejects an unsigned browser before contacting Railway', async () => {
   let contacted = false
   globalThis.fetch = async () => {
@@ -99,6 +113,7 @@ test('filters the hosted session list to projects owned by the signed-in user', 
     const upstream = new URL(url)
     assert.equal(upstream.searchParams.get('tenant'), '2')
     assert.equal(init.headers.get('Authorization'), 'Bearer server-secret')
+    assertPrincipal(init.headers)
     assert.equal(init.headers.has('Cookie'), false)
     return Response.json({
       ok: true,
@@ -129,6 +144,7 @@ test('reserves new project ownership and replaces the browser tenant', async () 
   const db = mockDb()
   globalThis.fetch = async (url, init) => {
     assert.equal(new URL(url).searchParams.get('tenant'), '2')
+    assertPrincipal(init.headers)
     assert.deepEqual(JSON.parse(init.body), {
       action: 'create_session',
       session: 'new-project',
@@ -166,9 +182,22 @@ test('a crafted path cannot ride an owned session param into another project', a
 })
 
 test('shared library paths are readable without naming a session', async () => {
-  globalThis.fetch = async () =>
-    Response.json({ ok: true, data: { content: 'portrait' } })
+  globalThis.fetch = async (_url, init) => {
+    assertPrincipal(init.headers)
+    return Response.json({ ok: true, data: { content: 'portrait' } })
+  }
   const response = await call(mockDb({ owned: [['mine', 2]] }), 'file?path=global/characters/aoi/portrait.png')
+  assert.equal(response.status, 200)
+})
+
+test('signs the principal on job ownership lookups', async () => {
+  const jobId = 'a'.repeat(32)
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new URL(url).pathname, `/api/jobs/${jobId}`)
+    assertPrincipal(init.headers)
+    return Response.json({ ok: true, data: { id: jobId, tenant: '2' } })
+  }
+  const response = await call(mockDb(), `jobs/${jobId}`)
   assert.equal(response.status, 200)
 })
 
@@ -198,6 +227,7 @@ test('forwards the signed-in site credential only inside a manual publish job', 
   const db = mockDb({ owned: [['mine', 2]] })
   globalThis.fetch = async (url, init) => {
     assert.equal(new URL(url).pathname, '/api/action')
+    assertPrincipal(init.headers)
     assert.equal(init.headers.has('Cookie'), false)
     assert.deepEqual(JSON.parse(init.body), {
       action: 'manual_publish',
