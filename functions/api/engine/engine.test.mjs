@@ -69,13 +69,22 @@ const mockFanoutDb = ({ showOwner = 2 } = {}) => {
   const execute = (statement) => {
     const { sql, args } = statement
     if (sql.includes('INSERT INTO engine_session_creations')) {
-      const [creationKey, userId, showId, seasonId, manifestJson, manifestHash] = args
+      const [
+        creationKey,
+        userId,
+        showId,
+        seasonId,
+        seasonNumber,
+        manifestJson,
+        manifestHash,
+      ] = args
       if (creations.has(creationKey)) throw new Error('duplicate creation')
       creations.set(creationKey, {
         creation_key: creationKey,
         user_id: userId,
         show_id: showId,
         season_id: seasonId,
+        season_number: seasonNumber,
         manifest_json: manifestJson,
         manifest_hash: manifestHash,
         provisioning_state: 'pending',
@@ -435,6 +444,7 @@ const fanoutPayload = (brief = 'Episode one opens the mystery.') => ({
   creation_key: 'season-one-v1',
   show_id: 'demo-show',
   season_id: 'season-1',
+  season_number: 1,
   manifest: [
     {
       session_id: 'demo-show-s01e01',
@@ -471,6 +481,7 @@ test('reserves every fan-out child before forwarding the exact manifest', async 
       manifest_hash: body.reservation.manifest_hash,
     })
     assert.match(body.reservation.manifest_hash, /^[a-f0-9]{64}$/)
+    assert.equal(body.season_number, 1)
     assert.deepEqual(body.manifest, fanoutPayload().manifest)
     assert.equal(body.tenant, '2')
     return Response.json({
@@ -516,6 +527,13 @@ test('same creation key resumes pending rows and rejects a changed manifest', as
 
   const changed = await postFanout(db, fanoutPayload('A changed brief.'))
   assert.equal(changed.status, 409)
+  assert.equal(attempts, 1)
+
+  const changedSeason = await postFanout(db, {
+    ...fanoutPayload(),
+    season_number: 2,
+  })
+  assert.equal(changedSeason.status, 409)
   assert.equal(attempts, 1)
 
   const retry = await postFanout(db)
@@ -587,4 +605,89 @@ test('fan-out denies an unowned show before reserving or contacting the engine',
   assert.equal(contacted, false)
   assert.equal(db.sessions.size, 0)
   assert.equal(db.creations.size, 0)
+})
+
+test('fan-out rejects missing, non-integer, and out-of-range season numbers', async () => {
+  const db = mockFanoutDb()
+  let contacted = false
+  globalThis.fetch = async () => {
+    contacted = true
+    return new Response()
+  }
+
+  for (const seasonNumber of [undefined, '1', 1.5, 0, 100, true]) {
+    const payload = fanoutPayload()
+    if (seasonNumber === undefined) delete payload.season_number
+    else payload.season_number = seasonNumber
+    const response = await postFanout(db, payload)
+    assert.equal(response.status, 400)
+  }
+
+  assert.equal(contacted, false)
+  assert.equal(db.sessions.size, 0)
+  assert.equal(db.creations.size, 0)
+})
+
+test('plans fan-out from the owned show without a client-built manifest', async () => {
+  const db = mockFanoutDb()
+  const plannedManifest = fanoutPayload().manifest
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new URL(url).pathname, '/api/action')
+    assertPrincipal(init.headers)
+    assert.deepEqual(JSON.parse(init.body), {
+      action: 'plan_fan_out',
+      show_id: 'demo-show',
+      season: 1,
+      tenant: '2',
+    })
+    return Response.json({
+      ok: true,
+      data: {
+        manifest: plannedManifest,
+        manifest_hash: 'a'.repeat(64),
+        existing: [],
+        warnings: [],
+      },
+    })
+  }
+
+  const response = await call(db, 'action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'plan_fan_out',
+      show_id: 'demo-show',
+      season: 1,
+      manifest: [{ session_id: 'browser-invented' }],
+    }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual((await response.json()).data.manifest, plannedManifest)
+  assert.equal(db.sessions.size, 0)
+  assert.equal(db.creations.size, 0)
+})
+
+test('fan-out planning validates the season and denies unowned shows before upstream', async () => {
+  let contacted = false
+  globalThis.fetch = async () => {
+    contacted = true
+    return new Response()
+  }
+
+  for (const season of [undefined, '1', 1.5, 0, 100, true]) {
+    const response = await call(mockFanoutDb(), 'action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'plan_fan_out', show_id: 'demo-show', season }),
+    })
+    assert.equal(response.status, 400)
+  }
+  const unowned = await call(mockFanoutDb({ showOwner: 1 }), 'action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'plan_fan_out', show_id: 'demo-show', season: 1 }),
+  })
+  assert.equal(unowned.status, 404)
+  assert.equal(contacted, false)
 })

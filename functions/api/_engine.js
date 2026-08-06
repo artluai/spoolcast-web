@@ -3,6 +3,7 @@ import { readCookie, sessionUser } from './_auth.js'
 const SAFE_ID = /^[A-Za-z0-9_-]+$/
 const STABLE_ID = /^[A-Za-z0-9_-]{1,128}$/
 const FANOUT_ACTION = 'fan_out_episodes'
+const PLAN_FANOUT_ACTION = 'plan_fan_out'
 const MAX_FANOUT_EPISODES = 50
 const MAX_EPISODE_BRIEF_LENGTH = 20_000
 const MAX_FANOUT_MANIFEST_LENGTH = 1_000_000
@@ -97,6 +98,10 @@ const sha256Hex = async (value) => {
     .join('')
 }
 
+const validSeasonNumber = (value) => (
+  Number.isInteger(value) && value >= 1 && value <= 99
+)
+
 const normalizeFanoutManifest = (value) => {
   if (!Array.isArray(value) || !value.length || value.length > MAX_FANOUT_EPISODES) {
     throw new Error(`manifest must contain 1-${MAX_FANOUT_EPISODES} episodes`)
@@ -169,6 +174,7 @@ const existingFanoutCreationMatches = (reservation, existing) => (
   && Number(existing.user_id) === Number(reservation.userId)
   && String(existing.show_id) === reservation.showId
   && String(existing.season_id) === reservation.seasonId
+  && Number(existing.season_number) === reservation.seasonNumber
   && String(existing.manifest_hash) === reservation.manifestHash
   && String(existing.manifest_json) === reservation.manifestJson
 )
@@ -203,8 +209,12 @@ const reserveFanout = async (env, userId, payload) => {
   const creationKey = String(payload.creation_key || '').trim()
   const showId = String(payload.show_id || '').trim()
   const seasonId = String(payload.season_id || '').trim()
+  const seasonNumber = payload.season_number
   if (![creationKey, showId, seasonId].every((value) => STABLE_ID.test(value))) {
     return { error: json({ error: 'Invalid creation, show, or season id.' }, 400) }
+  }
+  if (!validSeasonNumber(seasonNumber)) {
+    return { error: json({ error: 'season_number must be an integer 1-99.' }, 400) }
   }
 
   let normalized
@@ -232,6 +242,7 @@ const reserveFanout = async (env, userId, payload) => {
     creationKey,
     showId,
     seasonId,
+    seasonNumber,
     userId,
     manifest: normalized.manifest,
     manifestJson: normalized.manifestJson,
@@ -239,7 +250,7 @@ const reserveFanout = async (env, userId, payload) => {
     provisioningState: 'pending',
   }
   const existing = await env.DB.prepare(
-    `SELECT user_id, show_id, season_id, manifest_json, manifest_hash,
+    `SELECT user_id, show_id, season_id, season_number, manifest_json, manifest_hash,
             provisioning_state
        FROM engine_session_creations
       WHERE user_id = ? AND creation_key = ?`,
@@ -301,14 +312,15 @@ const reserveFanout = async (env, userId, payload) => {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO engine_session_creations
-           (creation_key, user_id, show_id, season_id, manifest_json,
-            manifest_hash, provisioning_state)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+           (creation_key, user_id, show_id, season_id, season_number,
+            manifest_json, manifest_hash, provisioning_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
       ).bind(
         creationKey,
         userId,
         showId,
         seasonId,
+        seasonNumber,
         normalized.manifestJson,
         manifestHash,
       ),
@@ -318,7 +330,7 @@ const reserveFanout = async (env, userId, payload) => {
     // A concurrent retry may have won the same atomic insert. Treat that as
     // the same pending reservation, never as a burned-id conflict.
     const raced = await env.DB.prepare(
-      `SELECT user_id, show_id, season_id, manifest_json, manifest_hash,
+      `SELECT user_id, show_id, season_id, season_number, manifest_json, manifest_hash,
               provisioning_state
          FROM engine_session_creations
         WHERE user_id = ? AND creation_key = ?`,
@@ -564,6 +576,29 @@ export async function proxyEngine({ env, request, path, user }) {
 
   const querySession = source.searchParams.get('session') || ''
   let fanoutReservation = null
+  if (action === PLAN_FANOUT_ACTION && request.method === 'POST') {
+    const showId = String(parsedBody.show_id || '').trim()
+    const seasonNumber = parsedBody.season
+    if (!STABLE_ID.test(showId)) {
+      return json({ error: 'Invalid show id.' }, 400)
+    }
+    if (!validSeasonNumber(seasonNumber)) {
+      return json({ error: 'season must be an integer 1-99.' }, 400)
+    }
+    const show = await env.DB.prepare(
+      `SELECT user_id FROM engine_shows WHERE show_id = ?`,
+    ).bind(showId).first()
+    if (!show || Number(show.user_id) !== Number(user.id)) {
+      return json({ error: 'Show not found.' }, 404)
+    }
+    parsedBody = {
+      action: PLAN_FANOUT_ACTION,
+      show_id: showId,
+      season: seasonNumber,
+      tenant: String(user.id),
+    }
+    body = JSON.stringify(parsedBody)
+  }
   if (action === FANOUT_ACTION && request.method === 'POST') {
     const result = await reserveFanout(env, user.id, parsedBody)
     if (result.error) return result.error
@@ -574,6 +609,7 @@ export async function proxyEngine({ env, request, path, user }) {
       creation_key: fanoutReservation.creationKey,
       show_id: fanoutReservation.showId,
       season_id: fanoutReservation.seasonId,
+      season_number: fanoutReservation.seasonNumber,
       manifest: fanoutReservation.manifest,
       reservation: {
         owner_id: String(user.id),

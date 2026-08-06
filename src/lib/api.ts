@@ -155,6 +155,41 @@ type ActionResponse<T> = {
   details?: string
 }
 
+export type FanoutManifestItem = {
+  session_id: string
+  episode_number: number
+  brief: string
+}
+
+export type FanoutPlan = {
+  manifest: FanoutManifestItem[]
+  manifest_hash: string
+  existing: string[]
+  warnings: string[]
+}
+
+/** Ask the engine to derive the exact no-write fan-out manifest from the
+ * approved season plan. This show-level action deliberately names no session. */
+export async function planFanOut(
+  showId: string,
+  season: number,
+): Promise<ActionResponse<FanoutPlan> | null> {
+  try {
+    const res = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'plan_fan_out',
+        show_id: showId,
+        season,
+      }),
+    })
+    return (await res.json()) as ActionResponse<FanoutPlan>
+  } catch {
+    return null
+  }
+}
+
 /** The admin's global render choice, readable by every signed-in creator.
  * Failure is deliberately local-first so today's single-machine flow stays
  * unchanged when the hosted proxy is absent. */
