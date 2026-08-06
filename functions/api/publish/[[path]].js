@@ -15,8 +15,6 @@
 
 import { sessionUser } from '../_auth.js'
 
-const MEDIA_BASE = 'https://pub-6903b93eacaf46b08e7b4644251ab085.r2.dev'
-
 const json = (data, status = 200) =>
   new Response(JSON.stringify({ ok: status < 400, data }), {
     status,
@@ -111,7 +109,9 @@ const registerPublish = async (env, target, poster, duration, width, height) => 
 
   let seriesId = target.existingSeries?.id ?? null
   if (target.seriesSlug) {
-    const coverUrl = posterKey ? `${MEDIA_BASE}/${posterKey}` : ''
+    // Persist the object key, not an expiring delivery URL. The site API
+    // signs it only after applying the series visibility/owner check.
+    const coverUrl = posterKey ? `r2:${posterKey}` : ''
     if (target.existingSeries) {
       await env.DB.prepare(
         `UPDATE series

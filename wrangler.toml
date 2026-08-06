@@ -1,7 +1,7 @@
 # Cloudflare Pages config for spoolcast-web.
 # The SPA (editor + viewer site) builds to dist/; functions/ become Pages
 # Functions. The viewer-site API reads D1; published video files live in the
-# spoolcast-videos R2 bucket and are served from its public URL.
+# private spoolcast-videos R2 bucket and are served through signed API URLs.
 name = "spoolcast-web"
 compatibility_date = "2026-07-01"
 pages_build_output_dir = "dist"

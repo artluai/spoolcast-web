@@ -10,8 +10,8 @@
 //   GET /api/site/templates   → { templates: [...] } (live global templates)
 
 import { sessionUser } from '../_auth.js'
+import { serveSignedVideo, signedVideoUrl } from '../_media.js'
 
-const MEDIA_BASE = 'https://pub-6903b93eacaf46b08e7b4644251ab085.r2.dev'
 // Global asset library bucket (spoolcast-assets) — same base the character
 // library's image_url values use.
 const ASSETS_BASE = 'https://pub-275d3988223b4b53b851fe856882cec0.r2.dev'
@@ -27,20 +27,42 @@ const json = (data, status = 200, privateResponse = false) =>
 
 const publicCreator = ({ user_id: _userId, ...creator }) => creator
 
-const withUrls = (v) =>
+const withUrls = async (env, v) =>
   v && {
     ...v,
-    media_url: `${MEDIA_BASE}/${v.r2_key}`,
-    poster_url: v.poster_key ? `${MEDIA_BASE}/${v.poster_key}` : '',
+    media_url: await signedVideoUrl(env, v.r2_key, Boolean(v.public)),
+    poster_url: v.poster_key ? await signedVideoUrl(env, v.poster_key, Boolean(v.public)) : '',
   }
+
+const videoKeyFromCover = (coverUrl) => {
+  const value = String(coverUrl || '')
+  if (value.startsWith('r2:videos/')) return value.slice(3)
+  const marker = '.r2.dev/'
+  const markerAt = value.indexOf(marker)
+  if (markerAt !== -1) {
+    const key = value.slice(markerAt + marker.length)
+    if (key.startsWith('videos/')) return key
+  }
+  return ''
+}
+
+const withCoverUrl = async (env, series) => {
+  if (!series) return series
+  const key = videoKeyFromCover(series.cover_url)
+  return key
+    ? { ...series, cover_url: await signedVideoUrl(env, key, Boolean(series.public)) }
+    : series
+}
 
 export async function onRequestGet({ env, request, params }) {
   const parts = Array.isArray(params.path) ? params.path : [params.path]
   const [route, arg] = parts
   const db = env.DB
 
+  if (route === 'media') return serveSignedVideo(env, request)
+
   if (route === 'home') {
-    const latest = (
+    const latest = await Promise.all((
       await db
         .prepare(
           `SELECT v.*, c.handle AS creator_handle, c.name AS creator_name, s.title AS series_title, s.slug AS series_slug
@@ -49,8 +71,8 @@ export async function onRequestGet({ env, request, params }) {
            WHERE v.public = 1 ORDER BY v.published_at DESC LIMIT 24`,
         )
         .all()
-    ).results.map(withUrls)
-    const seriesRows = (
+    ).results.map((video) => withUrls(env, video)))
+    const seriesRows = await Promise.all((
       await db
         .prepare(
           `SELECT s.*, c.handle AS creator_handle, c.name AS creator_name
@@ -58,17 +80,18 @@ export async function onRequestGet({ env, request, params }) {
            WHERE s.public = 1 ORDER BY s.created_at DESC LIMIT 12`,
         )
         .all()
-    ).results
+    ).results.map((series) => withCoverUrl(env, series)))
     const rows = []
     for (const s of seriesRows) {
-      const videos = (
+      const videoRows = (
         await db
           .prepare(
             `SELECT * FROM videos WHERE series_id = ? AND public = 1 ORDER BY episode, published_at LIMIT 20`,
           )
           .bind(s.id)
           .all()
-      ).results.map(withUrls)
+      ).results
+      const videos = await Promise.all(videoRows.map((video) => withUrls(env, video)))
       if (videos.length) rows.push({ series: s, videos })
     }
     return json({ latest, rows })
@@ -79,40 +102,41 @@ export async function onRequestGet({ env, request, params }) {
     if (!creator) return json({ error: 'not found' }, 404)
     const user = await sessionUser(env, request)
     const owner = Boolean(user && creator.user_id === user.id)
-    const series = (
+    const series = await Promise.all((
       await db
         .prepare(
           `SELECT * FROM series WHERE creator_id = ?${owner ? '' : ' AND public = 1'} ORDER BY created_at DESC`,
         )
         .bind(creator.id)
         .all()
-    ).results
-    const videos = (
+    ).results.map((item) => withCoverUrl(env, item)))
+    const videos = await Promise.all((
       await db
         .prepare(
           `SELECT * FROM videos WHERE creator_id = ?${owner ? '' : ' AND public = 1'} ORDER BY published_at DESC LIMIT 60`,
         )
         .bind(creator.id)
         .all()
-    ).results.map(withUrls)
+    ).results.map((video) => withUrls(env, video)))
     return json({ creator: publicCreator(creator), series, videos, owner }, 200, Boolean(user))
   }
 
   if (route === 's' && arg) {
-    const series = await db.prepare(`SELECT * FROM series WHERE slug = ?`).bind(arg).first()
-    if (!series) return json({ error: 'not found' }, 404)
-    const creator = await db.prepare(`SELECT * FROM creators WHERE id = ?`).bind(series.creator_id).first()
+    const seriesRow = await db.prepare(`SELECT * FROM series WHERE slug = ?`).bind(arg).first()
+    if (!seriesRow) return json({ error: 'not found' }, 404)
+    const creator = await db.prepare(`SELECT * FROM creators WHERE id = ?`).bind(seriesRow.creator_id).first()
     const user = await sessionUser(env, request)
     const owner = Boolean(user && creator.user_id === user.id)
-    if (!series.public && !owner) return json({ error: 'not found' }, 404, Boolean(user))
-    const videos = (
+    if (!seriesRow.public && !owner) return json({ error: 'not found' }, 404, Boolean(user))
+    const series = await withCoverUrl(env, seriesRow)
+    const videos = await Promise.all((
       await db
         .prepare(
           `SELECT * FROM videos WHERE series_id = ?${owner ? '' : ' AND public = 1'} ORDER BY episode, published_at`,
         )
         .bind(series.id)
         .all()
-    ).results.map(withUrls)
+    ).results.map((video) => withUrls(env, video)))
     return json(
       { series, creator: publicCreator(creator), videos, owner },
       200,
@@ -127,21 +151,22 @@ export async function onRequestGet({ env, request, params }) {
     const user = await sessionUser(env, request)
     const owner = Boolean(user && creator.user_id === user.id)
     if (!video.public && !owner) return json({ error: 'not found' }, 404, Boolean(user))
-    const series = video.series_id
+    const seriesRow = video.series_id
       ? await db.prepare(`SELECT * FROM series WHERE id = ?`).bind(video.series_id).first()
       : null
+    const series = await withCoverUrl(env, seriesRow)
     const siblings = video.series_id
-      ? (
+      ? await Promise.all((
           await db
             .prepare(
               `SELECT * FROM videos WHERE series_id = ?${owner ? '' : ' AND public = 1'} ORDER BY episode, published_at`,
             )
             .bind(video.series_id)
             .all()
-        ).results.map(withUrls)
+        ).results.map((item) => withUrls(env, item)))
       : []
     return json(
-      { video: withUrls(video), creator: publicCreator(creator), series, siblings, owner },
+      { video: await withUrls(env, video), creator: publicCreator(creator), series, siblings, owner },
       200,
       Boolean(user),
     )
@@ -227,5 +252,5 @@ export async function onRequestPatch({ env, request, params }) {
   }
 
   const updated = await env.DB.prepare(`SELECT * FROM videos WHERE id = ?`).bind(video.id).first()
-  return json({ video: withUrls(updated) }, 200, true)
+  return json({ video: await withUrls(env, updated) }, 200, true)
 }
