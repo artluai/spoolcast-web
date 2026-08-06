@@ -6,6 +6,7 @@ import { asset } from '../../lib/assets'
 import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, notifySessionConfigurationChanged, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
+import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
 import { styleThumbs } from '../../data/cast'
 import { TEMPLATE_ART } from '../../data/picker'
 import { INHERITED_COMPONENTS, SCAN_SUGGESTIONS, type TplRule } from '../../data/template-rules'
@@ -665,7 +666,13 @@ export function NarrationContent() {
         throw new Error(out?.message || out?.error || 'AI rewrite failed.')
       }
       setChunkDraft(String(out?.data?.narration || '').trim())
-      setChunkMessages((prev) => ({ ...prev, [chunk.id]: 'AI rewrite ready. Review it, then save or regenerate audio.' }))
+      const warning = ruleFindingMessage(out?.data?.rule_findings)
+      setChunkMessages((prev) => ({
+        ...prev,
+        [chunk.id]: warning
+          ? `Rule check: ${warning} The AI rewrite is still ready to review and save.`
+          : 'AI rewrite ready. Review it, then save or regenerate audio.',
+      }))
     } catch (err) {
       setChunkMessages((prev) => ({
         ...prev,
@@ -1230,7 +1237,14 @@ export function NarrationContent() {
                       Cancel
                     </button>
                   </div>
-                  {chunkMessages[chunk.id] ? <p className="voice-chunk-note">{chunkMessages[chunk.id]}</p> : null}
+                  {chunkMessages[chunk.id] ? (
+                    <p
+                      className="voice-chunk-note"
+                      style={chunkMessages[chunk.id].startsWith('Rule check:') ? { color: 'var(--amber)' } : undefined}
+                    >
+                      {chunkMessages[chunk.id]}
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <button
@@ -2241,6 +2255,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
   const [improveJobId, setImproveJobId] = useState(() => localStorage.getItem(improveJobStorageKey) || '')
   const [improvedPrompt, setImprovedPrompt] = useState(() => localStorage.getItem(improveProposalStorageKey) || '')
   const [improveError, setImproveError] = useState<string | null>(null)
+  const [improveRuleWarning, setImproveRuleWarning] = useState<string | null>(null)
   const [improveModel, setImproveModel] = useState(DEFAULT_MODEL_ID)
   const [improveOpen, setImproveOpen] = useState(false)
   const [improveNotes, setImproveNotes] = useState('')
@@ -2251,6 +2266,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
     localStorage.removeItem(improveProposalStorageKey)
     setImprovedPrompt('')
     setImproveError(null)
+    setImproveRuleWarning(null)
     setIdeaBrief(stepId, value)
   }
   const [files, setFiles] = useState<SourceFile[]>(
@@ -2267,6 +2283,7 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
     const idea = brief.trim()
     if (!idea || improving) return
     setImproveError(null)
+    setImproveRuleWarning(null)
     localStorage.removeItem(improveProposalStorageKey)
     setImprovedPrompt('')
     try {
@@ -2323,6 +2340,8 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
         }
         if (job?.status === 'done') {
           const proposal = String(job?.result?.improved_prompt || '').trim()
+          const warning = ruleFindingMessage(job?.result?.rule_findings)
+          setImproveRuleWarning(warning || null)
           localStorage.removeItem(improveJobStorageKey)
           setImproveJobId('')
           setStageProcess(stepId, null)
@@ -2551,6 +2570,11 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
       {improvedPrompt ? (
         <div className="check">
           <span className="eyebrow">AI-SUGGESTED IMPROVEMENT</span>
+          {improveRuleWarning ? (
+            <p style={{ color: 'var(--amber)', fontSize: 13, lineHeight: 1.5 }}>
+              Rule check: {improveRuleWarning} The suggestion is still available below.
+            </p>
+          ) : null}
           <div className="md-preview" style={{ marginTop: 10, whiteSpace: 'pre-wrap' }}>
             {improvedPrompt}
           </div>
@@ -2670,6 +2694,7 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
   })
   const [candidates, setCandidates] = useState<string[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [candidateRuleWarning, setCandidateRuleWarning] = useState<string | null>(null)
   const [needRewind, setNeedRewind] = useState(false)
   const [researchBrief, setResearchBrief] = useState('')
   const [researchOpen, setResearchOpen] = useState(false)
@@ -2816,9 +2841,14 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
       .then((out) => {
         if (out?.ok && out.data?.exists) {
           try {
-            const parsed = JSON.parse(out.data.content) as { candidates?: string[] }
+            const parsed = JSON.parse(out.data.content) as {
+              candidates?: string[]
+              rule_findings?: RuleFinding[]
+            }
             const opts = (parsed?.candidates ?? []).filter((c) => typeof c === 'string')
             if (opts.length > 0) setCandidates((prev) => prev ?? opts)
+            const warning = ruleFindingMessage(parsed?.rule_findings)
+            setCandidateRuleWarning(warning || null)
           } catch { /* ignore */ }
         }
       })
@@ -2857,6 +2887,8 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
     if (!response.ok || !out?.ok || !out.data?.exists) return
     const parsed = JSON.parse(out.data.content)
     setCandidates(Array.isArray(parsed?.candidates) ? parsed.candidates : [])
+    const warning = ruleFindingMessage(parsed?.rule_findings)
+    setCandidateRuleWarning(warning || null)
   }, [])
 
   const generateCandidates = async (instruction: string, requestedModel: string) => {
@@ -3244,6 +3276,11 @@ export function CoreMessageContent({ stepId }: { stepId: string }) {
           </span>
         </div>
         {aiError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>Engine: {aiError}</div>}
+        {candidateRuleWarning ? (
+          <div style={{ color: 'var(--amber)', fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
+            Rule check: {candidateRuleWarning} The candidates are still available.
+          </div>
+        ) : null}
         {candidates && candidates.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {candidates.map((c, i) => (

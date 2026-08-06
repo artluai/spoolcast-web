@@ -3,6 +3,7 @@ import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, MouseEvent a
 import { activeSession, adminRenderLocation, apiUrl, contentUrl, downloadUrl, fileUrl, getJson, jobsUrl, postAction, postRenderAction, renderTargetDownloadUrl, renderTargetFileUrl, renderTargetInfoUrl, templatesUrl, uploadFinalCutAsset } from '../../lib/api'
 import type { RenderLocation } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
+import { ruleFindingMessage } from '../../lib/rule-findings'
 import { TimelineScroller } from './TimelineScroller'
 
 // The engine's render job: started via POST /api/action (heavy actions route to
@@ -2240,7 +2241,11 @@ export function VisualReviewStage({
         await new Promise((resolve) => window.setTimeout(resolve, 2500))
         const jr = await fetch(jobsUrl(jobId)).then((r) => (r.ok ? r.json() : null)).catch(() => null)
         const status = String(jr?.data?.status || '')
-        if (status === 'done') break
+        if (status === 'done') {
+          const warning = ruleFindingMessage(jr?.data?.result?.rule_findings)
+          if (warning) onToast?.(`Rule check: ${warning} The reordered copy was kept.`)
+          break
+        }
         if (status === 'failed') throw new Error(jr?.data?.message || jr?.data?.error || 'Sync failed after the reorder.')
       }
       await postAction({ action: 'sync_clip_timing' }).catch(() => null)

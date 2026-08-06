@@ -25,6 +25,7 @@ import {
 import { parseScreenplay, type Clip } from '../../lib/screenplay-md'
 import { actionUrl, activeSession, apiUrl, contentUrl, contractUrl, downloadUrl, fileUrl, globalContentUrl, jobsUrl, templatesUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { ruleFindingMessage } from '../../lib/rule-findings'
 import { useWorkflowStore } from '../../store/workflow'
 import { VariantModule } from './VariantModule'
 import { FeedbackButton } from './FeedbackButton'
@@ -495,6 +496,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
   // A reload must not orphan a running job: the id persists here, and the
   // resume effect below picks it back up on mount.
   const updJobKey = `spoolcast-upd-job:${activeSession()}`
+  const updWarningKey = `spoolcast-upd-rule-warning:${activeSession()}`
+  const [updWarning, setUpdWarning] = useState<string | null>(
+    () => window.localStorage.getItem(updWarningKey),
+  )
   const pollUpdateJob = async (jobId: string) => {
     // 2.5s × 840 ≈ 35 min — must outlast the engine's own job timeout, so
     // a slow full-plan re-derive reports its real result, not a fake stall.
@@ -504,6 +509,10 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
       const jout = await jr.json().catch(() => null)
       const job = jout?.data
       if (job?.status === 'done') {
+        const warning = ruleFindingMessage(job?.result?.rule_findings)
+        if (warning) window.localStorage.setItem(updWarningKey, warning)
+        else window.localStorage.removeItem(updWarningKey)
+        setUpdWarning(warning || null)
         // The plan file changed under the local draft — drop the stale
         // draft and reload; the what-changed modal picks it up from there.
         window.localStorage.removeItem(updJobKey)
@@ -527,6 +536,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     updBusyRef.current = true
     setUpdBusy(true)
     setUpdErr(null)
+    setUpdWarning(null)
+    window.localStorage.removeItem(updWarningKey)
     try {
       // The chain edits the FILES for minutes — a live local draft is a
       // landmine (a mid-run flush once reverted the chain's write). Unsaved
@@ -591,6 +602,8 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
     setUpdBusy(true)
     setSyncBusy(true)
     setUpdErr(null)
+    setUpdWarning(null)
+    window.localStorage.removeItem(updWarningKey)
     try {
       // The engine reads the plan FILE — unsaved board edits are saved first,
       // then the local copy is dropped for the duration (same as runUpdate).
@@ -2322,6 +2335,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
             {updErr && !updBusy ? (
               <span style={{ fontSize: 12, color: 'var(--red)', marginLeft: 6 }}>{updErr}</span>
             ) : null}
+            {updWarning && !updBusy ? (
+              <span style={{ fontSize: 12, color: 'var(--amber)', marginLeft: 6 }}>
+                Rule check: {updWarning} The synced copy was kept.
+              </span>
+            ) : null}
             <button type="button" className="vp-undo vp-aimap" style={{ marginLeft: 8 }} disabled={mapAI} onClick={runMapAI}>
               ✦ {mapAI ? 'Mapping…' : 'Let AI map references'}
             </button>
@@ -3535,6 +3553,11 @@ export function VisualPacingEditor({ stageId, aiUpdate }: { stageId: string; aiU
           />
           {updErr ? (
             <span style={{ color: 'var(--red)', fontSize: 13 }}>Engine: {updErr}</span>
+          ) : null}
+          {updWarning ? (
+            <span style={{ color: 'var(--amber)', fontSize: 13 }}>
+              Rule check: {updWarning} The updated copy was kept.
+            </span>
           ) : null}
         </details>
       ) : null}

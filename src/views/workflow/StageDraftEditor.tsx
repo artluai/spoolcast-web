@@ -9,6 +9,7 @@ import { WorldKitEditor } from './WorldKitEditor'
 import { RulesPanel } from './RulesPanel'
 import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
 
 // The model catalog + dropdown live in ModelPicker.tsx — ONE list and ONE
 // design shared by every AI-suggest button.
@@ -17,7 +18,13 @@ type DraftJob = {
   status: 'queued' | 'running' | 'done' | 'failed'
   error?: string | null
   message?: string | null
-  result?: { ok?: boolean; error?: string; message?: string } | null
+  result?: {
+    ok?: boolean
+    error?: string
+    message?: string
+    rule_findings?: RuleFinding[]
+    data?: { rule_findings?: RuleFinding[] }
+  } | null
 }
 
 /**
@@ -38,6 +45,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const sourceWords = useSourceWords()
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [draftWarning, setDraftWarning] = useState<string | null>(null)
   const [, setDraftJob] = useState<DraftJob | null>(null)
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
@@ -199,6 +207,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       setDraftJob(job)
       updateProcess(job)
       if (job.status === 'done') {
+        const warning = ruleFindingMessage(
+          job.result?.data?.rule_findings ?? job.result?.rule_findings,
+        )
+        setDraftWarning(warning || null)
         if (!(await loadFreshDraft())) setDraftError('Draft finished, but the output file was not found.')
         setStageProcess(stageId, null)
         pollingJobRef.current = null
@@ -218,6 +230,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const runDraft = async (feedback = '', requestedModel = DEFAULT_MODEL_ID) => {
     setDrafting(true)
     setDraftError(null)
+    setDraftWarning(null)
     setDraftJob(null)
     try {
       // Long-running drafts go through the jobs queue instead of the
@@ -256,6 +269,8 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         })
         await pollDraftJob(job.id)
       } else {
+        const warning = ruleFindingMessage(out?.data?.rule_findings)
+        setDraftWarning(warning || null)
         // Pull the freshly written file and show it for review/editing.
         await loadFreshDraft()
       }
@@ -375,6 +390,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       ) : null}
       {!needRewind && draftError ? (
         <p style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>Engine: {draftError}</p>
+      ) : null}
+      {!needRewind && draftWarning ? (
+        <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
+          Rule check: {draftWarning} The draft was kept so you can review or edit it.
+        </p>
       ) : null}
       {!needRewind && ['input_intake', 'story_lock', 'format_setup'].includes(stageId) ? (
         <ThinSourceNote words={sourceWords} />

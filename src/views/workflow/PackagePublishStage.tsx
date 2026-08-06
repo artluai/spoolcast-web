@@ -3,6 +3,7 @@ import { Pill } from '../../components/common/Pill'
 import { activeSession, contentUrl, downloadUrl, fileUrl, getFileJson, getJson, jobsUrl, postAction, urlOk } from '../../lib/api'
 import { useWorkflowStore } from '../../store/workflow'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
+import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
 import { FeedbackButton } from './FeedbackButton'
 import { ModelPicker } from './ModelPicker'
 import { RulesPanel } from './RulesPanel'
@@ -50,6 +51,7 @@ type VideoMeta = {
   platforms?: Record<string, { title?: string; description?: string }>
   thumbnail_prompt?: string
   thumbnail_prompts?: string[]
+  rule_findings?: RuleFinding[]
 }
 type ThumbState = {
   gen: GenState
@@ -162,6 +164,7 @@ export function PackagePublishStage({
   const [synopsis, setSynopsis] = useState('')
   const [tags, setTags] = useState('')
   const [platformMeta, setPlatformMeta] = useState<Record<string, { title?: string; description?: string }>>({})
+  const [metaRuleWarning, setMetaRuleWarning] = useState<string | null>(null)
   // Advanced generation options (persisted per browser — they describe the
   // user's publishing habits, not one video).
   const [advOpen, setAdvOpen] = useState(false)
@@ -186,6 +189,8 @@ export function PackagePublishStage({
     setSynopsis(meta.synopsis || '')
     setTags((meta.tags || []).join(', '))
     setPlatformMeta(meta.platforms || {})
+    const warning = ruleFindingMessage(meta.rule_findings)
+    setMetaRuleWarning(warning || null)
     hasMetaRef.current = true
     setMetaGen('ready')
   }
@@ -486,6 +491,11 @@ export function PackagePublishStage({
         </p>
         {metaGen === 'ready' ? (
           <div className="pkg-fields">
+            {metaRuleWarning ? (
+              <p style={{ color: 'var(--amber)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+                Rule check: {metaRuleWarning} The drafted metadata is still editable below.
+              </p>
+            ) : null}
             <label className="st-field">
               <span>Video title</span>
               <input value={title} onChange={(e) => setTitle(e.target.value)} />
