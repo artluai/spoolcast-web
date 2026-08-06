@@ -13,7 +13,7 @@
 //   VITE_SESSION       = <session id>   (dev fallback only — the real session
 //                                        comes from the /p/:id route)
 //   VITE_TENANT        = <tenant>
-//   VITE_MEDIA_PREVIEW = 1                        (request LQ preview proxies)
+//   VITE_MEDIA_PREVIEW = 0                        (opt OUT of LQ preview proxies)
 //
 // The migration is COMPLETE: no file outside this one may build an engine URL
 // by hand or name a session id. New server calls import from here, always.
@@ -42,10 +42,11 @@ export function activeSession(): string {
 export const TENANT = env.VITE_TENANT ?? 'local'
 export type RenderLocation = 'local' | 'cloud'
 
-// When the backend can serve low-quality preview proxies, flip this on; the preview
-// player then requests the lighter feed while full-quality stays available for
-// download/export. Off by default so today's requests are byte-for-byte unchanged.
-const MEDIA_PREVIEW_ENABLED = env.VITE_MEDIA_PREVIEW === '1'
+// The engine serves downscaled proxies for still images on quality=preview and
+// ignores the param for everything else (video stays byte-identical until its
+// transcode proxies exist), so preview requests are on by default; full quality
+// stays available for download/export. VITE_MEDIA_PREVIEW=0 opts out.
+const MEDIA_PREVIEW_ENABLED = env.VITE_MEDIA_PREVIEW !== '0'
 
 type QueryValue = string | number | boolean | undefined | null
 const queryString = (params: Record<string, QueryValue>) =>

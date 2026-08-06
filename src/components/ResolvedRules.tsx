@@ -46,23 +46,28 @@ function ChoiceMenu<T extends string>({
   value,
   choices,
   onChange,
+  bare = false,
 }: {
   label: string
   value: T
   choices: { value: T; label: string; note?: string; disabled?: boolean }[]
   onChange: (value: T) => void
+  // Badge form: the button shows only the active value (used as each rule's
+  // level tag); the opened menu still carries the full label as its header.
+  bare?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const active = choices.find((choice) => choice.value === value)
   return (
-    <span className="rule-choice-wrap">
+    <span className={`rule-choice-wrap${bare ? ' bare' : ''}`}>
       <button
         type="button"
         className="vp-menu-btn rule-choice-btn"
         aria-expanded={open}
+        title={bare ? label : undefined}
         onClick={() => setOpen((current) => !current)}
       >
-        {label}: {active?.label ?? value} ▾
+        {bare ? <>{active?.label ?? value} ▾</> : <>{label}: {active?.label ?? value} ▾</>}
       </button>
       {open ? (
         <>
@@ -126,6 +131,7 @@ export function ResolvedRules({
   const [editing, setEditing] = useState<{ id: string; text: string; applies: string } | null>(null)
   const [disabling, setDisabling] = useState<{ id: string; reason: string } | null>(null)
   const [busyId, setBusyId] = useState('')
+  const [historyFor, setHistoryFor] = useState('')
   const [suggesting, setSuggesting] = useState(false)
   const [suggestions, setSuggestions] = useState<{ id: string; text: string }[]>([])
 
@@ -242,6 +248,20 @@ export function ResolvedRules({
     if (ok) setDisabling(null)
   }
 
+  // "Change this rule's level": take control of the rule at the chosen layer
+  // by writing it there with its current wording — the same override semantics
+  // as the panel-wide selector, scoped to one rule.
+  const moveRule = async (rule: ResolvedRule, scope: RuleScope) => {
+    if (scope === rule.effective_scope) return
+    await mutate({
+      action: 'set_rule',
+      scope,
+      id: rule.id,
+      text: rule.text,
+      applies_to: rule.applies_to.length ? rule.applies_to : [targetApplies],
+    }, rule.id)
+  }
+
   const resetSelectedOverride = async (rule: ResolvedRule) => {
     await mutate({
       action: 'delete_rule_override',
@@ -343,32 +363,54 @@ export function ResolvedRules({
                       >
                         {rule.text}
                       </button>
-                      <span className="resolved-rule-source">{SCOPE_LABEL[rule.effective_scope]}</span>
+                      <span className="resolved-rule-level">
+                        <ChoiceMenu
+                          bare
+                          label="Rule level"
+                          value={rule.effective_scope}
+                          choices={scopeChoices}
+                          onChange={(scope) => void moveRule(rule, scope)}
+                        />
+                        {/* Provenance earns UI only when there is a story: a
+                            single-entry chain is just "this layer wrote it",
+                            so no affordance and no row is spent. */}
+                        {rule.chain.length > 1 || hasSelectedOverride ? (
+                          <button
+                            type="button"
+                            className="resolved-rule-history"
+                            title="Where this rule's wording came from"
+                            onClick={() => setHistoryFor(historyFor === rule.id ? '' : rule.id)}
+                          >
+                            {historyFor === rule.id ? '▾' : '▸'}
+                          </button>
+                        ) : null}
+                      </span>
                     </div>
                     {!rule.enabled ? (
                       <p className="resolved-rule-reason">
                         Disabled{rule.reason ? `: ${rule.reason}` : '.'}
                       </p>
                     ) : null}
-                    <details className="resolved-rule-chain">
-                      <summary>History</summary>
-                      {rule.chain.map((item, index) => (
-                        <span key={`${item.scope}-${index}`}>
-                          {SCOPE_LABEL[item.scope]} {item.operation.replace('-', ' ')}
-                          {item.reason ? ` — ${item.reason}` : ''}
-                        </span>
-                      ))}
-                      {hasSelectedOverride && permissions?.[targetScope]?.can_edit ? (
-                        <button
-                          type="button"
-                          className="vp-undo"
-                          disabled={busyId === rule.id}
-                          onClick={() => void resetSelectedOverride(rule)}
-                        >
-                          Reset {SCOPE_LABEL[targetScope]} change
-                        </button>
-                      ) : null}
-                    </details>
+                    {historyFor === rule.id ? (
+                      <div className="resolved-rule-chain">
+                        {rule.chain.map((item, index) => (
+                          <span key={`${item.scope}-${index}`}>
+                            {SCOPE_LABEL[item.scope]} {item.operation.replace('-', ' ')}
+                            {item.reason ? ` — ${item.reason}` : ''}
+                          </span>
+                        ))}
+                        {hasSelectedOverride && permissions?.[targetScope]?.can_edit ? (
+                          <button
+                            type="button"
+                            className="vp-undo"
+                            disabled={busyId === rule.id}
+                            onClick={() => void resetSelectedOverride(rule)}
+                          >
+                            Reset {SCOPE_LABEL[targetScope]} change
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </>
                 )}
                 {disabling?.id === rule.id ? (

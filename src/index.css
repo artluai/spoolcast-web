@@ -1397,11 +1397,16 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .pkg-gen-row + .pkg-fields, .pkg-gen-row + .pkg-thumbs { margin-top: 14px; }
 .pkg-fields { display: flex; flex-direction: column; gap: 16px; max-width: 560px; }
 .pkg-thumbs { max-width: 860px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-/* Let each approved thumbnail keep its real frame instead of forcing 16:9. */
-.thumb-pill.wide { min-height: 0; }
+/* Candidate tiles share one height (a widescreen tile's) and HUG their
+   image: width comes from the frame's aspect, so portrait tiles are narrow
+   instead of padding out a 16:9 box with empty bars. */
+.s1-style-grid.pkg-thumbs { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.pkg-thumbs .thumb-pill.wide { width: auto; min-height: 0; }
 .thumb-pill.wide .pill-body { padding: 7px; }
-.thumb-pill.wide .preview { aspect-ratio: auto; height: auto; background: #10141e; }
-.thumb-pill.wide .preview img { width: 100%; height: auto; object-fit: contain; background: #10141e; }
+.thumb-pill.wide .preview { aspect-ratio: auto; height: auto; width: fit-content; background: #10141e; }
+/* The image drives the tile: fixed height, intrinsic-ratio width. (A
+   percentage height would go circular against the preview grid's auto row.) */
+.thumb-pill.wide .preview img { width: auto; height: 230px; object-fit: contain; background: #10141e; }
 /* Full-size candidate preview: image-first modal, actions below. */
 .pkg-thumb-modal { width: min(1080px, calc(100vw - 64px)); padding: 14px; }
 .pkg-thumb-modal img { display: block; width: 100%; border-radius: 8px; }
@@ -3291,6 +3296,12 @@ body.chat-pinned { padding-right: 380px; }
 .resolved-rule-text:hover:not(:disabled) { color: var(--ink); }
 .resolved-rule-text:disabled { cursor: default; }
 .resolved-rule-source { flex: none; margin-top: 2px; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; }
+.resolved-rule-level { flex: none; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+/* The per-rule level tag is the same badge, now a dropdown trigger. */
+.rule-choice-wrap.bare .rule-choice-btn { background: none; border: 0; padding: 0; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+.rule-choice-wrap.bare .rule-choice-btn:hover { color: var(--ink-1); }
+.resolved-rule-history { background: none; border: 0; padding: 0; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; cursor: pointer; }
+.resolved-rule-history:hover { color: var(--ink-1); }
 .resolved-rule-reason { margin: 3px 0 0; color: var(--amber); font-size: 11.5px; line-height: 1.4; }
 .resolved-rule-chain { margin-top: 4px; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; }
 .resolved-rule-chain summary { width: fit-content; cursor: pointer; }

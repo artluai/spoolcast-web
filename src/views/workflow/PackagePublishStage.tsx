@@ -586,7 +586,8 @@ export function PackagePublishStage({
                   onClick={() => setPreviewVersion(version)}
                 >
                   <span className="preview">
-                    <img src={`${contentUrl(thumbOptionPath(version))}&v=${thumb.bust}`} alt="" />
+                    {/* Feed-size tile: the preview variant, never the full render. */}
+                    <img src={`${contentUrl(thumbOptionPath(version), 'preview')}&v=${thumb.bust}`} alt="" />
                   </span>
                   <span className="name">
                     {thumb.finalizing === version
