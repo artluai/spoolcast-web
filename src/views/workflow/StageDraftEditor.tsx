@@ -262,7 +262,12 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         return
       }
       if (job.status === 'failed' || job.status === 'cancelled') {
-        await handleDraftFailure(job.result || { error: job.error || undefined, message: job.message || undefined })
+        await handleDraftFailure({
+          error: job.result?.error || job.error || undefined,
+          // Queue failures often put the useful traceback in `error` while
+          // `message` only says "exited with code N". Surface the real cause.
+          message: job.result?.message || job.error || job.message || undefined,
+        })
         updateProcess(job)
         setDrafting(false)
         pollingJobRef.current = null
