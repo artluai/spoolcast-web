@@ -1764,6 +1764,8 @@ type StepOneKitItem = {
   global_path?: string
   image_scope?: string
   scope?: string
+  selected_in_step_1?: boolean
+  selected_directly?: boolean
 }
 
 type StepOneKitAttachment = {
@@ -1901,6 +1903,17 @@ function StepOneAdvanced({
       .then((out) => {
         if (!live) return
         const items = out?.data?.kit
+        const persistedRefs = Array.isArray(items)
+          ? items
+              .filter((item: StepOneKitItem) => (
+                item.selected_in_step_1 && item.selected_directly
+              ))
+              .map((item: StepOneKitItem) => item.name)
+          : []
+        if (persistedRefs.length) {
+          const nextIdea = withFeaturingNames(idea, persistedRefs)
+          if (nextIdea !== idea) onIdeaChange(nextIdea)
+        }
         setKit(
           Array.isArray(items)
             ? items.filter((item: StepOneKitItem) => (
