@@ -101,6 +101,10 @@ export function VariantModule({
   // Extra references travel as session-relative IMAGE PATHS (not kit names):
   // kit refs, imported sources and fresh uploads all fit the same list.
   const [vExtras, setVExtras] = useState<string[]>([])
+  // Exact World Kit ids travel beside their paths. Paths alone are ambiguous
+  // when aliases map to the same uploaded product image; Master Shot
+  // dependencies must preserve the item the user actually picked.
+  const [vExtraRefNames, setVExtraRefNames] = useState<Record<string, string>>({})
   const [vExtrasOpen, setVExtrasOpen] = useState(false)
   const [vUploads, setVUploads] = useState<{ path: string; name: string }[]>([])
   const [vModel, setVModel] = useState(base.active_model || '')
@@ -292,6 +296,10 @@ export function VariantModule({
         // only wins when its picker is actually visible.
         model: modelOverride || vModel || base.active_model || DEFAULT_IMAGE_MODEL_ID,
         ref_images: [...(baseIsImage ? [base.image_path] : []), ...vExtras],
+        ref_names: [
+          ...(!asVersion ? [base.name] : []),
+          ...vExtras.flatMap((path) => vExtraRefNames[path] ? [vExtraRefNames[path]] : []),
+        ],
         ...(aspectRatioOverride !== 'auto' ? { aspect_ratio: aspectRatioOverride } : {}),
         allow_cost: true,
       }),
@@ -417,7 +425,16 @@ export function VariantModule({
               type="button"
               className={`vp-var-xref ${vExtras.includes(k.image_path) ? 'on' : ''}`}
               title={k.name}
-              onClick={() => setVExtras((cur) => (cur.includes(k.image_path) ? cur.filter((p) => p !== k.image_path) : [...cur, k.image_path]))}
+              onClick={() => {
+                const selected = vExtras.includes(k.image_path)
+                setVExtras((cur) => (selected ? cur.filter((p) => p !== k.image_path) : [...cur, k.image_path]))
+                setVExtraRefNames((cur) => {
+                  const next = { ...cur }
+                  if (selected) delete next[k.image_path]
+                  else next[k.image_path] = k.name
+                  return next
+                })
+              }}
             >
               <img src={contentUrl(k.image_path)} alt={k.name} />
             </button>

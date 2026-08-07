@@ -27,7 +27,14 @@ type RefVersion = {
   ref_images?: string[]
   at?: string
 }
-type RefManifest = { versions: RefVersion[]; active: string | null }
+type RefManifest = {
+  versions: RefVersion[]
+  active: string | null
+  stale?: {
+    changed_refs?: string[]
+    artifacts_preserved?: boolean
+  }
+}
 type PoolImage = { path: string; name: string; size?: number; ref?: string; mtime?: number }
 type AssetLibraryGroup = {
   id: string
@@ -1025,6 +1032,26 @@ export function RefImagePanel({
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
                 {KIND_BADGE[active.kind]}{dims ? ` · ${dims}` : ''}
               </div>
+              {manifest?.stale ? (
+                <div
+                  aria-live="polite"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    marginTop: 8,
+                    color: 'var(--ink-2)',
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <span className="status-pill work">Needs update</span>
+                  <span>
+                    Its source {manifest.stale.changed_refs?.length === 1 ? 'item changed' : 'items changed'}.
+                    The existing image is preserved; generate a new take when ready.
+                  </span>
+                </div>
+              ) : null}
               {(active.ref_images?.length ?? 0) > 0 ? (
                 <div className="ref-source-panel">
                   <button

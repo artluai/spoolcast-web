@@ -106,6 +106,24 @@ uses whatever references it needs.
 - `cast.txt` = the **Cast subsection** manifest (recurring characters only).
 - Standalone route: `/p/:id/world-kit` (the old `/cast` route is gone).
 
+World Kit dependency contract:
+`../spoolcast/docs/world-kit-dependency-contract.md`.
+
+- A World Kit item's current description is authoritative. Master Shots store
+  structured ingredient links; copied prompt prose is preview/history, never a
+  second source of truth.
+- Upstream edits preserve generated media but mark dependent masters, prompts,
+  approvals, and outputs stale until rebuilt.
+- Audio follows its semantic owner through Master Shots and variants: voices
+  from cast, object sounds from props, and ambience from environments.
+- Planned next phase: the primary AI-fill path becomes a durable `/api/jobs`
+  stage process that reuses
+  existing work and completes missing visuals, Master Shots, and audio prompts.
+  Text-only drafting is an Advanced option.
+- The structured dependency graph, live text/audio resolver, and
+  preservation-first stale marking are implemented. Do not present the
+  one-click visual fill as shipped until the job exists.
+
 ## Assets
 
 Real content is mirrored from the `spoolcast-content` repo into
