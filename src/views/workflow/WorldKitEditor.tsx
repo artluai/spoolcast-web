@@ -32,7 +32,15 @@ const SECTION_BLURBS: Record<string, string> = {
 // Survives unmounts (step hops) within the app session; keyed session:stage.
 const EXPANDED_MEMORY: Record<string, string | null> = {}
 
-export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?: (m: string) => void }) {
+export function WorldKitEditor({
+  stageId,
+  onToast,
+  refreshToken = '',
+}: {
+  stageId: string
+  onToast?: (m: string) => void
+  refreshToken?: string
+}) {
   // Toast plumbing is optional here (StageDraftEditor doesn't thread it yet) —
   // fall back to a console note rather than swallowing feedback.
   const toast = onToast ?? ((m: string) => console.info('[world-kit]', m))
@@ -151,7 +159,7 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
         setKitMeta(meta)
       })
       .catch(() => {})
-  }, [expanded])
+  }, [expanded, refreshToken])
   const inheritTriedRef = useRef(false)
 
   // AUTO-INHERIT: arriving with no kit pulls the show's shared items from the
@@ -634,10 +642,10 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                 <button
                   style={{ ...btn, padding: '5px 12px' }}
                   disabled={aiSection === section.heading}
-                  title={`Let AI fill in ${section.heading} from the story so far`}
+                  title={`Draft text for ${section.heading} from the story so far`}
                   onClick={() => void fillSectionWithAI(section.heading)}
                 >
-                  {aiSection === section.heading ? 'Thinking…' : '✦ Let AI fill this'}
+                  {aiSection === section.heading ? 'Thinking…' : '✦ Draft text with AI'}
                 </button>
               )}
               {/* Cast picks from the GLOBAL library — real-looking creators

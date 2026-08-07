@@ -117,6 +117,7 @@ export function WorkflowView({
   // shows it's working instead of sitting silent.
   const [advancing, setAdvancing] = useState(false)
   const [stepAIModels, setStepAIModels] = useState<Record<string, string>>({})
+  const [stepAIModes, setStepAIModes] = useState<Record<string, string>>({})
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -177,6 +178,11 @@ export function WorkflowView({
   const activeStepId = activeStep.sourceId ?? activeStep.id
   const activeStepAI = useWorkflowStore((state) => state.stepAIActions[activeStepId] ?? null)
   const activeStepAIModel = stepAIModels[activeStepId] ?? DEFAULT_MODEL_ID
+  const activeStepAIModeId = stepAIModes[activeStepId]
+    ?? activeStepAI?.defaultMode
+    ?? activeStepAI?.modes?.[0]?.id
+    ?? ''
+  const activeStepAIMode = activeStepAI?.modes?.find((mode) => mode.id === activeStepAIModeId)
 
   // A blank Final Cut should receive Step 08 automatically. Once the user has
   // any timeline at all, syncing becomes an explicit opt-in so approval never
@@ -1073,7 +1079,7 @@ export function WorkflowView({
               {activeStepId !== 'input_intake' ? (
                 <span className="step-ai-control">
                   <FeedbackButton
-                    label={activeStepAI?.label || 'Complete step with AI'}
+                    label={activeStepAIMode?.actionLabel || activeStepAI?.label || 'Complete step with AI'}
                     busy={Boolean(activeStepAI?.busy)}
                     busyLabel={activeStepAI?.busyLabel || 'Working…'}
                     disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
@@ -1089,6 +1095,41 @@ export function WorkflowView({
                     ruleStep={activeStepId}
                     allowFeedback={Boolean(activeStepAI) && activeStepAI.acceptsInstructions !== false}
                     allowRuleSave={activeStepAI?.allowRuleSave !== false}
+                    aboveActions={activeStepAI?.modes?.some((mode) => mode.id === 'text_only') ? (
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          color: 'var(--ink-2)',
+                          fontSize: 12,
+                          cursor: activeStepAI.busy ? 'default' : 'pointer',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={activeStepAIModeId === 'text_only'}
+                          disabled={Boolean(activeStepAI.busy)}
+                          onChange={(event) => {
+                            setStepAIModes((current) => ({
+                              ...current,
+                              [activeStepId]: event.target.checked
+                                ? 'text_only'
+                                : activeStepAI.defaultMode || activeStepAI.modes?.[0]?.id || '',
+                            }))
+                          }}
+                          style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
+                        />
+                        <span>
+                          <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>
+                            Advanced: text only
+                          </b>
+                          <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
+                            Plan the World Kit now and leave image generation for later.
+                          </span>
+                        </span>
+                      </label>
+                    ) : undefined}
                     runExtras={activeStepAI?.usesTextModel !== false ? (
                       <ModelPicker
                         model={activeStepAIModel}
@@ -1098,7 +1139,11 @@ export function WorkflowView({
                     ) : undefined}
                     onRun={(instructions) => {
                       if (!activeStepAI || activeStepAI.disabled || isBeyondBlocked) return
-                      void activeStepAI.run({ instructions, model: activeStepAIModel })
+                      void activeStepAI.run({
+                        instructions,
+                        model: activeStepAIModel,
+                        mode: activeStepAIModeId || undefined,
+                      })
                     }}
                   />
                 </span>

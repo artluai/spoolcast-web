@@ -7,7 +7,7 @@ import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 import { RulesPanel } from './RulesPanel'
-import { activeSession, actionUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
+import { activeSession, actionUrl, apiUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
 
@@ -15,7 +15,7 @@ import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
 // design shared by every AI-suggest button.
 type DraftJob = {
   id: string
-  status: 'queued' | 'running' | 'done' | 'failed'
+  status: 'queued' | 'retrying' | 'running' | 'cancelling' | 'cancelled' | 'done' | 'failed'
   error?: string | null
   message?: string | null
   result?: {
@@ -25,6 +25,15 @@ type DraftJob = {
     rule_findings?: RuleFinding[]
     data?: { rule_findings?: RuleFinding[] }
   } | null
+}
+type WorldKitFillReport = {
+  mode?: string
+  counts?: {
+    generated?: number
+    reused?: number
+    skipped?: number
+    failed?: number
+  }
 }
 
 /**
@@ -46,6 +55,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [draftWarning, setDraftWarning] = useState<string | null>(null)
+  const [completionNote, setCompletionNote] = useState<string | null>(null)
   const [, setDraftJob] = useState<DraftJob | null>(null)
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
@@ -135,6 +145,18 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     return false
   }
 
+  const loadWorldKitFillReport = async (): Promise<WorldKitFillReport | null> => {
+    try {
+      const response = await fetch(fileUrl('working/world-kit-fill.json'))
+      const out = await response.json().catch(() => null)
+      if (!out?.ok || !out.data?.exists) return null
+      const report = JSON.parse(out.data.content || '{}')
+      return report && typeof report === 'object' ? report : null
+    } catch {
+      return null
+    }
+  }
+
   const handleDraftFailure = async (out: { error?: string; message?: string } | null) => {
     if (out?.error === 'illegal_action') {
       // Stage already approved and the engine has moved past it. Offer to
@@ -167,10 +189,17 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   }
 
   const updateProcess = (job: DraftJob, label = processLabel) => {
+    const status: StageProcess['status'] = ['queued', 'retrying'].includes(job.status)
+      ? 'queued'
+      : ['running', 'cancelling'].includes(job.status)
+        ? 'running'
+        : job.status === 'done'
+          ? 'done'
+          : 'failed'
     const next: StageProcess = {
       stageId,
       jobId: job.id,
-      status: job.status,
+      status,
       label,
       error: job.error || job.result?.error || null,
       message: job.message || job.result?.message || null,
@@ -200,39 +229,140 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           message: jout?.message || 'Could not read draft job status.',
           updatedAt: new Date().toISOString(),
         })
+        setDrafting(false)
         pollingJobRef.current = null
         return
       }
       const job = jout.data as DraftJob
       setDraftJob(job)
-      updateProcess(job)
+      updateProcess(job, job.message || processLabel)
       if (job.status === 'done') {
         const warning = ruleFindingMessage(
           job.result?.data?.rule_findings ?? job.result?.rule_findings,
         )
         setDraftWarning(warning || null)
+        if (stageId === 'world_kit') {
+          const report = await loadWorldKitFillReport()
+          const counts = report?.counts
+          if (report?.mode === 'text-only') {
+            setCompletionNote('World Kit text is ready. Image generation was intentionally skipped.')
+          } else if (counts) {
+            setCompletionNote(
+              `World Kit filled: ${Number(counts.generated || 0)} image${Number(counts.generated || 0) === 1 ? '' : 's'} generated, `
+              + `${Number(counts.reused || 0)} reused, ${Number(counts.skipped || 0)} text-only or skipped.`,
+            )
+          } else {
+            setCompletionNote('World Kit fill finished. Review the text and reference images below.')
+          }
+        }
         if (!(await loadFreshDraft())) setDraftError('Draft finished, but the output file was not found.')
         setStageProcess(stageId, null)
+        setDrafting(false)
         pollingJobRef.current = null
         return
       }
-      if (job.status === 'failed') {
+      if (job.status === 'failed' || job.status === 'cancelled') {
         await handleDraftFailure(job.result || { error: job.error || undefined, message: job.message || undefined })
         updateProcess(job)
+        setDrafting(false)
         pollingJobRef.current = null
         return
       }
     }
     setDraftError('Draft job is still running. You can leave this page and check back later.')
+    setDrafting(false)
     pollingJobRef.current = null
   }
 
-  const runDraft = async (feedback = '', requestedModel = DEFAULT_MODEL_ID) => {
+  useEffect(() => {
+    if (stageId !== 'world_kit' || stageProcess?.jobId || pollingJobRef.current) return
+    let alive = true
+    fetch(apiUrl('jobs', {
+      session: activeSession(),
+      status: 'queued,running',
+      limit: 20,
+    }))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((out) => {
+        if (!alive) return
+        const live = (out?.data?.jobs ?? []).find(
+          (job: { kind?: string; status?: string; id?: string }) =>
+            job.kind === 'fill_world_kit'
+            && ['queued', 'running'].includes(String(job.status || '')),
+        )
+        if (!live?.id) return
+        const job = live as DraftJob
+        setDrafting(true)
+        setDraftJob(job)
+        setStageProcess(stageId, {
+          stageId,
+          jobId: job.id,
+          status: job.status === 'running' ? 'running' : 'queued',
+          label: job.message || 'AI is filling the World Kit…',
+          error: job.error || null,
+          message: job.message || null,
+          updatedAt: new Date().toISOString(),
+        })
+        void pollDraftJob(job.id)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // pollDraftJob intentionally follows the current mounted editor instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageId, stageProcess?.jobId])
+
+  const runDraft = async (
+    feedback = '',
+    requestedModel = DEFAULT_MODEL_ID,
+    requestedMode = '',
+  ) => {
     setDrafting(true)
     setDraftError(null)
     setDraftWarning(null)
+    setCompletionNote(null)
     setDraftJob(null)
     try {
+      if (stageId === 'world_kit') {
+        const textOnly = requestedMode === 'text_only'
+        const res = await fetch(actionUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: activeSession(),
+            tenant: 'local',
+            action: 'fill_world_kit',
+            text_only: textOnly,
+            model: requestedModel,
+            allow_cost: true,
+            ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+            ...(draftReasoning(requestedModel) ? { reasoning: draftReasoning(requestedModel) } : {}),
+          }),
+        })
+        const out = await res.json().catch(() => null)
+        const jobId = String(out?.data?.job_id || '')
+        if (!res.ok || out?.ok === false || !jobId) {
+          await handleDraftFailure(out)
+          return
+        }
+        const job: DraftJob = { id: jobId, status: 'queued' }
+        const label = textOnly
+          ? 'AI is drafting the World Kit text…'
+          : 'AI is filling the World Kit and creating missing images…'
+        setDraftJob(job)
+        setStageProcess(stageId, {
+          stageId,
+          jobId,
+          status: 'queued',
+          label,
+          error: null,
+          message: null,
+          updatedAt: new Date().toISOString(),
+        })
+        await pollDraftJob(jobId)
+        return
+      }
       // Long-running drafts go through the jobs queue instead of the
       // synchronous 180s action path: pacing plans can be large.
       const useJob = stageId === 'visual_pacing'
@@ -261,7 +391,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         setStageProcess(stageId, {
           stageId,
           jobId: job.id,
-          status: job.status,
+          status: job.status === 'running' ? 'running' : 'queued',
           label: 'AI is drafting the visual pacing plan…',
           error: null,
           message: null,
@@ -316,11 +446,30 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     registerStepAIAction(stageId, {
       stageId,
       label: draft.trim() ? 'Update with AI' : 'Complete step with AI',
+      ...(stageId === 'world_kit' ? {
+        label: 'Fill with AI',
+        busyLabel: 'Filling World Kit…',
+        modes: [
+          {
+            id: 'complete',
+            label: 'Complete World Kit',
+            description: 'Draft text and create only missing or stale images.',
+            actionLabel: 'Fill with AI',
+          },
+          {
+            id: 'text_only',
+            label: 'Text only',
+            description: 'Draft the plan without generating images.',
+            actionLabel: 'Draft text only',
+          },
+        ],
+        defaultMode: 'complete',
+      } : {}),
       busy: isBusy,
       disabled: !(stageCurrent || Boolean(draft.trim())),
       disabledReason: 'Complete the earlier step first',
       usesTextModel: true,
-      run: ({ instructions, model }) => runDraft(instructions, model),
+      run: ({ instructions, model, mode }) => runDraft(instructions, model, mode),
     })
     return () => registerStepAIAction(stageId, null)
   }, [cfg.aiDraft, draft, isBusy, registerStepAIAction, stageCurrent, stageId])
@@ -396,6 +545,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           Rule check: {draftWarning} The draft was kept so you can review or edit it.
         </p>
       ) : null}
+      {!needRewind && completionNote ? (
+        <p style={{ color: 'var(--green)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
+          {completionNote}
+        </p>
+      ) : null}
       {!needRewind && ['input_intake', 'story_lock', 'format_setup'].includes(stageId) ? (
         <ThinSourceNote words={sourceWords} />
       ) : null}
@@ -416,7 +570,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             ) : cfg.structured === 'worldkit' ? (
               // STRUCTURED MODE (world kit): per-item editor with scope-aware remove
               // warnings, undo, and reset-to-default — always visible when content exists.
-              <WorldKitEditor stageId={stageId} />
+              <WorldKitEditor stageId={stageId} refreshToken={completionNote || ''} />
             ) : (
               <>
       <button

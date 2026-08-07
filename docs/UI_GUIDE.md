@@ -37,6 +37,9 @@ Do not add theme-specific conditions inside workflow components.
   for Autopilot and must not be used for model pickers or ordinary AI actions.
 - Use the split AI action when notes and model choice are optional. The main
   button must work without opening the options.
+- When the simple default completes both planning and media, put a lower-cost
+  text-only mode inside the split panel and label it `Advanced: text only`.
+  The closed main button must keep running the complete default.
 - Split actions use the same horizontal padding as regular buttons. Model
   pickers use the regular neutral button treatment; the action that runs the
   model uses the normal blue primary treatment.

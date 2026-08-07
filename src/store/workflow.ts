@@ -70,6 +70,13 @@ export type StageProcess = {
 export type StepAIRequest = {
   instructions: string
   model: string
+  mode?: string
+}
+export type StepAIMode = {
+  id: string
+  label: string
+  description?: string
+  actionLabel?: string
 }
 export type StepAIAction = {
   stageId: string
@@ -84,6 +91,8 @@ export type StepAIAction = {
   allowRuleSave?: boolean
   usesTextModel?: boolean
   acceptsInstructions?: boolean
+  modes?: StepAIMode[]
+  defaultMode?: string
   run: (request: StepAIRequest) => void | Promise<void>
 }
 export type StepMenuAction = {

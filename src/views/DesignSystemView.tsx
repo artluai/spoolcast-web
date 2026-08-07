@@ -49,6 +49,7 @@ export default function DesignSystemView() {
     document.documentElement.dataset.theme || DEFAULT_THEME_ID,
   )
   const [splitOpen, setSplitOpen] = useState(false)
+  const [textOnly, setTextOnly] = useState(false)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [compactMenuOpen, setCompactMenuOpen] = useState(false)
   const [compactChoice, setCompactChoice] = useState('Default')
@@ -184,7 +185,7 @@ export default function DesignSystemView() {
               </div>
             </Example>
 
-            <Example title="AI split action" note="Main click runs; caret reveals optional notes and model.">
+            <Example title="AI split action" note="Main click runs the simple default; caret reveals optional notes, model, and advanced scope.">
               <div className="ds-split-demo">
                 <span className={`vg-split-action ${splitOpen ? 'open' : ''}`}>
                   <button
@@ -196,15 +197,31 @@ export default function DesignSystemView() {
                     {splitOpen ? '▴' : '▾'}
                   </button>
                   <button type="button" className="vp-undo vg-split-main">
-                    ✦ Improve prompt with AI
+                    ✦ Fill with AI
                   </button>
                 </span>
                 {splitOpen ? (
                   <div className="vg-regen-note-panel step1-improve-panel ds-ai-panel">
+                    <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 8, color: 'var(--ink-2)', fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={textOnly}
+                        onChange={(event) => setTextOnly(event.target.checked)}
+                        style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
+                      />
+                      <span>
+                        <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>Advanced: text only</b>
+                        <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
+                          Plan now and leave image generation for later.
+                        </span>
+                      </span>
+                    </label>
                     <textarea placeholder="Optional directions for what AI should emphasize or preserve…" rows={3} />
                     <div className="vp-edit-actions step1-improve-actions">
                       <ModelPicker model={model} onChange={setModel} />
-                      <button type="button" className="vp-save">✦ Improve prompt</button>
+                      <button type="button" className="vp-save">
+                        {textOnly ? '✦ Draft text only' : '✦ Fill with AI'}
+                      </button>
                     </div>
                   </div>
                 ) : null}
