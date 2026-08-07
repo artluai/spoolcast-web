@@ -56,6 +56,17 @@ export type Step = {
   // Format fork not decided yet (blank flow): the step renders as a nameless
   // skeleton ghost — no name, no status, no connectors. Absent = normal node.
   fog?: 'ghost'
+  // Show-canvas extension nodes (seasons / episodes fanned off a show-plan
+  // session). Absent = ordinary contract step. `href` navigates on click
+  // (episode nodes open their session); `foot` overrides the computed
+  // status-foot label.
+  kind?: 'season' | 'episode' | 'stage'
+  href?: string
+  foot?: string
+  // Corner ⤢/⤡ on show-canvas episode nodes: expands/collapses that one
+  // episode's lane (value = the episode's session id).
+  toggleEpisode?: string
+  toggleKind?: 'expand' | 'collapse'
 }
 
 export type Gate = {

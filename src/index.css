@@ -469,8 +469,14 @@ body.chat-pinned .detail-card.full { right: 380px; }
 .detail-nav-pair button { border-radius: 0; }
 .detail-nav-pair button:first-child { border-radius: 9px 0 0 9px; }
 .detail-nav-pair button:last-child { margin-left: -1px; border-radius: 0 9px 9px 0; }
-.detail-head .expand-btn { position: absolute; top: 8px; right: 12px; width: 26px; padding: 4px 0 !important; border: 0; background: transparent; color: var(--ink-3); }
+/* Corner controls: expand ⤢ with hide ✕ directly beneath — one 26px column,
+   same glyph size, on every detail card. The ✕ hides the panel; it returns
+   when any step node is clicked. */
+.detail-head .expand-btn { position: absolute; top: 8px; right: 12px; width: 26px; min-height: 0; height: 20px; padding: 4px 0 !important; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; line-height: 1; }
 .detail-head .expand-btn:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--ink); }
+.detail-head .hide-btn { position: absolute; top: 30px; right: 12px; width: 26px; min-height: 0; height: 20px; padding: 4px 0 !important; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; line-height: 1; }
+.detail-head .hide-btn:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--ink); }
+.detail-card.hidden { display: none; }
 .detail-command-section { position: relative; z-index: 2; border-bottom: 0; background: rgba(17,20,29,.86); }
 .detail-command-bar { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px var(--detail-gutter) 8px; }
 .detail-command-bar > button,
@@ -3302,6 +3308,16 @@ body.chat-pinned { padding-right: 380px; }
 .rule-choice-wrap.bare .rule-choice-btn:hover { color: var(--ink-1); }
 .resolved-rule-history { background: none; border: 0; padding: 0; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; cursor: pointer; }
 .resolved-rule-history:hover { color: var(--ink-1); }
+
+/* Show-page canvas extension: the expand/collapse-all dropdown is the
+   existing vp-menu/rule-choice control, only ANCHORED in canvas space above
+   the episode column. The season/episode nodes themselves are ordinary
+   .node elements; episode nodes add the corner ⤢/⤡ lane toggle (the same
+   quiet corner glyph the detail card uses). */
+.fan-view-menu { position: absolute; z-index: 4; }
+.node.linked { cursor: pointer; }
+.node .lane-toggle { position: absolute; top: 6px; right: 6px; width: 20px; min-height: 0; height: 20px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; line-height: 1; cursor: pointer; z-index: 2; }
+.node .lane-toggle:hover { color: var(--ink); }
 .resolved-rule-reason { margin: 3px 0 0; color: var(--amber); font-size: 11.5px; line-height: 1.4; }
 .resolved-rule-chain { margin-top: 4px; color: var(--ink-3); font-family: var(--mono); font-size: 9.5px; }
 .resolved-rule-chain summary { width: fit-content; cursor: pointer; }
