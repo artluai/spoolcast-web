@@ -83,7 +83,12 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
   // A GLOBAL row's Notes cell is deliberately empty — its description lives in
   // the library and the engine resolves it. Keep the resolved text (and the
   // content-root image path) so the panel can show what the row actually means.
-  const [globalMeta, setGlobalMeta] = useState<Record<string, { notes: string; image: string }>>({})
+  const [kitMeta, setKitMeta] = useState<Record<string, {
+    notes: string
+    resolvedNotes: string
+    image: string
+    readOnly: boolean
+  }>>({})
   // Which kit item (if any) is the session's STYLE ANCHOR — its image rides
   // into every generation as a reference (session.json style_reference).
   const [anchorRef, setAnchorRef] = useState('')
@@ -127,13 +132,23 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
           if (img.ref) map[img.ref] = img.path
         }
         setActiveRefImages(map)
-        const meta: Record<string, { notes: string; image: string }> = {}
+        const meta: Record<string, {
+          notes: string
+          resolvedNotes: string
+          image: string
+          readOnly: boolean
+        }> = {}
         for (const k of out.data?.kit ?? []) {
-          if (k?.read_only && k?.name) {
-            meta[k.name] = { notes: String(k.notes || ''), image: String(k.global_path || '') }
+          if (k?.name) {
+            meta[k.name] = {
+              notes: String(k.notes || ''),
+              resolvedNotes: String(k.resolved_notes || k.notes || ''),
+              image: String(k.global_path || ''),
+              readOnly: Boolean(k.read_only),
+            }
           }
         }
-        setGlobalMeta(meta)
+        setKitMeta(meta)
       })
       .catch(() => {})
   }, [expanded])
@@ -185,7 +200,17 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
     const dIdx = sec.columns.length - 1
     for (const r of sec.rows) {
       const ref = (r[rIdx] || '').trim()
-      if (ref) kitIndex[ref] = { kind: kIdx >= 0 ? r[kIdx] : '', notes: dIdx !== rIdx ? r[dIdx] : '', section: sec.heading }
+      if (ref) {
+        const kind = kIdx >= 0 ? r[kIdx] : ''
+        const storedNotes = dIdx !== rIdx ? r[dIdx] : ''
+        kitIndex[ref] = {
+          kind,
+          notes: /^master$/i.test(kind.trim())
+            ? kitMeta[ref]?.resolvedNotes || storedNotes
+            : storedNotes,
+          section: sec.heading,
+        }
+      }
     }
   }
 
@@ -684,8 +709,8 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                       castImages[row[refIdx]] ??
                       (activeRefImages[row[refIdx]]
                         ? contentUrl(activeRefImages[row[refIdx]])
-                        : globalMeta[row[refIdx]]?.image
-                          ? globalContentUrl(globalMeta[row[refIdx]].image)
+                        : kitMeta[row[refIdx]]?.image
+                          ? globalContentUrl(kitMeta[row[refIdx]].image)
                           : undefined)
                     if (img && !(expanded ?? '').startsWith(`${si}:`)) {
                       // CHARACTER SHEET CARD — same law as the mapping wall:
@@ -884,6 +909,25 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                     }
                   }
                   const scope = scopeIdx >= 0 ? row[scopeIdx] : 'episode-only'
+                  const refName = row[refIdx].trim()
+                  const kindName = kindIdx >= 0 ? row[kindIdx].trim() : ''
+                  const storedNotes = descIdx !== refIdx ? row[descIdx] || '' : ''
+                  const panelNotes = /^master$/i.test(kindName)
+                    ? kitMeta[refName]?.resolvedNotes || storedNotes
+                    : storedNotes || kitMeta[refName]?.notes || ''
+                  const setPanelNotes = (text: string) => {
+                    if (descIdx === refIdx) return
+                    setKitMeta((current) => ({
+                      ...current,
+                      [refName]: {
+                        notes: text.slice(0, 300),
+                        resolvedNotes: text,
+                        image: current[refName]?.image || '',
+                        readOnly: current[refName]?.readOnly || false,
+                      },
+                    }))
+                    setCell(descIdx, text)
+                  }
                   const fieldRows = (
                     <>
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1041,35 +1085,30 @@ export function WorldKitEditor({ stageId, onToast }: { stageId: string; onToast?
                           // so the panel forces "save as a new variant".
                           readOnly={scopeIdx >= 0 && /^global$/i.test((row[scopeIdx] || '').trim())}
                           readOnlyImage={
-                            globalMeta[row[refIdx]]?.image
-                              ? globalContentUrl(globalMeta[row[refIdx]].image)
+                            kitMeta[row[refIdx]]?.image
+                              ? globalContentUrl(kitMeta[row[refIdx]].image)
                               : ''
                           }
-                          readOnlyPath={globalMeta[row[refIdx]]?.image || ''}
+                          readOnlyPath={kitMeta[row[refIdx]]?.image || ''}
                           // Global rows carry no text of their own — show the
                           // library's resolved description instead of a blank.
-                          notes={
-                            descIdx !== refIdx
-                              ? row[descIdx] || globalMeta[row[refIdx]]?.notes || ''
-                              : ''
-                          }
+                          notes={panelNotes}
                           notesLabel={descIdx !== refIdx ? section.columns[descIdx].toUpperCase() : ''}
                           fields={fieldRows}
                           kitIndex={kitIndex}
                           onNotesInput={(text) => {
-                            if (descIdx === refIdx) return
-                            setCell(descIdx, text)
+                            setPanelNotes(text)
                           }}
                           onNotesFocus={snapshot}
                           onDescribed={(text) => {
                             if (descIdx === refIdx) return
                             snapshot()
-                            setCell(descIdx, row[descIdx].trim() ? `${row[descIdx].trim()}\n\n${text}` : text)
+                            setPanelNotes(panelNotes.trim() ? `${panelNotes.trim()}\n\n${text}` : text)
                           }}
                           onNotesChange={(text) => {
                             if (descIdx === refIdx) return
                             snapshot()
-                            setCell(descIdx, text)
+                            setPanelNotes(text)
                           }}
                           onToast={toast}
                           onVariantCreated={(name, generationPrompt) => {
