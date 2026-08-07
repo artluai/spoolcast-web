@@ -1833,6 +1833,24 @@ function StepOneAdvanced({
   const [webResearch, setWebResearch] = useState<boolean | null>(null)
   const [kit, setKit] = useState<StepOneKitItem[]>([])
   const [kitLoading, setKitLoading] = useState(true)
+  const [kitSyncReady, setKitSyncReady] = useState(false)
+
+  const saveKitSelection = useCallback(async (refs: string[]) => {
+    const response = await fetch(actionUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: activeSession(),
+        tenant: 'local',
+        action: 'set_step1_world_kit_refs',
+        refs,
+      }),
+    }).catch(() => null)
+    const out = response ? await response.json().catch(() => null) : null
+    if (!response?.ok || out?.ok === false) {
+      throw new Error(out?.message || out?.error || 'Could not save the selected World Kit references.')
+    }
+  }, [])
 
   useEffect(() => {
     let live = true
@@ -1871,11 +1889,13 @@ function StepOneAdvanced({
     if (!series) {
       setKit([])
       setKitLoading(false)
+      setKitSyncReady(false)
       return
     }
     let live = true
     setKit([])
     setKitLoading(true)
+    setKitSyncReady(false)
     fetch(apiUrl('source-images', { session: activeSession(), include_refs: 1 }))
       .then((r) => (r.ok ? r.json() : null))
       .then((out) => {
@@ -1889,6 +1909,7 @@ function StepOneAdvanced({
               ))
             : [],
         )
+        setKitSyncReady(Array.isArray(items))
       })
       .catch(() => {
         if (live) setKit([])
@@ -1920,6 +1941,7 @@ function StepOneAdvanced({
     if (response?.ok && out?.ok) {
       setKit([])
       onIdeaChange(withFeaturingNames(idea, []))
+      void saveKitSelection([]).catch(() => {})
       setSeries(String(out?.data?.series || seriesId))
       setTemplate(String(out?.data?.template || ''))
       notifySessionConfigurationChanged()
@@ -1946,6 +1968,7 @@ function StepOneAdvanced({
     if (response?.ok && out?.ok) {
       setKit([])
       onIdeaChange(withFeaturingNames(idea, []))
+      void saveKitSelection([]).catch(() => {})
       setSeries('')
       setTemplate(String(out?.data?.template || ''))
       notifySessionConfigurationChanged()
@@ -1975,6 +1998,7 @@ function StepOneAdvanced({
       const nextSeries = String(out?.data?.series || seriesId)
       setKit([])
       onIdeaChange(withFeaturingNames(idea, []))
+      void saveKitSelection([]).catch(() => {})
       setSeries(nextSeries)
       setTemplate(String(out?.data?.template || template))
       setSeriesOptions((current) => (
@@ -2010,6 +2034,7 @@ function StepOneAdvanced({
 
   const selectedFeatures = featuringNames(idea)
   const selectedSet = new Set(selectedFeatures)
+  const selectedFeatureKey = selectedFeatures.join('\u0000')
   const imageKit = kit.filter((item) => item.name && (item.global_path || item.image_path))
   const seriesThumbnailUrl = (path: string) =>
     /^https?:\/\//i.test(path) ? path : globalContentUrl(path)
@@ -2030,6 +2055,21 @@ function StepOneAdvanced({
         })),
     )
   }, [idea, kit, onKitSelectionChange, series])
+  useEffect(() => {
+    if (!series || !kitSyncReady) return
+    const available = new Set(kit.map((item) => item.name))
+    const refs = (selectedFeatureKey ? selectedFeatureKey.split('\u0000') : [])
+      .filter((name) => available.has(name))
+    let live = true
+    void saveKitSelection(refs).catch((error) => {
+      if (live) {
+        setSeriesError(error instanceof Error ? error.message : 'Could not save the selected World Kit references.')
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [kit, kitSyncReady, saveKitSelection, selectedFeatureKey, series])
 
   return (
     <>
@@ -2592,7 +2632,13 @@ export function IdeaBriefContent({ blankProject, stepId }: { blankProject: boole
               type="button"
               className="primary"
               onClick={() => {
-                setIdeaBrief(stepId, improvedPrompt)
+                // "Featuring:" is structured state, not prose for the model
+                // to rewrite. Keep the exact Step 1 reference choices when
+                // applying an improved creative brief.
+                setIdeaBrief(
+                  stepId,
+                  withFeaturingNames(improvedPrompt, featuringNames(brief)),
+                )
                 localStorage.removeItem(improveProposalStorageKey)
                 setImprovedPrompt('')
               }}
