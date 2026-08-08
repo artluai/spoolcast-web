@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { actionUrl, activeSession, fileUrl, postAction } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, fileUrl, postAction } from '../../lib/api'
 import { castByShow } from '../../data/cast'
 import { STAGE_DRAFT_OUTPUTS } from '../../data/stage-outputs'
 import { useWorkflowStore } from '../../store/workflow'
 import type { Gate, OnboardSeed, SetupMode, Step } from '../../types'
+import { buildShowExtension, deriveSequentialEdges } from '../../lib/workflow-graph'
+import type { ShowStatus } from '../../lib/workflow-graph'
 import { StepContent } from './StepContent'
 import type { VisualReviewLayoutCommand } from './VisualReviewStage'
 import { FeedbackButton } from './FeedbackButton'
@@ -304,6 +306,11 @@ export function WorkflowView({
         if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
           try {
             const cfg = JSON.parse(out.data.content)
+            // Show-plan sessions grow the canvas rightward: seasons fan off
+            // the last planning node, fed by cfg.series.
+            if (String(cfg?.format || '') === 'show-plan' && typeof cfg?.series === 'string' && cfg.series) {
+              setShowSeries(cfg.series)
+            }
             const cm = String(cfg?.core_message || '').trim()
             const store = useWorkflowStore.getState()
             if (cm && store.goal.text.trim() === '' && store.goal.mode === '' && !store.dirtySteps['story_lock']) {
@@ -384,6 +391,36 @@ export function WorkflowView({
   }
   const [restLeft, setRestLeft] = useState<number | null>(null)
   const [tetherAnim, setTetherAnim] = useState(false)
+  // The detail card can be hidden to read the bare map (the show canvas
+  // especially needs the room). Clicking any step node brings it back.
+  const [cardHidden, setCardHidden] = useState(false)
+  // Set only for show-plan sessions: the series whose seasons/episodes the
+  // canvas extends into (v5 show-page spec).
+  const [showSeries, setShowSeries] = useState('')
+  const [showStatus, setShowStatus] = useState<ShowStatus | null>(null)
+  // Which episode lanes are unrolled into their full flow. Collapse all and
+  // work one lane at a time is the intended rhythm.
+  const [openLanes, setOpenLanes] = useState<Record<string, boolean>>({})
+  const [fanMenu, setFanMenu] = useState(false)
+  useEffect(() => {
+    if (!showSeries) return
+    let alive = true
+    fetch(apiUrl('show-status', { series: showSeries }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => { if (alive && out?.ok) setShowStatus(out.data as ShowStatus) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [showSeries])
+  // Season + episode nodes registered through the SAME graph vocabulary the
+  // contract steps use — the map renderer below draws them, nothing parallel.
+  const showExt = useMemo(
+    () => buildShowExtension(steps, showStatus, openLanes),
+    [steps, showStatus, openLanes],
+  )
+  const allEpisodeSessions = useMemo(
+    () => (showStatus ? showStatus.seasons.flatMap((s) => s.episodes.map((e) => e.session_id)) : []),
+    [showStatus],
+  )
   // did the format diverge from the template it started from?
   const formatDirty = !!seed && (
     s1.narrator !== seed.s1.narrator ||
@@ -394,28 +431,23 @@ export function WorkflowView({
   const cardRef = useRef<HTMLDivElement | null>(null)
   const landedStepRef = useRef('')
 
-  // The canvas grows with the layout (contracts with more steps extend it);
-  // 3340 is the floor so today's explainer canvas is pixel-identical.
+  // The canvas grows with the layout — contracts with more steps extend it
+  // rightward, the show extension's stacked episode fans extend it downward.
+  // 3340×850 is the floor so today's explainer canvas is pixel-identical.
   const canvasWidth = useMemo(
-    () => Math.max(3340, ...steps.map((step) => step.x + 730)),
-    [steps],
+    () => Math.max(3340, ...steps.map((step) => step.x + 730), ...showExt.nodes.map((n) => n.x + 730)),
+    [steps, showExt],
+  )
+  const canvasHeight = useMemo(
+    () => Math.max(850, ...showExt.nodes.map((n) => n.y + 14 + 88 + 120)),
+    [showExt],
   )
 
   // Connectors are DERIVED from the computed layout: steps sharing one x slot
   // are a parallel group; every member links to every member of the next
   // group (fan-out before a pair, fan-in after). No per-contract edge list.
-  const edges = useMemo(() => {
-    const groups: Step[][] = []
-    for (const step of steps) {
-      const last = groups[groups.length - 1]
-      if (last && last[0].x === step.x) last.push(step)
-      else groups.push([step])
-    }
-    const out: (readonly [string, string])[] = []
-    for (let i = 0; i < groups.length - 1; i++)
-      for (const a of groups[i]) for (const b of groups[i + 1]) out.push([a.id, b.id] as const)
-    return out
-  }, [steps])
+  // The same rule (deriveSequentialEdges) draws the show extension's lanes.
+  const edges = useMemo(() => deriveSequentialEdges(steps), [steps])
 
   const orderedSteps = steps
   const selectableIndex = orderedSteps.findIndex((step) => step.id === selected)
@@ -579,6 +611,12 @@ export function WorkflowView({
 
     const measure = () => {
       if (!card) return
+      // Hidden card: keep the canvas sized for the map alone and leave the
+      // user's scroll position exactly where it is.
+      if (cardHidden) {
+        if (canvas) canvas.style.minHeight = fullView ? '' : `${canvasHeight}px`
+        return
+      }
       const isLanding = Boolean(view) && !fullView && !dragPos && landedStepRef.current !== activeStep.id
       // When the detail card lands on a step, pan the canvas so the active node
       // is centered too. This keeps refresh/auto-selected steps from showing a
@@ -644,7 +682,7 @@ export function WorkflowView({
         if (fullView) {
           canvas.style.minHeight = ''
         } else {
-          canvas.style.minHeight = `${Math.max(850, top + h + 80)}px`
+          canvas.style.minHeight = `${Math.max(canvasHeight, top + h + 80)}px`
         }
       }
       if (view && !fullView && !dragPos) {
@@ -677,7 +715,7 @@ export function WorkflowView({
       window.removeEventListener('resize', measure)
       ro.disconnect()
     }
-  }, [activeStep.id, activeStep.x, showWide, mediaFitPanel, fullView, dragPos, s1, runningId, userSize])
+  }, [activeStep.id, activeStep.x, showWide, mediaFitPanel, fullView, dragPos, s1, runningId, userSize, canvasHeight, cardHidden])
 
   // reset the header-float state when the workflow mounts (always starts at top)
   useEffect(() => {
@@ -723,7 +761,7 @@ export function WorkflowView({
           event.preventDefault()
         }}
       >
-        <svg className="edges" viewBox={`0 0 ${canvasWidth} 850`} style={{ width: canvasWidth }} preserveAspectRatio="none" aria-hidden="true">
+        <svg className="edges" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} style={{ width: canvasWidth, height: canvasHeight }} preserveAspectRatio="none" aria-hidden="true">
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="#414866" />
@@ -805,6 +843,39 @@ export function WorkflowView({
               </path>
             )
           })}
+          {(() => {
+            // Show-extension connectors: same curved segments as the contract
+            // edges. Fan edges (Series World Kit → S·, S· → E··) draw dashed —
+            // the map's inheritance stroke — lane edges (E··.1 → E··.2) solid.
+            const byId = new Map<string, Step>()
+            for (const s of steps) byId.set(s.id, s)
+            for (const n of showExt.nodes) byId.set(n.id, n)
+            const draw = (pairs: [string, string][], dashed: boolean) =>
+              pairs.map(([a, b]) => {
+                const from = byId.get(a)
+                const to = byId.get(b)
+                if (!from || !to) return null
+                const { x1, y1, x2, y2, vertical } = edgeAnchors(from, to)
+                return (
+                  <path
+                    key={`ext-${a}-${b}`}
+                    d={(vertical ? vSeg : seg)(x1, y1, x2, y2)}
+                    fill="none"
+                    stroke="#414866"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeDasharray={dashed ? '4 6' : undefined}
+                    markerEnd="url(#ar)"
+                  />
+                )
+              })
+            return (
+              <>
+                {draw(showExt.fanEdges, true)}
+                {draw(showExt.laneEdges, false)}
+              </>
+            )
+          })()}
           {failedAuditGates.map((gate) => {
             const gp = gatePos(gate)
             const step = steps.find((s) => s.id === gate.step)
@@ -828,7 +899,7 @@ export function WorkflowView({
               />
             )
           })}
-          {!fullView && cardBox && activeStep
+          {!fullView && !cardHidden && cardBox && activeStep
             ? (() => {
                 const x1 = activeStep.x + NODE_OFF_X + NODE_W / 2
                 const y1 = activeStep.y + NODE_OFF_Y + NODE_H
@@ -901,7 +972,7 @@ export function WorkflowView({
               }`}
               key={step.id}
               style={{ left: step.x + 24, top: step.y + 14 }}
-              onClick={() => setSelected(step.id)}
+              onClick={() => { setSelected(step.id); setCardHidden(false) }}
             >
               <span className="node-stripe" />
               {autopilot && displayStatus !== 'done' ? (
@@ -934,6 +1005,86 @@ export function WorkflowView({
             </button>
           )
         })}
+        {showExt.nodes.map((node) => {
+          // Extension nodes share the contract nodes' exact anatomy and
+          // classes; only the click semantics differ — episode nodes navigate
+          // into their session, season nodes are informational (the season
+          // plan lives in its own session the roll-up doesn't link yet).
+          // Episode nodes carry a corner ⤢/⤡ that unrolls/collapses just
+          // that episode's lane, so they render as divs (a button can't nest
+          // the toggle button).
+          const cls = `node s-${node.status} ${node.progress ? 'has-progress' : ''} ${
+            node.subtitle && !node.progress ? 'has-sub' : ''
+          } ${node.href ? 'linked' : ''}`
+          const pos = { left: node.x + 24, top: node.y + 14 }
+          return (
+            <div
+              className={cls}
+              key={node.id}
+              style={pos}
+              onClick={node.href ? () => { window.location.href = node.href! } : undefined}
+            >
+              <span className="node-stripe" />
+              {node.toggleEpisode ? (
+                <button
+                  type="button"
+                  className="lane-toggle"
+                  title={node.toggleKind === 'expand' ? 'Expand this episode’s flow' : 'Collapse this episode’s flow'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setOpenLanes((lanes) => ({ ...lanes, [node.toggleEpisode!]: node.toggleKind === 'expand' }))
+                  }}
+                >
+                  {node.toggleKind === 'expand' ? '⤢' : '⤡'}
+                </button>
+              ) : null}
+              <span className="num">{node.num}</span>
+              <span className="node-name">{node.name}</span>
+              {node.subtitle ? <span className="node-sub">{node.subtitle}</span> : null}
+              {node.progress ? (
+                <span className="progress">
+                  <i style={{ width: `${Math.round((node.progress.done / node.progress.total) * 100)}%` }} />
+                </span>
+              ) : null}
+              <span className="node-foot">
+                <b>{node.foot}</b>
+                {node.progress ? <small>{node.progress.done}/{node.progress.total}</small> : null}
+              </span>
+            </div>
+          )
+        })}
+        {showExt.toolbar ? (
+          <span className="rule-choice-wrap fan-view-menu" style={{ left: showExt.toolbar.x, top: showExt.toolbar.y }}>
+            <button type="button" className="vp-menu-btn rule-choice-btn" aria-expanded={fanMenu} onClick={() => setFanMenu((v) => !v)}>
+              Episodes ▾
+            </button>
+            {fanMenu ? (
+              <>
+                <span className="vp-menu-backdrop" onClick={() => setFanMenu(false)} />
+                <span className="vp-menu rule-choice-menu">
+                  <span className="vp-menu-h">EPISODES</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenLanes(Object.fromEntries(allEpisodeSessions.map((id) => [id, true])))
+                      setFanMenu(false)
+                    }}
+                  >
+                    <span className="vg-select-choice">Expand all</span>
+                    <small>every episode’s full flow</small>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setOpenLanes({}); setFanMenu(false) }}
+                  >
+                    <span className="vg-select-choice">Collapse all</span>
+                    <small>one node per episode</small>
+                  </button>
+                </span>
+              </>
+            ) : null}
+          </span>
+        ) : null}
         {gates.map((gate) => {
           // No gate chips on fogged territory — the gates themselves depend
           // on which format the fork resolves to.
@@ -960,7 +1111,7 @@ export function WorkflowView({
         </div>
         <div
           ref={cardRef}
-          className={`detail-card step-${activeStep.id} ${showWide ? 'wide' : ''} ${fullView ? 'full' : ''} ${!fullView && userSize.h != null ? 'h-sized' : ''}`}
+          className={`detail-card step-${activeStep.id} ${showWide ? 'wide' : ''} ${fullView ? 'full' : ''} ${!fullView && userSize.h != null ? 'h-sized' : ''} ${cardHidden ? 'hidden' : ''}`}
           style={
             fullView
               ? undefined
@@ -1066,6 +1217,15 @@ export function WorkflowView({
                 Next ›
               </button>
             </span>
+            {!fullView ? (
+              <button
+                className="icon-btn hide-btn"
+                title="Hide this panel · click any step to reopen"
+                onClick={() => setCardHidden(true)}
+              >
+                ✕
+              </button>
+            ) : null}
             <button
               className="icon-btn expand-btn"
               title={fullView ? 'Exit expanded view' : 'Expand this step'}

@@ -188,12 +188,225 @@ export function buildStepsFromContract(
       progress,
       optional: false,
       // Fogged steps have no honest number — the count depends on the answer.
-      num: fog ? '?' : String(index + 1).padStart(2, '0'),
+      // Show-plan sessions number hierarchically (P1…Pn, then S·, then E··.·)
+      // so planning, season, and episode nodes read as one tree.
+      num: fog ? '?' : contract.id === 'show-plan' ? `P${index + 1}` : String(index + 1).padStart(2, '0'),
       x,
       y,
       ...(fog ? { fog } : {}),
     } satisfies Step
   })
+}
+
+// ---------------------------------------------------------------------------
+// SHOW CANVAS EXTENSION (series tier model §6, v5 spec). A show-plan session's
+// map keeps growing rightward: seasons fan off the Series World Kit node, an
+// approved season fans into its episode flows. The nodes returned here are
+// ordinary Steps so the EXISTING map renderer draws them — same anatomy
+// (stripe / num / name / status foot), same curved SVG edges. The episode
+// lanes are each episode's REAL contract stages as the engine reports them,
+// never a redrawn copy.
+
+export type ShowEpisodeStage = {
+  id: string
+  label: string
+  status: string
+  requires_approval: boolean
+}
+export type ShowEpisode = {
+  session_id: string
+  episode: number
+  title: string
+  template: string
+  current_stage: string
+  needs_you: boolean
+  stages: ShowEpisodeStage[]
+}
+export type ShowSeason = {
+  season: number
+  arc: string
+  plan_state: string
+  episode_count: number
+  episodes: ShowEpisode[]
+}
+export type ShowStatus = { series: string; template: string; seasons: ShowSeason[] }
+
+export type ShowExtension = {
+  nodes: Step[]
+  // Explicit connections (node ids) — fan edges draw dashed (inheritance),
+  // in-lane edges draw solid (sequence), through the same curved paths.
+  fanEdges: [string, string][]
+  laneEdges: [string, string][]
+  // Canvas-space anchor for the expand/collapse-all dropdown (above the
+  // episode column).
+  toolbar: { x: number; y: number } | null
+}
+
+const EMPTY_EXTENSION: ShowExtension = { nodes: [], fanEdges: [], laneEdges: [], toolbar: null }
+
+// Vertical pitches in canvas units (node box is 172×88 at +24/+14 offsets).
+// Y_TOP matches the contract spine's main-line y so every column's top row —
+// planning, seasons, episodes — sits at the same height.
+const ROW_PITCH = 118
+const SEASON_GAP = 60
+const Y_TOP = 110
+
+const epNum = (episode: number) => `E${String(episode).padStart(2, '0')}`
+const epTitle = (ep: ShowEpisode) => ep.title.replace(/^E\d+\s*[—-]\s*/, '').trim() || ep.title
+
+const stageDone = (stage: ShowEpisodeStage) =>
+  stage.status === 'passed' || stage.status === 'approved' || stage.status === 'skipped'
+
+/** The map's one connector rule, shared by the contract spine and the episode
+ *  lanes: steps sharing an x slot are a parallel group; every member links to
+ *  every member of the next group. */
+export function deriveSequentialEdges(steps: Step[]): [string, string][] {
+  const groups: Step[][] = []
+  for (const step of steps) {
+    const last = groups[groups.length - 1]
+    if (last && last[0].x === step.x) last.push(step)
+    else groups.push([step])
+  }
+  const out: [string, string][] = []
+  for (let i = 0; i < groups.length - 1; i++)
+    for (const a of groups[i]) for (const b of groups[i + 1]) out.push([a.id, b.id])
+  return out
+}
+
+export function buildShowExtension(
+  steps: Step[],
+  status: ShowStatus | null,
+  openLanes: Record<string, boolean>,
+): ShowExtension {
+  if (!status || !status.seasons.length || !steps.length) return EMPTY_EXTENSION
+  // Seasons fan off the Series World Kit stage — the last planning node —
+  // falling back to whatever stage IS last if a contract reorders.
+  const anchor =
+    steps.find((s) => s.sourceId === 'world_cast')
+    ?? steps.reduce((a, b) => (b.x > a.x ? b : a))
+  const seasonX = anchor.x + 258
+  const epX = seasonX + 258
+
+  const nodes: Step[] = []
+  const fanEdges: [string, string][] = []
+  const laneEdges: [string, string][] = []
+  // TOP-ALIGNED columns: S1 tops the season column level with E01 and the
+  // planning row; each later season sits ~1.5 rows below the previous SEASON
+  // NODE — enough drop that its fan leaves from a clearly lower point and
+  // stays visually separate from the previous season's fan (episode blocks
+  // still stack in order, so a later season's connectors just travel
+  // farther down). Not a full block down: the season column stays compact.
+  let blockTop = Y_TOP
+  let seasonY = Y_TOP
+
+  status.seasons.forEach((season) => {
+    const seasonId = `season-${season.season}`
+    const approved = season.plan_state === 'approved'
+    const episodes = season.episodes
+
+    nodes.push({
+      id: seasonId,
+      kind: 'season',
+      num: `S${season.season}`,
+      name: `Season ${season.season}`,
+      blurb: season.arc,
+      ...(season.arc ? { subtitle: season.arc } : {}),
+      status: approved ? 'done' : 'later',
+      foot: approved
+        ? episodes.length
+          ? `Approved · ${episodes.length} episodes`
+          : `Approved · ${season.episode_count || '?'} planned`
+        : 'Proposed',
+      x: seasonX,
+      y: seasonY,
+    })
+    fanEdges.push([anchor.id, seasonId])
+    seasonY += ROW_PITCH + SEASON_GAP
+
+    for (const ep of episodes) {
+      const done = ep.stages.filter(stageDone).length
+      const total = ep.stages.length
+      const currentIndex = ep.stages.findIndex((s) => s.id === ep.current_stage)
+      const href = `/p/${ep.session_id}`
+
+      if (!openLanes[ep.session_id]) {
+        const id = `ep-${ep.session_id}`
+        fanEdges.push([seasonId, id])
+        nodes.push({
+          id,
+          kind: 'episode',
+          num: epNum(ep.episode),
+          name: epTitle(ep),
+          blurb: '',
+          status: done === total && total > 0 ? 'done' : ep.needs_you ? 'work' : 'later',
+          foot: ep.needs_you
+            ? `Needs you · ${epNum(ep.episode)}.${currentIndex + 1}`
+            : done === total && total > 0
+              ? 'Complete'
+              : done > 0
+                ? 'In progress'
+                : 'Queued',
+          ...(total > 0 ? { progress: { done, total } } : {}),
+          href,
+          toggleEpisode: ep.session_id,
+          toggleKind: 'expand',
+          x: epX,
+          y: blockTop,
+        })
+        blockTop += ROW_PITCH
+        continue
+      }
+
+      // OPEN LANE: the episode's flow drawn by the SAME builder its own map
+      // uses — same presentation hints (folds, stacked branch pairs), same
+      // canonical step names — then shifted into the lane's slot. A contract
+      // with a branch pair makes a taller lane, exactly like its map.
+      const laneSteps = buildStepsFromContract(
+        { id: ep.template || 'base', stages: ep.stages.map((s) => ({ id: s.id, label: s.label })) },
+        false,
+        { workflow_graph: { nodes: ep.stages } },
+      )
+      const minY = Math.min(...laneSteps.map((s) => s.y))
+      const maxY = Math.max(...laneSteps.map((s) => s.y))
+      const byId = new Map(ep.stages.map((s) => [s.id, s]))
+      const placed = laneSteps.map((step, index) => {
+        const stage = step.sourceId ? byId.get(step.sourceId) : undefined
+        const isCurrent = stage?.id === ep.current_stage
+        const needsYou = Boolean(isCurrent && stage?.requires_approval)
+        return {
+          ...step,
+          id: `ep-${ep.session_id}-${step.sourceId ?? step.id}`,
+          kind: 'stage' as const,
+          num: `${epNum(ep.episode)}.${index + 1}`,
+          ...(needsYou ? { status: 'work' as const } : {}),
+          foot: stage && stageDone(stage)
+            ? 'Complete'
+            : needsYou
+              ? 'Needs you'
+              : stage?.status === 'running'
+                ? 'In progress'
+                : 'Pending',
+          href,
+          x: epX + (step.x - 30),
+          y: blockTop + (step.y - minY),
+        }
+      })
+      placed[0].toggleEpisode = ep.session_id
+      placed[0].toggleKind = 'collapse'
+      nodes.push(...placed)
+      laneEdges.push(...deriveSequentialEdges(placed))
+      const headX = Math.min(...placed.map((s) => s.x))
+      for (const head of placed.filter((s) => s.x === headX)) fanEdges.push([seasonId, head.id])
+      blockTop += maxY - minY + ROW_PITCH
+    }
+
+    if (episodes.length) blockTop += SEASON_GAP
+  })
+
+  // The dropdown holds the expand/collapse-all actions; per-episode toggles
+  // live on the nodes themselves. Only exists once a season has fanned out.
+  const anyEpisodes = status.seasons.some((s) => s.episodes.length > 0)
+  return { nodes, fanEdges, laneEdges, toolbar: anyEpisodes ? { x: epX + 24, y: 18 } : null }
 }
 
 export function buildGates(
