@@ -71,6 +71,7 @@ export type StepAIRequest = {
   instructions: string
   model: string
   mode?: string
+  refreshExisting?: boolean
 }
 export type StepAIMode = {
   id: string

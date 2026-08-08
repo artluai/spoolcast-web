@@ -322,6 +322,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     feedback = '',
     requestedModel = DEFAULT_MODEL_ID,
     requestedMode = '',
+    refreshExisting = false,
   ) => {
     setDrafting(true)
     setDraftError(null)
@@ -339,6 +340,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
             tenant: 'local',
             action: 'fill_world_kit',
             text_only: textOnly,
+            refresh_existing: refreshExisting,
             model: requestedModel,
             allow_cost: true,
             ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
@@ -352,9 +354,13 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
           return
         }
         const job: DraftJob = { id: jobId, status: 'queued' }
-        const label = textOnly
-          ? 'AI is drafting the World Kit text…'
-          : 'AI is filling the World Kit and creating missing images…'
+        const label = refreshExisting
+          ? textOnly
+            ? 'AI is refreshing the World Kit text…'
+            : 'AI is refreshing the World Kit and creating new image versions…'
+          : textOnly
+            ? 'AI is drafting the World Kit text…'
+            : 'AI is filling the World Kit and creating missing images…'
         setDraftJob(job)
         setStageProcess(stageId, {
           stageId,
@@ -474,7 +480,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       disabled: !(stageCurrent || Boolean(draft.trim())),
       disabledReason: 'Complete the earlier step first',
       usesTextModel: true,
-      run: ({ instructions, model, mode }) => runDraft(instructions, model, mode),
+      run: ({ instructions, model, mode, refreshExisting }) => (
+        runDraft(instructions, model, mode, Boolean(refreshExisting))
+      ),
     })
     return () => registerStepAIAction(stageId, null)
   }, [cfg.aiDraft, draft, isBusy, registerStepAIAction, stageCurrent, stageId])

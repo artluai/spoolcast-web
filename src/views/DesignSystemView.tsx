@@ -50,6 +50,7 @@ export default function DesignSystemView() {
   )
   const [splitOpen, setSplitOpen] = useState(false)
   const [textOnly, setTextOnly] = useState(false)
+  const [refreshExisting, setRefreshExisting] = useState(false)
   const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [compactMenuOpen, setCompactMenuOpen] = useState(false)
   const [compactChoice, setCompactChoice] = useState('Default')
@@ -197,7 +198,7 @@ export default function DesignSystemView() {
                     {splitOpen ? '▴' : '▾'}
                   </button>
                   <button type="button" className="vp-undo vg-split-main">
-                    ✦ Fill with AI
+                    {refreshExisting && !textOnly ? '✦ Regenerate with AI' : textOnly ? '✦ Draft text only' : '✦ Fill with AI'}
                   </button>
                 </span>
                 {splitOpen ? (
@@ -216,11 +217,27 @@ export default function DesignSystemView() {
                         </span>
                       </span>
                     </label>
+                    <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 8, color: 'var(--ink-2)', fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={refreshExisting}
+                        onChange={(event) => setRefreshExisting(event.target.checked)}
+                        style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
+                      />
+                      <span>
+                        <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>Regenerate existing items</b>
+                        <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
+                          {textOnly
+                            ? 'Rewrite existing episode text. Images stay untouched.'
+                            : 'Rewrite episode text and create new versions of AI-generated images. Uploads, library, and shared items stay untouched; older versions stay in history.'}
+                        </span>
+                      </span>
+                    </label>
                     <textarea placeholder="Optional directions for what AI should emphasize or preserve…" rows={3} />
                     <div className="vp-edit-actions step1-improve-actions">
                       <ModelPicker model={model} onChange={setModel} />
                       <button type="button" className="vp-save">
-                        {textOnly ? '✦ Draft text only' : '✦ Fill with AI'}
+                        {refreshExisting && !textOnly ? '✦ Regenerate with AI' : textOnly ? '✦ Draft text only' : '✦ Fill with AI'}
                       </button>
                     </div>
                   </div>

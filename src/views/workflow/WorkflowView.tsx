@@ -59,6 +59,47 @@ type CardSize = { w: number | null; h: number | null }
 // fresh object (the measure effect depends on the size by identity).
 const AUTO_CARD_SIZE: CardSize = { w: null, h: null }
 
+function StepAIAdvancedOption({
+  checked,
+  disabled,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean
+  disabled: boolean
+  title: string
+  description: string
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 8,
+        color: 'var(--ink-2)',
+        fontSize: 12,
+        cursor: disabled ? 'default' : 'pointer',
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
+      />
+      <span>
+        <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>{title}</b>
+        <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
+          {description}
+        </span>
+      </span>
+    </label>
+  )
+}
+
 export function WorkflowView({
   steps: rawSteps,
   gates,
@@ -120,6 +161,7 @@ export function WorkflowView({
   const [advancing, setAdvancing] = useState(false)
   const [stepAIModels, setStepAIModels] = useState<Record<string, string>>({})
   const [stepAIModes, setStepAIModes] = useState<Record<string, string>>({})
+  const [stepAIRefreshExisting, setStepAIRefreshExisting] = useState<Record<string, boolean>>({})
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches,
   )
@@ -185,6 +227,7 @@ export function WorkflowView({
     ?? activeStepAI?.modes?.[0]?.id
     ?? ''
   const activeStepAIMode = activeStepAI?.modes?.find((mode) => mode.id === activeStepAIModeId)
+  const activeStepAIRefreshesExisting = stepAIRefreshExisting[activeStepId] ?? false
 
   // A blank Final Cut should receive Step 08 automatically. Once the user has
   // any timeline at all, syncing becomes an explicit opt-in so approval never
@@ -1239,7 +1282,9 @@ export function WorkflowView({
               {activeStepId !== 'input_intake' ? (
                 <span className="step-ai-control">
                   <FeedbackButton
-                    label={activeStepAIMode?.actionLabel || activeStepAI?.label || 'Complete step with AI'}
+                    label={activeStepAIRefreshesExisting && activeStepAIModeId !== 'text_only'
+                      ? 'Regenerate with AI'
+                      : activeStepAIMode?.actionLabel || activeStepAI?.label || 'Complete step with AI'}
                     busy={Boolean(activeStepAI?.busy)}
                     busyLabel={activeStepAI?.busyLabel || 'Working…'}
                     disabled={!activeStepAI || activeStepAI.disabled || isBeyondBlocked}
@@ -1256,39 +1301,36 @@ export function WorkflowView({
                     allowFeedback={Boolean(activeStepAI) && activeStepAI.acceptsInstructions !== false}
                     allowRuleSave={activeStepAI?.allowRuleSave !== false}
                     aboveActions={activeStepAI?.modes?.some((mode) => mode.id === 'text_only') ? (
-                      <label
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 8,
-                          color: 'var(--ink-2)',
-                          fontSize: 12,
-                          cursor: activeStepAI.busy ? 'default' : 'pointer',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        <StepAIAdvancedOption
                           checked={activeStepAIModeId === 'text_only'}
                           disabled={Boolean(activeStepAI.busy)}
-                          onChange={(event) => {
+                          title="Advanced: text only"
+                          description="Plan the World Kit now and leave image generation for later."
+                          onChange={(checked) => {
                             setStepAIModes((current) => ({
                               ...current,
-                              [activeStepId]: event.target.checked
+                              [activeStepId]: checked
                                 ? 'text_only'
                                 : activeStepAI.defaultMode || activeStepAI.modes?.[0]?.id || '',
                             }))
                           }}
-                          style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
                         />
-                        <span>
-                          <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>
-                            Advanced: text only
-                          </b>
-                          <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
-                            Plan the World Kit now and leave image generation for later.
-                          </span>
-                        </span>
-                      </label>
+                        <StepAIAdvancedOption
+                          checked={activeStepAIRefreshesExisting}
+                          disabled={Boolean(activeStepAI.busy)}
+                          title="Regenerate existing items"
+                          description={activeStepAIModeId === 'text_only'
+                            ? 'Rewrite existing episode text. Images stay untouched.'
+                            : 'Rewrite episode text and create new versions of AI-generated images. Uploads, library, and shared items stay untouched; older versions stay in history.'}
+                          onChange={(checked) => {
+                            setStepAIRefreshExisting((current) => ({
+                              ...current,
+                              [activeStepId]: checked,
+                            }))
+                          }}
+                        />
+                      </div>
                     ) : undefined}
                     runExtras={activeStepAI?.usesTextModel !== false ? (
                       <ModelPicker
@@ -1303,6 +1345,7 @@ export function WorkflowView({
                         instructions,
                         model: activeStepAIModel,
                         mode: activeStepAIModeId || undefined,
+                        refreshExisting: activeStepAIRefreshesExisting,
                       })
                     }}
                   />
