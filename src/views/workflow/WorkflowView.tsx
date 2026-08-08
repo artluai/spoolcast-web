@@ -1305,7 +1305,7 @@ export function WorkflowView({
                         <StepAIAdvancedOption
                           checked={activeStepAIModeId === 'text_only'}
                           disabled={Boolean(activeStepAI.busy)}
-                          title="Advanced: text only"
+                          title="Text only"
                           description="Plan the World Kit now and leave image generation for later."
                           onChange={(checked) => {
                             setStepAIModes((current) => ({

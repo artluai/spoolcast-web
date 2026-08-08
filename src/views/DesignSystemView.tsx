@@ -211,7 +211,7 @@ export default function DesignSystemView() {
                         style={{ margin: '2px 0 0', accentColor: 'var(--accent)' }}
                       />
                       <span>
-                        <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>Advanced: text only</b>
+                        <b style={{ display: 'block', color: 'var(--ink-1)', fontWeight: 600 }}>Text only</b>
                         <span style={{ display: 'block', marginTop: 2, color: 'var(--ink-3)' }}>
                           Plan now and leave image generation for later.
                         </span>
@@ -289,10 +289,14 @@ export default function DesignSystemView() {
                 </div>
               </div>
             </Example>
-            <Example title="Inline feedback" note="Errors preserve the current work and explain the next action.">
+            <Example title="Inline feedback" note="Failures preserve current work and explain the next action; partial success names what remains.">
               <div>
                 <p className="voice-error">Generation failed. The previous image is unchanged.</p>
                 <button type="button" className="vp-undo">Retry</button>
+                <p style={{ color: 'var(--amber)', fontSize: 13, margin: '14px 0 0', lineHeight: 1.5 }}>
+                  World Kit partly updated: 6 images generated, 5 reused, and 1 failed (seated-bedroom-master).
+                  Successful work was saved. Turn off Regenerate existing items, then use Fill with AI to retry only missing or stale images.
+                </p>
               </div>
             </Example>
           </div>

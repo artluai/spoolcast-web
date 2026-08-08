@@ -30,6 +30,11 @@ type DraftJob = {
 }
 type WorldKitFillReport = {
   mode?: string
+  failed?: Array<{
+    ref?: string
+    error?: string
+    exit_code?: number
+  }>
   counts?: {
     generated?: number
     reused?: number
@@ -58,6 +63,19 @@ const worldKitFillReportFromJob = (job: DraftJob): WorldKitFillReport | null => 
   return null
 }
 
+const worldKitPartialFailureMessage = (report: WorldKitFillReport | null): string => {
+  const failed = Number(report?.counts?.failed || 0)
+  if (!failed) return ''
+  const generated = Number(report?.counts?.generated || 0)
+  const reused = Number(report?.counts?.reused || 0)
+  const failedRefs = (report?.failed || [])
+    .map((item) => String(item.ref || '').trim())
+    .filter(Boolean)
+  const names = failedRefs.length ? ` (${failedRefs.join(', ')})` : ''
+  return `World Kit partly updated: ${generated} image${generated === 1 ? '' : 's'} generated, ${reused} reused, and ${failed} failed${names}. `
+    + 'Successful work was saved. Turn off Regenerate existing items, then use Fill with AI to retry only missing or stale images.'
+}
+
 /**
  * Draft editor for stages whose contract output is a single drafted file.
  * Default path: AI drafts via the engine (draft_stage → OpenRouter, metered in
@@ -78,6 +96,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
   const [draftError, setDraftError] = useState<string | null>(null)
   const [draftWarning, setDraftWarning] = useState<string | null>(null)
   const [completionNote, setCompletionNote] = useState<string | null>(null)
+  const [completionWarning, setCompletionWarning] = useState<string | null>(null)
   const [, setDraftJob] = useState<DraftJob | null>(null)
   const pollingJobRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
@@ -266,7 +285,10 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         if (stageId === 'world_kit') {
           const report = worldKitFillReportFromJob(job) ?? await loadWorldKitFillReport()
           const counts = report?.counts
-          if (report?.mode === 'text-only' || report?.mode === 'refresh-text-only') {
+          const partialFailure = worldKitPartialFailureMessage(report)
+          if (partialFailure) {
+            setCompletionWarning(partialFailure)
+          } else if (report?.mode === 'text-only' || report?.mode === 'refresh-text-only') {
             setCompletionNote('World Kit text is ready. Image generation was intentionally skipped.')
           } else if (counts) {
             setCompletionNote(
@@ -284,6 +306,19 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         return
       }
       if (job.status === 'failed' || job.status === 'cancelled') {
+        if (stageId === 'world_kit' && job.status === 'failed') {
+          const report = worldKitFillReportFromJob(job) ?? await loadWorldKitFillReport()
+          const partialFailure = worldKitPartialFailureMessage(report)
+          if (partialFailure) {
+            setDraftError(null)
+            setCompletionWarning(partialFailure)
+            await loadFreshDraft()
+            setStageProcess(stageId, null)
+            setDrafting(false)
+            pollingJobRef.current = null
+            return
+          }
+        }
         await handleDraftFailure({
           error: job.result?.error || job.error || undefined,
           // Queue failures often put the useful traceback in `error` while
@@ -350,6 +385,7 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     setDraftError(null)
     setDraftWarning(null)
     setCompletionNote(null)
+    setCompletionWarning(null)
     setDraftJob(null)
     try {
       if (stageId === 'world_kit') {
@@ -583,6 +619,11 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
       {!needRewind && completionNote ? (
         <p style={{ color: 'var(--green)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
           {completionNote}
+        </p>
+      ) : null}
+      {!needRewind && completionWarning ? (
+        <p style={{ color: 'var(--amber)', fontSize: 13, margin: '0 0 10px', lineHeight: 1.5 }}>
+          {completionWarning}
         </p>
       ) : null}
       {!needRewind && ['input_intake', 'story_lock', 'format_setup'].includes(stageId) ? (
