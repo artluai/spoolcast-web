@@ -5,6 +5,7 @@ import {
   IdeaBriefContent,
   NarrationContent,
   SeriesSetup,
+  ShowSetup,
   Step01Flow,
   TemplateComponents,
 } from './StepPanels'
@@ -52,6 +53,11 @@ export function StepContent({
         <TemplateComponents />
       </>
     )
+  }
+  if (step.id === 'series_setup') {
+    // The show-tier twin of Project setup (show-plan contract): the format
+    // question + the show-wide default rows every episode inherits.
+    return <ShowSetup stepId={stepId} />
   }
   if (step.id === 'idea')
     return <IdeaBriefContent blankProject={blankProject} stepId={stepId} />

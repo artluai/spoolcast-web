@@ -697,6 +697,9 @@ body.chat-pinned .detail-card.full { right: 380px; }
   font-size: 13px;
   color: var(--ink);
 }
+/* Series setup's style-anchor box — the step-1 text-input recipe. Grows with
+   its content; the vertical resize handle stays available. */
+.show-setup-input { width: 100%; box-sizing: border-box; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 8px; padding: 9px 12px; font-family: var(--sans); font-size: 13px; line-height: 1.5; color: var(--ink); resize: vertical; min-height: 38px; overflow: hidden; }
 .inherited-block { display: grid; gap: 16px; }
 .field-card, .inherited-card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-3); padding: 16px; }
 .field-card b { display: block; margin-top: 8px; }

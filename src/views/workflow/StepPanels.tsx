@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { Pill } from '../../components/common/Pill'
 import { asset } from '../../lib/assets'
-import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, notifySessionConfigurationChanged, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
+import { actionUrl, activeSession, apiUrl, contentUrl, fileUrl, globalContentUrl, jobsUrl, notifySessionConfigurationChanged, postAction, researchJobStorageKey, seriesUrl, statusUrl, templatesUrl, TENANT } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { appendUserRule } from '../../lib/rules'
 import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
@@ -429,6 +429,52 @@ export function TemplateComponents({
   )
 }
 
+// ONE voice catalog, shared by the narration step and the show-tier Series
+// setup panel — never a second list.
+const audioDemo = (path: string) => `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/${path}`
+export const NARRATION_VOICES = [
+  {
+    id: 'google-schedar',
+    provider: 'google',
+    name: 'Schedar',
+    value: 'schedar',
+    detail: 'Existing news-anime TTS voice',
+    demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-voice-ab/Schedar.mp3'),
+  },
+  {
+    id: 'google-puck',
+    provider: 'google',
+    name: 'Puck',
+    value: 'Puck',
+    detail: 'Found in Dev Log 03 session settings',
+    demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-puck-archive/04-cfo-magnified-invoice.mp3'),
+  },
+  {
+    id: 'edge-andrew',
+    provider: 'edge',
+    name: 'Andrew',
+    value: 'en-US-AndrewNeural',
+    detail: 'Current dev-log-12 voice',
+    demo: audioDemo('sessions/spoolcast-dev-log-11/source/audio/C001.mp3'),
+  },
+  {
+    id: 'edge-guy',
+    provider: 'edge',
+    name: 'Guy',
+    value: 'en-US-GuyNeural',
+    detail: 'Microsoft Edge voice option',
+    demo: '',
+  },
+  {
+    id: 'elevenlabs-library',
+    provider: 'elevenlabs',
+    name: 'Library voice',
+    value: 'elevenlabs-library',
+    detail: 'Connect an ElevenLabs voice ID',
+    demo: '',
+  },
+] as const
+
 export function NarrationContent() {
   type AudioArtifact = {
     stage_id?: string
@@ -452,7 +498,6 @@ export function NarrationContent() {
   const stageProcess = useWorkflowStore((s) => s.stageProcesses[stageId] ?? null)
   const setStageProcess = useWorkflowStore((s) => s.setStageProcess)
   const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
-  const audioDemo = (path: string) => `/@fs/Users/ralphxu/Documents/Projects/spoolcast-content/${path}`
   const defaultProvider = 'edge'
   const defaultVoice = 'edge-andrew'
   const defaultSpeed = 1.0
@@ -478,48 +523,7 @@ export function NarrationContent() {
       detail: 'External voice library',
     },
   ] as const
-  const voices = [
-    {
-      id: 'google-schedar',
-      provider: 'google',
-      name: 'Schedar',
-      value: 'schedar',
-      detail: 'Existing news-anime TTS voice',
-      demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-voice-ab/Schedar.mp3'),
-    },
-    {
-      id: 'google-puck',
-      provider: 'google',
-      name: 'Puck',
-      value: 'Puck',
-      detail: 'Found in Dev Log 03 session settings',
-      demo: audioDemo('shows/news-anime-bot/sessions/2026-04-29/episode/audio-puck-archive/04-cfo-magnified-invoice.mp3'),
-    },
-    {
-      id: 'edge-andrew',
-      provider: 'edge',
-      name: 'Andrew',
-      value: 'en-US-AndrewNeural',
-      detail: 'Current dev-log-12 voice',
-      demo: audioDemo('sessions/spoolcast-dev-log-11/source/audio/C001.mp3'),
-    },
-    {
-      id: 'edge-guy',
-      provider: 'edge',
-      name: 'Guy',
-      value: 'en-US-GuyNeural',
-      detail: 'Microsoft Edge voice option',
-      demo: '',
-    },
-    {
-      id: 'elevenlabs-library',
-      provider: 'elevenlabs',
-      name: 'Library voice',
-      value: 'elevenlabs-library',
-      detail: 'Connect an ElevenLabs voice ID',
-      demo: '',
-    },
-  ] as const
+  const voices = NARRATION_VOICES
   const [provider, setProvider] = useState<(typeof providers)[number]['id']>(defaultProvider)
   const [providerMenu, setProviderMenu] = useState(false)
   const providerMenuRef = useRef<HTMLSpanElement>(null)
@@ -3806,6 +3810,277 @@ export function SeriesSetup({ stepId, showName, onOpenCast }: { stepId: string; 
       <div className="eyebrow" style={{ margin: '22px 0 2px' }}>This episode</div>
       <EpisodeSettings stepId={stepId} />
       {setupAIError ? <p className="voice-error">Engine: {setupAIError}</p> : null}
+    </div>
+  )
+}
+
+// SHOW SETUP (the show-plan contract's series_setup stage): the show-tier
+// twin of the episode "Project setup" step — the same format question and
+// row idiom, pointed at SHOW scope. Field edits save onto the planning
+// session (set_session_fields, the episode step's save path); approving the
+// stage stamps the template and these defaults into series/<id>/defaults.json,
+// where every fanned-out episode inherits them. Narrator voice is the ONE
+// format-conditional row: narration-first shows see it, video-first shows
+// don't — same panel, never a second flow.
+const SERIES_SETUP_TEMPLATE_RE = /^Template:\s*([a-z0-9\-_]+)\s*$/m
+
+export function ShowSetup({ stepId }: { stepId: string }) {
+  const registerStepAIAction = useWorkflowStore((s) => s.registerStepAIAction)
+  const [seriesId, setSeriesId] = useState('')
+  const [draftMd, setDraftMd] = useState('')
+  const [ttsVoice, setTtsVoice] = useState('')
+  const [stylePrompt, setStylePrompt] = useState('')
+  const [aspect, setAspect] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const savedStyleRef = useRef('')
+  const styleBoxRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // The draft file is the machine truth (its Template line is what approval
+  // parses); the format question is that line rendered as the step-1 pills.
+  // The Recommended/Aspect/Style lines are the AI's original picks — they
+  // survive user overrides, so "Recommended by Spoolcast" stays honest.
+  const templateId = SERIES_SETUP_TEMPLATE_RE.exec(draftMd)?.[1] ?? ''
+  const narrator = templateId === 'explainer' ? 'yes' : templateId === 'ad' ? 'no' : ''
+  const recTemplate = /^Recommended:\s*([a-z0-9\-_]+)\s*$/m.exec(draftMd)?.[1] ?? ''
+  const recNarrator = recTemplate === 'explainer' ? 'yes' : recTemplate === 'ad' ? 'no' : ''
+  const recAspect = /^Aspect:\s*(16:9|9:16|1:1)\s*$/m.exec(draftMd)?.[1] ?? ''
+  const recStyle = /^Style:\s*(.+?)\s*$/m.exec(draftMd)?.[1] ?? ''
+  const why = /## Why\n+([\s\S]*?)(?:\n## |$)/.exec(draftMd)?.[1]?.trim() ?? ''
+
+  const loadDraft = useCallback(async (): Promise<boolean> => {
+    const out = await fetch(fileUrl('working/series-setup.md'))
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+    if (out?.ok && out.data?.exists && typeof out.data.content === 'string') {
+      setDraftMd(out.data.content)
+      return true
+    }
+    return false
+  }, [])
+
+  useEffect(() => {
+    fetch(fileUrl('session.json'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((out) => {
+        if (!out?.ok || !out.data?.exists || typeof out.data.content !== 'string') return
+        try {
+          const cfg = JSON.parse(out.data.content)
+          if (typeof cfg?.series === 'string') setSeriesId(cfg.series)
+          if (typeof cfg?.tts_voice === 'string') setTtsVoice(cfg.tts_voice)
+          if (typeof cfg?.default_style_prompt === 'string') {
+            setStylePrompt(cfg.default_style_prompt)
+            savedStyleRef.current = cfg.default_style_prompt
+          }
+          if (typeof cfg?.aspect_ratio === 'string') setAspect(cfg.aspect_ratio)
+        } catch { /* unreadable session.json — leave the defaults */ }
+      })
+      .catch(() => {})
+    // Season-breakdown approval auto-drafts the recommendation (zero-touch);
+    // if it hasn't landed yet, keep checking while the job runs.
+    let alive = true
+    let attempts = 0
+    const tick = async () => {
+      const found = await loadDraft()
+      attempts += 1
+      if (alive && !found && attempts < 24) window.setTimeout(tick, 5000)
+    }
+    void tick()
+    return () => { alive = false }
+  }, [loadDraft])
+
+  const saveFields = async (fields: Record<string, unknown>) => {
+    setError('')
+    const out = await postAction<{ message?: string; error?: string }>({ action: 'set_session_fields', fields })
+    if (out?.ok === false) setError(String(out?.message || out?.error || 'Could not save.'))
+  }
+
+  const chooseFormat = async (choice: 'yes' | 'no') => {
+    const id = choice === 'yes' ? 'explainer' : 'ad'
+    const next = SERIES_SETUP_TEMPLATE_RE.test(draftMd)
+      ? draftMd.replace(SERIES_SETUP_TEMPLATE_RE, `Template: ${id}`)
+      : `# Format — ${seriesId || 'show'}\n\nTemplate: ${id}\n\n## Why\n\nChosen by hand in Series setup.\n`
+    setDraftMd(next)
+    setError('')
+    const out = await postAction<{ message?: string; error?: string }>({
+      action: 'set_stage_output',
+      stage_id: stepId,
+      path: 'working/series-setup.md',
+      content: next,
+    })
+    if (out?.ok === false) setError(String(out?.message || out?.error || 'Could not save the format choice.'))
+  }
+
+  // The step's ✦ button runs the engine drafter (the stage's registered
+  // action, same OpenRouter path as the other planning gates) and reloads
+  // the recommendation.
+  const busyRef = useRef(false)
+  useEffect(() => {
+    registerStepAIAction(stepId, {
+      stageId: stepId,
+      label: 'Recommend a format',
+      busy,
+      busyLabel: 'Reading the season breakdown…',
+      usesTextModel: false,
+      acceptsInstructions: false,
+      run: async () => {
+        if (busyRef.current) return
+        busyRef.current = true
+        setBusy(true)
+        setError('')
+        try {
+          const out = await postAction<{ message?: string; error?: string }>({
+            action: 'draft_stage',
+            stage_id: stepId,
+            allow_cost: true,
+          })
+          if (out?.ok === false) setError(String(out?.message || out?.error || 'Drafting failed.'))
+          await loadDraft()
+        } finally {
+          busyRef.current = false
+          setBusy(false)
+        }
+      },
+    })
+    return () => registerStepAIAction(stepId, null)
+  }, [busy, loadDraft, registerStepAIAction, stepId])
+
+  const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0' }
+  const labelStyle: CSSProperties = { width: 104, flexShrink: 0, fontSize: 13, color: 'var(--ink-2)' }
+  // The visible aspect: the user's saved choice, else the AI's recommendation
+  // (which is exactly what approval will stamp if left untouched).
+  const shownAspect = aspect || recAspect
+  const shownStyle = stylePrompt || recStyle
+
+  // The style box grows to fit its content (the user can still drag the
+  // resize handle for more room). Refit when the card's width settles or
+  // changes — measuring during the card's initial layout wraps the text
+  // into a sliver and locks in a bogus height.
+  useEffect(() => {
+    const el = styleBoxRef.current
+    if (!el) return
+    const fit = () => {
+      el.style.height = 'auto'
+      el.style.height = `${el.scrollHeight + 2}px`
+    }
+    fit()
+    let lastWidth = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== lastWidth) {
+        lastWidth = el.clientWidth
+        fit()
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [shownStyle])
+  // The ✦ tag sits ON TOP of whatever it recommends. Every option column
+  // reserves the SAME fixed tag line, so box tops stay perfectly aligned
+  // whether or not a column carries the tag.
+  const recTag = (on: boolean) => (
+    <span className="lock-text" style={{ display: 'block', height: 16, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      {on ? (<><span className="ap-spark">✦</span> AI recommended</>) : null}
+    </span>
+  )
+
+  return (
+    <div>
+      <div className="s1-flow">
+        <div className="s1-question active">
+          <div className="s1-q-head" style={{ marginBottom: 4 }}>
+            <span className="s1-q-title">
+              Is there a narrator? <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(this decides how the audio is made)</span>
+            </span>
+          </div>
+          <div className="s1-pills">
+            {([
+              ['yes', 'Yes — a narrator reads the entire video', 'audio is generated separately from the video'],
+              ['no', 'Speech is generated with the video', 'characters speak on screen — no separate narration track'],
+            ] as const).map(([key, name, desc]) => (
+              <span key={key} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {recTag(recNarrator === key)}
+                <Pill selected={narrator === key} onClick={() => void chooseFormat(key)}>
+                  <span className="name">{name}</span>
+                  <span className="desc">{desc}</span>
+                </Pill>
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      {why ? (
+        <div style={{ margin: '4px 2px 10px', color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.6 }}>
+          <span className="eyebrow" style={{ display: 'block', marginBottom: 4 }}>Why Spoolcast recommends this</span>
+          <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{why}</p>
+        </div>
+      ) : null}
+
+      <div className="eyebrow" style={{ margin: '22px 0 2px' }}>Every episode inherits</div>
+      {narrator !== 'no' ? (
+        <div title="Narration-first only — the one voice that reads every episode" style={rowStyle}>
+          <span style={labelStyle}>Narrator voice</span>
+          <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {NARRATION_VOICES.filter((v) => v.value !== 'elevenlabs-library').map((v) => (
+              <button
+                key={v.id}
+                className={`pill-btn ${ttsVoice === v.value ? 'sel' : ''}`}
+                title={v.detail}
+                onClick={() => { setTtsVoice(v.value); void saveFields({ tts_voice: v.value }) }}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div
+        title="The style anchor every episode's visuals start from — reference images are generated in the Series World Kit"
+        style={{ ...rowStyle, alignItems: 'flex-start' }}
+      >
+        <span style={{ ...labelStyle, paddingTop: 27 }}>Visual style</span>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {recTag(Boolean(shownStyle) && shownStyle === recStyle)}
+          <textarea
+            ref={styleBoxRef}
+            className="show-setup-input"
+            value={shownStyle}
+            rows={1}
+            placeholder="e.g. ink-wash storybook, muted palette"
+            onChange={(event) => setStylePrompt(event.target.value)}
+            onBlur={() => {
+              if (shownStyle !== savedStyleRef.current) {
+                savedStyleRef.current = shownStyle
+                void saveFields({ default_style_prompt: shownStyle })
+              }
+            }}
+          />
+        </div>
+      </div>
+      <div title="Every episode renders to this shape" style={{ ...rowStyle, alignItems: 'flex-start' }}>
+        <span style={{ ...labelStyle, paddingTop: 27 }}>Output</span>
+        <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+          {[
+            ['16:9', 'Widescreen'],
+            ['9:16', 'Vertical'],
+            ['1:1', 'Square'],
+          ].map(([value, label]) => (
+            <span key={value} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {recTag(value === recAspect)}
+              <button
+                className={`pill-btn ${shownAspect === value ? 'sel' : ''}`}
+                onClick={() => { setAspect(value); void saveFields({ aspect_ratio: value }) }}
+              >
+                {label} {value}
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+      <p style={{ margin: '14px 2px 0', color: 'var(--ink-3)', fontSize: 12.5, lineHeight: 1.6 }}>
+        Approving this step stamps the format and these defaults into the show — every episode
+        created by fan-out inherits them. Episode length stays a per-episode choice.
+      </p>
+      {error ? <p className="voice-error">Engine: {error}</p> : null}
     </div>
   )
 }
