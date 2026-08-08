@@ -18,12 +18,14 @@ type DraftJob = {
   status: 'queued' | 'retrying' | 'running' | 'cancelling' | 'cancelled' | 'done' | 'failed'
   error?: string | null
   message?: string | null
+  log_tail?: string | null
   result?: {
     ok?: boolean
     error?: string
     message?: string
     rule_findings?: RuleFinding[]
     data?: { rule_findings?: RuleFinding[] }
+    details?: { world_kit_fill?: WorldKitFillReport }
   } | null
 }
 type WorldKitFillReport = {
@@ -34,6 +36,26 @@ type WorldKitFillReport = {
     skipped?: number
     failed?: number
   }
+}
+
+const JOB_STATE_EVENT_PREFIX = 'SPOOLCAST_JOB_STATE:'
+
+const worldKitFillReportFromJob = (job: DraftJob): WorldKitFillReport | null => {
+  const direct = job.result?.details?.world_kit_fill
+  if (direct && typeof direct === 'object') return direct
+
+  const lines = String(job.log_tail || '').split('\n').reverse()
+  for (const line of lines) {
+    if (!line.startsWith(JOB_STATE_EVENT_PREFIX)) continue
+    try {
+      const details = JSON.parse(line.slice(JOB_STATE_EVENT_PREFIX.length))
+      const report = details?.world_kit_fill
+      if (report && typeof report === 'object') return report as WorldKitFillReport
+    } catch {
+      // Ignore unrelated or truncated log lines and keep looking.
+    }
+  }
+  return null
 }
 
 /**
@@ -242,9 +264,9 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
         )
         setDraftWarning(warning || null)
         if (stageId === 'world_kit') {
-          const report = await loadWorldKitFillReport()
+          const report = worldKitFillReportFromJob(job) ?? await loadWorldKitFillReport()
           const counts = report?.counts
-          if (report?.mode === 'text-only') {
+          if (report?.mode === 'text-only' || report?.mode === 'refresh-text-only') {
             setCompletionNote('World Kit text is ready. Image generation was intentionally skipped.')
           } else if (counts) {
             setCompletionNote(
