@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type * as React from 'react'
 
-// UNSAVED DRAFTS SURVIVE REFRESH. The header says "auto-saved"; before this,
+// UNSAVED DRAFTS SURVIVE REFRESH. Before this,
 // stageDrafts lived only in memory and a refresh silently discarded every
 // unsaved edit (audio prompts included). Drafts now mirror to localStorage
 // per session and hydrate on load. Engine saves still happen explicitly.
@@ -245,7 +245,21 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     })),
   seedDrafts: (d) => set(() => ({ ...d })),
   clearDirty: (stepId) =>
-    set((state) => ({ dirtySteps: { ...state.dirtySteps, [stepId]: false } })),
+    set((state) => {
+      const dirtySteps = { ...state.dirtySteps, [stepId]: false }
+      // A confirmed engine save must win over the pending debounced browser
+      // write. Otherwise reload can resurrect the old dirty flag and draft.
+      window.clearTimeout(persistTimer)
+      try {
+        window.localStorage.setItem(
+          draftsStorageKey(),
+          JSON.stringify({ stageDrafts: state.stageDrafts, dirtySteps }),
+        )
+      } catch {
+        /* storage blocked - the engine save still succeeded */
+      }
+      return { dirtySteps }
+    }),
   isStepDirty: (stepId) => Boolean(get().dirtySteps[stepId]),
   handoff: null,
   setHandoff: (h) => set(() => ({ handoff: h })),

@@ -7,9 +7,10 @@ import { useWorkflowStore, type StageProcess } from '../../store/workflow'
 import { VisualPacingEditor } from './VisualPacingEditor'
 import { WorldKitEditor } from './WorldKitEditor'
 import { RulesPanel } from './RulesPanel'
-import { activeSession, actionUrl, apiUrl, fileUrl, jobsUrl, statusUrl } from '../../lib/api'
+import { activeSession, actionUrl, apiUrl, fileUrl, jobsUrl, postAction, statusUrl } from '../../lib/api'
 import { DEFAULT_MODEL_ID, draftReasoning } from '../../lib/draft-models'
 import { ruleFindingMessage, type RuleFinding } from '../../lib/rule-findings'
+import { saveStageDraftBeforeAI } from '../../lib/save-before-ai'
 
 // The model catalog + dropdown live in ModelPicker.tsx — ONE list and ONE
 // design shared by every AI-suggest button.
@@ -388,6 +389,26 @@ export function StageDraftEditor({ stageId }: { stageId: string }) {
     setCompletionWarning(null)
     setDraftJob(null)
     try {
+      // SAVE-BEFORE-AI LAW: the editor draft is newer than the engine file
+      // while the user is typing. Persist and confirm it before any drafter or
+      // generation job starts, otherwise the job can resurrect deleted text.
+      const current = useWorkflowStore.getState()
+      const saved = await saveStageDraftBeforeAI({
+        dirty: Boolean(current.dirtySteps[stageId]),
+        stageId,
+        path: cfg.path,
+        content: current.stageDrafts[stageId] ?? '',
+        save: (request) => postAction<{ content?: string }>(request),
+      })
+      if (!saved.ok) {
+        setDraftError(`Your edits were not saved, so AI was not started. ${saved.error || ''}`.trim())
+        return
+      }
+      if (!saved.skipped) {
+        if (typeof saved.content === 'string') seedStageDraft(stageId, saved.content)
+        useWorkflowStore.getState().clearDirty(stageId)
+      }
+
       if (stageId === 'world_kit') {
         const textOnly = requestedMode === 'text_only'
         const res = await fetch(actionUrl(), {

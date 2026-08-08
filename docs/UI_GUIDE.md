@@ -56,6 +56,10 @@ Do not add theme-specific conditions inside workflow components.
 - Never show fake progress percentages. Use actual queue/provider progress or a
   truthful activity label.
 - Preserve existing work on failure and explain the next available action.
+- Save pending browser edits to the engine before any AI action starts. If the
+  save is not confirmed, do not start the AI. Header status must distinguish a
+  draft protected on this device from work saved to the project; never call a
+  browser-only draft fully auto-saved.
 - Use the existing glyph set: `✦`, `▾`, `⋯`, `✓`, `↻`, `↓`, `▶`, `⤢`.
   Do not introduce an icon font.
 

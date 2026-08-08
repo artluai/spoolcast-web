@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { SeriesMenu } from './SeriesMenu'
+import { useWorkflowStore } from '../store/workflow'
 
 // Avatar letter comes from the REAL session (same-origin cookie); '?' when
 // signed out or when the auth functions aren't reachable (plain vite).
@@ -60,6 +61,9 @@ export function Header({
   // One menu instead of a row of header buttons — simpler, scales.
   const [menuOpen, setMenuOpen] = useState(false)
   const avatarLetter = useAvatarLetter()
+  const hasBrowserDraft = useWorkflowStore((state) =>
+    Object.values(state.dirtySteps).some(Boolean),
+  )
   const pick = (fn?: () => void) => () => {
     setMenuOpen(false)
     fn?.()
@@ -146,7 +150,12 @@ export function Header({
         <div className="header-right">
           <div className="saving">
             <span className="pulse" />
-            auto-saved
+            <span title={hasBrowserDraft
+              ? 'Protected in this browser. Spoolcast saves it to the project before AI runs.'
+              : 'Saved to the project.'}
+            >
+              {hasBrowserDraft ? 'draft saved on this device' : 'saved to project'}
+            </span>
           </div>
           {!isWorldKit ? (
             <button
